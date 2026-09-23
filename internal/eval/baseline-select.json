@@ -1,0 +1,588 @@
+{
+  "generated_at": "2026-09-20T19:37:03.5697131+08:00",
+  "depth": "select",
+  "model": "deepseek-v4.1-flash-expires-on-0910",
+  "local_select": true,
+  "relevant_only": true,
+  "rule_set": "860d8397bf",
+  "total": 16,
+  "passed": 16,
+  "failed": 0,
+  "prompt_chars": 82460,
+  "cases": [
+    {
+      "id": "schedule-daily-water",
+      "goal": "每天早上9点提醒我喝水",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 schedule.create",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 shell.exec",
+          "passed": true
+        },
+        {
+          "name": "不该选到 file.delete",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "schedule.create",
+        "desktop.notify"
+      ],
+      "note": "定时路由：这是提示词压缩那一刀的直接回归保护。schedule.create 的描述一旦丢了关键词，这条就再也选不到它。同时也是路由文本上限（routingTextLimit=100）的守卫——触发词「每天」「提醒」必须留在前 100 字里。",
+      "prompt_chars": 5542,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "schedule-weekday-report",
+      "goal": "每周一到周五下午6点自动写日报",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 schedule.create",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 file.delete",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "schedule.create",
+        "file.write",
+        "schedule.delete"
+      ],
+      "note": "定时路由的另一种说法（每周/工作日），确认不是只对「每天」这一个词有效。",
+      "prompt_chars": 5629,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "schedule-list",
+      "goal": "列出我所有的定时任务",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 schedule.list",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 shell.exec",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "schedule.list",
+        "schedule.delete",
+        "schedule.create",
+        "desktop.notify",
+        "desktop.snippets",
+        "file.list",
+        "skill.list"
+      ],
+      "note": "读类定时操作不能误路由到创建。",
+      "prompt_chars": 5410,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "schedule-delete",
+      "goal": "删掉每天提醒喝水的那个定时任务",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 schedule.delete",
+          "passed": true,
+          "detail": "相关度第 2 名"
+        },
+        {
+          "name": "不该选到 shell.exec",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "schedule.create",
+        "schedule.delete",
+        "schedule.list",
+        "desktop.notify"
+      ],
+      "note": "删除类定时操作：三个 schedule.* 都会命中关键词，这里只要求 delete 进前 5 名（能被模型用）。",
+      "prompt_chars": 5452,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "file-write",
+      "goal": "把这段文本写入 notes.md",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 file.write",
+          "passed": true,
+          "detail": "相关度第 2 名"
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "desktop.clipboard.write",
+        "file.write",
+        "desktop.clipboard.read",
+        "desktop.screenshot",
+        "desktop.snippets",
+        "file.read",
+        "memory.save",
+        "web.fetch"
+      ],
+      "note": "文件写：必须选到 file.write，否则计划会退化成只回复。",
+      "prompt_chars": 5032,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "file-read",
+      "goal": "读取 config.yaml 的内容",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 file.read",
+          "passed": true,
+          "detail": "相关度第 2 名"
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "desktop.snippets",
+        "file.read",
+        "desktop.clipboard.read",
+        "desktop.clipboard.write",
+        "file.list",
+        "web.fetch"
+      ],
+      "note": "文件读。",
+      "prompt_chars": 4873,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "file-list",
+      "goal": "列出当前目录下有哪些文件",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 file.list",
+          "passed": true,
+          "detail": "相关度第 3 名"
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "desktop.screenshot",
+        "file.delete",
+        "file.list",
+        "file.move",
+        "file.write",
+        "desktop.clipboard.write",
+        "desktop.snippets",
+        "file.mkdir",
+        "file.read",
+        "file.search",
+        "schedule.list",
+        "skill.list"
+      ],
+      "note": "列目录。中文二元组匹配会让「列出」同时命中 schedule.list / skill.list（它们的描述都以「列出」开头），但它们排在末位（第 11、12 名），落在前 5 之外——长尾噪音不影响行为，不该判红。",
+      "prompt_chars": 4985,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "file-search",
+      "goal": "搜索项目里所有 PDF 文件",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 file.search",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 shell.exec",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "file.search",
+        "desktop.screenshot",
+        "file.delete",
+        "file.move",
+        "file.read",
+        "file.write"
+      ],
+      "note": "按名搜索，不是列目录——两者容易混。",
+      "prompt_chars": 5083,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "web-fetch",
+      "goal": "抓取 https://example.com 的正文",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 web.fetch",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 shell.exec",
+          "passed": true
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "web.fetch"
+      ],
+      "note": "网页抓取。",
+      "prompt_chars": 4873,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "memory-save",
+      "goal": "记住我偏好简洁的回复风格",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 memory.save",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 file.write",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "memory.save",
+        "reply"
+      ],
+      "note": "写长期记忆。",
+      "prompt_chars": 4933,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "memory-search",
+      "goal": "检索我之前关于部署的偏好",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 memory.search",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 memory.save",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "memory.search"
+      ],
+      "note": "读长期记忆，别路由到写。【曾修】：原先 memory.save 的描述里「（用户偏好、项目背景等）」命中「偏好」，与 memory.search 的「检索」同为 1 分打成平手，而平手按工具名排序 → 保存工具排到了检索工具前面。改法是把那句内容举例从描述里去掉（它与 schema 的 tags 示例重复），描述只留「记住重要信息：写入长期记忆」。",
+      "prompt_chars": 4915,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "skill-list",
+      "goal": "我有哪些已固化的技能",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "应选到 skill.list",
+          "passed": true,
+          "detail": "相关度第 1 名"
+        },
+        {
+          "name": "不该选到 skill.run",
+          "passed": true
+        }
+      ],
+      "tools": [
+        "skill.list",
+        "skill.run"
+      ],
+      "note": "技能列表。只有 skill.list / skill.run 两个工具命中「技能」，这里要求列表工具必须排第 1——排到第 2 就说明打分的排序被 skill.run 的描述抢走了。",
+      "prompt_chars": 4864,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "chat-only",
+      "goal": "你好，简单介绍一下你自己",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "不该选到 shell.exec",
+          "passed": true
+        },
+        {
+          "name": "不该选到 file.delete",
+          "passed": true
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        }
+      ],
+      "note": "纯对话不该拉一堆工具出来。【曾修】：schedule.create 描述里的「不要自己拼 cron」含「自己」这个二元组，命中闲聊目标后把它排到第 1。改法是路由文本只取描述前 100 字（routingTextLimit），那句用法提醒在第 191 字，不再参与路由。注意 reply 不在这里断言——它是被强制保留的收尾工具，从不参与打分，要求它「进前 N 名」是错的期望；这条用例真正的断言（步数、验收标准）在 plan/full 深度。",
+      "prompt_chars": 4952,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "no-misroute-mail",
+      "goal": "帮我写一封给客户的道歉邮件",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "不该选到 shell.exec",
+          "passed": true
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        },
+        {
+          "name": "不该选到 file.delete",
+          "passed": true
+        }
+      ],
+      "note": "纯写作任务：不该碰 shell、也不该被误判成定时任务。少选一个工具通常会让计划失败，多选一个会静默做错事。",
+      "prompt_chars": 4952,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "work-analyze-sales",
+      "goal": "把上季度销售数据整理成表格并汇总",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        },
+        {
+          "name": "不该选到 file.delete",
+          "passed": true
+        }
+      ],
+      "note": "工作类目标：应当给出验收标准、步数不该失控。【曾修】：schedule.create 描述里的示例「每日下载目录整理」含「整理」，命中本目标后把它排到第 1。路由文本只取前 100 字后，该示例（第 120 字）不再参与路由。",
+      "prompt_chars": 5401,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "schedule.hint"
+      ]
+    },
+    {
+      "id": "code-add-test",
+      "goal": "给 utils.go 里的 parseDate 函数补充单元测试",
+      "passed": true,
+      "checks": [
+        {
+          "name": "执行无错误",
+          "passed": true
+        },
+        {
+          "name": "不该选到 schedule.create",
+          "passed": true
+        },
+        {
+          "name": "不该选到 desktop.notify",
+          "passed": true
+        }
+      ],
+      "note": "代码类目标。本地关键词打分对代码语义几乎没有信号（工具描述讲的是文件/命令操作），所以这里只守「别误路由」这类负面断言。【曾修】：目标里的英文词 go 作为**子串**命中了 schedule.create 描述里的 goal。改法是英文/数字词按整词匹配、且至少 3 个字符——「go」既不再命中「goal」，也不再把 go / in / is 这类两字母词当成检索词。",
+      "prompt_chars": 5564,
+      "duration_ms": 0,
+      "rules": [
+        "output.format",
+        "output.rules",
+        "output.acceptance",
+        "safety.untrusted",
+        "code.tools",
+        "code.diff",
+        "code.verify",
+        "code.report",
+        "schedule.hint"
+      ]
+    }
+  ]
+}

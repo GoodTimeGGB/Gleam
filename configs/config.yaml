@@ -1,0 +1,59 @@
+# Gleam（微光）配置文件示例
+# 本文件由 Gleam 自研的 YAML 子集解析器读取（2 空格缩进，禁止 Tab）。
+
+llm:
+  provider: glm                            # glm（OpenAI 兼容协议）| mock（离线自测）
+  base_url: https://open.bigmodel.cn/api/paas/v4
+  model: glm-5.3-flash
+  # api_key 建议不要写在这里，用环境变量 GLEAM_API_KEY 注入
+  temperature: 0.3
+  max_tokens: 4096
+  timeout_seconds: 60
+
+agent:
+  max_replans: 2          # 反思后自动重规划次数上限
+  max_steps: 32           # 单个计划的步骤数上限（规划校验层）；与 config.DefaultMaxSteps 保持一致
+  step_timeout_seconds: 30
+  step_retries: 1         # 步骤超时后的自动重试次数（超时后重试或跳过）
+  done_threshold: 80      # 完成度评分达标线（0-100）
+  max_concurrency: 8      # 并行步骤并发上限
+  reflect_each_step: false
+  context_compress: true  # 上下文自动压缩：短期窗口外的旧对话摘要存储并注入规划
+  skill_auto_optimize: true # 技能运行失败后自动优化参数并保存为新版本（仅真实模型）
+
+safety:
+  mode: auto              # auto | plan_first | interactive
+  approval_timeout_seconds: 300
+  allow_private_web: false # 允许 web.fetch 访问本机/内网地址（默认拒绝，防 SSRF 注入）
+  trusted_paths: []       # 中风险文件操作在信任路径内自动放行，如 ["D:/data"]
+  trusted_tools:          # 信任工具白名单
+    - file.list
+    - file.read
+    - file.search
+    - web.fetch
+    - memory.search
+    - memory.save
+    - schedule.list
+    - skill.list
+
+memory:
+  short_term_capacity: 20 # 短期记忆环缓冲轮数
+  vector_dim: 256         # 自研向量索引维度
+  max_items: 5000         # 长期记忆条目上限
+
+scheduler:
+  enabled: true
+
+persona:
+  name: Gleam
+  style: efficient        # rigorous（严谨）| gentle（温和）| efficient（高效）
+
+# MCP 外部服务器（可选）。示例：
+# mcp:
+#   - name: fs
+#     command: npx
+#     args: ["-y", "@modelcontextprotocol/server-filesystem", "D:/data"]
+#     trust: user_approved   # readonly | user_approved | full_access
+
+# data_dir: ""   # 默认 ~/.gleam
+# workspace: ""  # 默认当前目录

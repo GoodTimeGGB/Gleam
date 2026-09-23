@@ -1,0 +1,14 @@
+# 构建产物
+bin/
+*.exe
+*.test
+*.out
+tmp/
+
+# 本机 Go 构建缓存（几百 MB，本机专用）
+.gocache/
+
+# 发布产物：scripts/package.sh 可重建，不入库
+dist/
+website/dist/
+pack/*.zip

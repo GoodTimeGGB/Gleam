@@ -1,0 +1,52 @@
+{
+  "name": "gleam",
+  "display_name": "Gleam（微光）",
+  "version": "0.1.0",
+  "description": "本地优先的桌面 AI 智能体：Plan-Execute-Reflect 自主任务引擎 + 三层记忆 + 安全门控。宿主（编辑器插件）通过 stdio 以 JSON-RPC 2.0 与其通信。",
+  "entry": {
+    "command": "gleam",
+    "args": ["serve"],
+    "transport": "stdio",
+    "protocol": "jsonrpc-2.0",
+    "framing": "ndjson"
+  },
+  "methods": {
+    "host_to_gleam": [
+      "initialize",
+      "goal/submit",
+      "goal/status",
+      "goal/cancel",
+      "goal/list",
+      "tools/list",
+      "tools/call",
+      "memory/save",
+      "memory/search",
+      "skills/save",
+      "skills/run",
+      "skills/list",
+      "skills/delete",
+      "schedule/create",
+      "schedule/list",
+      "schedule/delete",
+      "shutdown"
+    ],
+    "gleam_to_host": [
+      "goal/progress",
+      "goal/ask_approval",
+      "goal/completed",
+      "agent/suggestion",
+      "agent/suggest_skill"
+    ]
+  },
+  "modes": ["auto", "plan_first", "interactive"],
+  "safety": {
+    "approval_method": "goal/ask_approval",
+    "approval_timeout_seconds_default": 300,
+    "high_risk_always_requires_approval": true
+  },
+  "web_ui": {
+    "command": "gleam",
+    "args": ["app"],
+    "url": "http://127.0.0.1:8787"
+  }
+}

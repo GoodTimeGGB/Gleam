@@ -1,0 +1,4 @@
+# 本仓库有**刻意**的混合行尾：绝大多数文件是 LF，而 pack/CHANGELOG.md 是 GBK + CRLF。
+# 所以一律不做行尾转换，保证「工作区字节」与「提交的字节」一致——
+# 否则在 Windows 上 checkout 会把 LF 变 CRLF，`gofmt -l` 与文档预算会莫名其妙地变。
+* -text

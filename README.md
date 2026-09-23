@@ -238,7 +238,7 @@ bash scripts/smoke.sh   # 冒烟自测：构建真实二进制，驱动 JSON-RPC
 bash scripts/smoke-replay.sh   # 审计四用法冒烟：回放 / 重跑 / 恢复 / 分叉 / 比较
 ```
 
-当前状态：`bash scripts/verify.sh` 闸门自检 + 六层全过（377 秒，退出码 0）；`go vet` 零告警；27 个测试包全绿（另 5 个包无测试）；
+当前状态：`bash scripts/verify.sh` 闸门自检 + 六层全过（退出码 0；**耗时随机器负载浮动很大**——本机实测 350~800 秒，大头是进程创建而不是检查本身，见 `docs/known-limits.md`）；`go vet` 零告警；27 个测试包全绿（另 5 个包无测试）；
 `smoke.sh` 45 项与 `smoke-replay.sh` 33 条断言通过；桌面端真机验收通过（windowsgui 双击启动 → 应用窗口 → 关窗自动退出）；
 设置页与市场页浏览器实测通过；真实 MCP 服务器（@modelcontextprotocol/server-filesystem）安装→14 工具热注册→重连→卸载全链路验证通过。
 

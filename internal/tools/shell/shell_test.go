@@ -24,8 +24,20 @@ func failingCmd() string {
 	return "exit 3"
 }
 
+// execTimeout 是这几条测试的兜底超时，**不是被测对象**。
+//
+// 为什么不用 10s：它们断言的是「退出码怎么报」（0 与非 0 都要返回 nil error、
+// 失败事实留在 payload 里），与耗时无关。而 10s 会让它们在**全量并发跑**时假红——
+// 实测 `go test ./...` 里那条 `cmd /c exit 3` 花了 15.28s（机器一忙，进程创建会慢一个量级），
+// 于是 TestShell_ExecExitCode 报「非零退出码不应返回 error: 命令超时（10s）」，
+// 而单独跑该包 3.8s 就过。**一个偶发假红的闸门很快就会被忽略**，所以把兜底放宽。
+//
+// 超时行为本身由 TestShell_ExecTimeout 覆盖（它显式传 timeout_sec: 1），
+// 所以这里放宽到 60s 不会少测任何东西。
+const execTimeout = 60 * time.Second
+
 func TestShell_ExecEcho(t *testing.T) {
-	tool := New(10 * time.Second)
+	tool := New(execTimeout)
 	out, err := tool.Execute(context.Background(), map[string]any{
 		"command": echoCmd("hello-gleam"),
 	})
@@ -42,7 +54,7 @@ func TestShell_ExecEcho(t *testing.T) {
 }
 
 func TestShell_ExecExitCode(t *testing.T) {
-	tool := New(10 * time.Second)
+	tool := New(execTimeout)
 	out, err := tool.Execute(context.Background(), map[string]any{"command": failingCmd()})
 	if err != nil {
 		t.Fatalf("非零退出码不应返回 error: %v", err)
@@ -62,7 +74,7 @@ func TestShell_ExecExitCode(t *testing.T) {
 // 失败事实只留在 payload 的 exit_code/error 里。没有 OutcomeReporter，
 // 执行器就会把 `exit 1` 的步骤标成 succeeded，整个任务被判成 success。
 func TestShell_OutcomeReportsNonZeroExit(t *testing.T) {
-	tool := New(10 * time.Second)
+	tool := New(execTimeout)
 
 	okOut, err := tool.Execute(context.Background(), map[string]any{"command": "echo hi"})
 	if err != nil {
@@ -86,7 +98,7 @@ func TestShell_OutcomeReportsNonZeroExit(t *testing.T) {
 }
 
 func TestShell_ExecTimeout(t *testing.T) {
-	tool := New(10 * time.Second)
+	tool := New(execTimeout)
 	// 注意：Git Bash 环境中 coreutils 的 timeout 会抢占 Windows timeout.exe，
 	// 故用 ping -n 作为跨环境可靠的休眠命令（System32 自带）。
 	sleepCmd := "ping -n 6 127.0.0.1 >nul"

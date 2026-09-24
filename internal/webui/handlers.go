@@ -246,8 +246,12 @@ type goalSubmitBody struct {
 
 func (s *Server) handleGoalSubmit(w http.ResponseWriter, r *http.Request) {
 	var body goalSubmitBody
-	if err := readJSON(r, &body); err != nil || len([]rune(body.Goal)) < 2 {
-		writeErr(w, 400, "goal 不能为空")
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, "请求体格式无效")
+		return
+	}
+	if len([]rune(body.Goal)) < 2 {
+		writeErr(w, 400, "目标太短，请至少输入 2 个字")
 		return
 	}
 	req := types.GoalRequest{Goal: body.Goal, References: body.References, Mode: body.Mode, TaskMode: types.TaskMode(body.TaskMode), Role: body.Role, ConversationID: body.ConversationID}

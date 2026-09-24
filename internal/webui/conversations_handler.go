@@ -1,10 +1,24 @@
 package webui
 
 import (
+	"errors"
 	"net/http"
 
 	"gleam/internal/harness/conversation"
 )
+
+// writeConvoErr 把会话存储错误映射到合适状态码：非法 ID→400、不存在→404、
+// 其余→500。此前一律 404 且原样回吐 %v，会把 OS 报错（含数据目录文件路径）泄漏给前端。
+func writeConvoErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, conversation.ErrInvalidID):
+		writeErr(w, 400, "%v", err)
+	case errors.Is(err, conversation.ErrNotFound):
+		writeErr(w, 404, "会话不存在")
+	default:
+		writeErr(w, 500, "会话操作失败")
+	}
+}
 
 // requireConvos 校验会话存储是否已装配；未装配时返回 503。
 func (s *Server) requireConvos(w http.ResponseWriter) bool {
@@ -57,7 +71,7 @@ func (s *Server) handleConversationGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c, err := s.Agent.Convos.Get(id)
 	if err != nil {
-		writeErr(w, 404, "%v", err)
+		writeConvoErr(w, err)
 		return
 	}
 	writeJSON(w, 200, c)
@@ -71,7 +85,7 @@ func (s *Server) handleConversationActivate(w http.ResponseWriter, r *http.Reque
 	id := r.PathValue("id")
 	c, err := s.Agent.LoadConversationContext(id)
 	if err != nil {
-		writeErr(w, 404, "%v", err)
+		writeConvoErr(w, err)
 		return
 	}
 	writeJSON(w, 200, c)
@@ -94,7 +108,7 @@ func (s *Server) handleConversationRename(w http.ResponseWriter, r *http.Request
 	}
 	c, err := s.Agent.Convos.Rename(id, body.Title)
 	if err != nil {
-		writeErr(w, 404, "%v", err)
+		writeConvoErr(w, err)
 		return
 	}
 	writeJSON(w, 200, c)
@@ -107,7 +121,7 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 	}
 	id := r.PathValue("id")
 	if err := s.Agent.Convos.Delete(id); err != nil {
-		writeErr(w, 404, "%v", err)
+		writeConvoErr(w, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})

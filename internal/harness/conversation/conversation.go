@@ -4,6 +4,7 @@ package conversation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,13 @@ import (
 	"time"
 
 	"gleam/pkg/types"
+)
+
+// ErrInvalidID 会话 id 形态非法（含 `/\`、非十六进制字符等，会被拼进文件路径）。
+// ErrNotFound 会话文件不存在。二者让处理器区分 400/404，而非把 OS 报错原样回吐。
+var (
+	ErrInvalidID = errors.New("非法会话 ID")
+	ErrNotFound  = errors.New("会话不存在")
 )
 
 // Message 一条会话消息（用户输入或助手回复）。
@@ -101,7 +109,7 @@ func (s *Store) migrateLegacy() error {
 // path 返回会话文件路径（id 仅允许十六进制，防目录穿越）。
 func (s *Store) path(id string) (string, error) {
 	if id == "" || strings.ContainsAny(id, `/\`) || id != strings.Map(safeRune, id) {
-		return "", fmt.Errorf("非法会话 ID")
+		return "", ErrInvalidID
 	}
 	return filepath.Join(s.dir, id+".json"), nil
 }
@@ -308,6 +316,9 @@ func (s *Store) Delete(id string) error {
 func (s *Store) readLocked(p string) (*Conversation, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("读取会话失败: %w", err)
 	}
 	var c Conversation

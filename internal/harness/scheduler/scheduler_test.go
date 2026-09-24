@@ -42,6 +42,25 @@ func TestScheduler_AddJobValidation(t *testing.T) {
 	}
 }
 
+// TestScheduler_DuplicateNameRejected 任务名是主键：同名再次创建必须报错，
+// 而不是静默覆盖已有任务（2026-09-24 接口走查 L1）。
+func TestScheduler_DuplicateNameRejected(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "schedules.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddJob("daily", "0 9 * * *", 0, "整理桌面", "auto"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddJob("daily", "*/5 * * * *", 0, "覆盖用目标", "auto"); err == nil {
+		t.Fatal("同名任务应被拒绝，而不是静默替换")
+	}
+	jobs := s.ListJobs()
+	if len(jobs) != 1 || jobs[0].Goal != "整理桌面" || jobs[0].Cron != "0 9 * * *" {
+		t.Fatalf("拒绝后原任务不应被改动: %+v", jobs)
+	}
+}
+
 func TestScheduler_Persistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schedules.json")
 	s, _ := Open(path, nil)

@@ -14,6 +14,15 @@
 - 走查确认无需改动：hover/active/:focus-visible 覆盖完整（含按钮禁用态、色彩令牌聚焦环）；goalInput 已有 IME 守卫；窄视口与深浅主题样式齐备。
 - **验证**：`go test ./... -count=1` 全绿；`node --check`、`gofmt`、`go vet`、`go build` 通过；浏览器实跑五路模态（Esc/遮罩/关闭钮/确定/取消）、焦点归还、prompt/alert 不挂起、F1 成功与失败定格、模态取消后删除流程不再卡死。
 
+### 后端接口全流程走查与修复（登录注册/空间/会话/调度）
+
+- **H1 空间存储目录穿越（实测复现）**：`DELETE /api/spaces/..%5cmark` 曾以 200 删掉数据目录内的任意 JSON（Windows 下反斜杠是路径分隔符，单段 URL 里 %5c 编码的斜杠绕过了 ServeMux 按 `/` 分段的清洗）；保留名 `state` 也曾被当成普通空间删除。改为存储层统一 id 形态白名单（`default` 或 `sp_` 加 12 位 hex），非法形态一律 ErrInvalidID；读写走 tmp+rename 原子落盘；readOne 校验内容 id 归属，杜绝把 state.json 当空间读写。
+- **M2 错误映射与路径泄漏**：空间/会话处理器此前把所有错误一律回 400/404 并原样吐 %v，会把 OS 报错（含数据目录绝对路径）泄漏给前端。会话存储补 ErrInvalidID/ErrNotFound 哨兵；处理器按 errors.Is 分流：非法 id 400、不存在 404（回中文，不含路径）、其余不再回吐原始错误。
+- **M1 OAuth 会话固定与回调注入**：授权 URL 此前无 state，攻击者可用自己发起的 code 顶替当前登录；回调页把 provider 回传的 error_description 未转义直进 HTML。新增随机 state 并在回调处严格核对（不匹配直接拒绝、绝不送 code），callbackPage 对消息做 html.EscapeString；finishOAuth 改收 pendingOAuth 参数，不再并发读 m.pending。
+- **L1 定时任务静默覆盖**：AddJobDetailed 此前对同名任务直接赋值覆盖，"新建"变"改掉旧任务"且原配置无声丢失。改为锁内查重，重名回"任务名已存在，请换一个"（任务名是主键，工具 schema 早已声明唯一）。
+- **W1 目标提交文案**：1 字目标此前回中英混排的 goal 不能为空；拆开"请求体格式无效"与"目标太短，请至少输入 2 个字"。
+- **验证**：新增 space_test.go（穿越/保留名/不存在/原子写）、auth_test.go（state 携带、不匹配拒绝、回调转义）、api_errors_test.go（会话/空间状态码分流且不泄漏路径、重名调度 400）及调度重名单元测；scripts/verify.sh 六层全过；重建 mock 服务实测 ..%5cmark 与 state 均 400 且目录外文件与 state.json 无损、重名调度 400 原任务不动、会话 400/404 分流。
+
 ## 2026-09-23
 
 ### QA 低风险修复批（L1-L14）与 Qoder 式回复过程呈现

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +23,18 @@ const DefaultID = "default"
 
 // ErrDefaultSpace 表示对默认空间执行了不被允许的操作（如删除）。
 var ErrDefaultSpace = errors.New("默认空间不能删除")
+
+// ErrInvalidID 空间 id 不在合法形态内。id 会被拼进文件路径，
+// `..`、`\`（Windows 分隔符）、`state`（激活态保留名）等必须一刀挡掉——
+// 2026-09-24 接口走查实测 `DELETE /api/spaces/..%5cmark` 曾可穿越删掉数据目录文件。
+// ErrNotFound 空间不存在（与 IO/损坏错误区分，处理器据此回 404 而非谎报）。
+var (
+	ErrInvalidID = errors.New("非法空间 ID")
+	ErrNotFound  = errors.New("空间不存在")
+)
+
+// spaceIDPattern 是存储自己生成的 id 形态：default 或 sp_+12位十六进制。
+var spaceIDPattern = regexp.MustCompile(`^(default|sp_[0-9a-f]{12})$`)
 
 // Space 一个微光空间的元数据。
 type Space struct {
@@ -74,22 +87,48 @@ func Open(dataDir, initialWorkspace string) (*Store, error) {
 			return nil, err
 		}
 	} else if _, err := s.ActiveID(); err != nil {
-		// state 丢失或指向已删空间时，回落到默认空间（否则取第一个）
+		// state 丢失或指向已删空间时，回落到默认空间（否则取第一个合法 id 的空间）
 		fallback := DefaultID
-		if _, err := os.Stat(s.path(DefaultID)); err != nil {
-			fallback = list[0].ID
+		if _, err := os.Stat(s.pathLocked(DefaultID)); err != nil {
+			fallback = ""
+			for _, sp := range list {
+				if spaceIDPattern.MatchString(sp.ID) {
+					fallback = sp.ID
+					break
+				}
+			}
+			if fallback == "" {
+				return nil, fmt.Errorf("spaces: 无合法空间可回落")
+			}
 		}
 		_ = s.writeStateLocked(fallback)
 	}
 	return s, nil
 }
 
-func (s *Store) path(id string) string {
+// pathLocked 仅用于自家生成的必然合法的 id（default / newID），不做二次校验。
+func (s *Store) pathLocked(id string) string {
 	return filepath.Join(s.dir, id+".json")
+}
+
+func (s *Store) path(id string) (string, error) {
+	if !spaceIDPattern.MatchString(id) {
+		return "", ErrInvalidID
+	}
+	return filepath.Join(s.dir, id+".json"), nil
 }
 
 func (s *Store) statePath() string {
 	return filepath.Join(s.dir, "state.json")
+}
+
+// writeAtomic tmp+rename 落盘：半截 JSON 会让空间在下次启动时凭空消失。
+func writeAtomic(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (s *Store) writeLocked(sp Space) error {
@@ -98,7 +137,11 @@ func (s *Store) writeLocked(sp Space) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path(sp.ID), data, 0o644)
+	path, err := s.path(sp.ID)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(path, data)
 }
 
 func (s *Store) writeStateLocked(id string) error {
@@ -106,17 +149,24 @@ func (s *Store) writeStateLocked(id string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.statePath(), data, 0o644)
+	return writeAtomic(s.statePath(), data)
 }
 
 func (s *Store) readOne(path string) (Space, error) {
 	var sp Space
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return sp, ErrNotFound
+		}
 		return sp, err
 	}
 	if err := json.Unmarshal(data, &sp); err != nil {
 		return sp, err
+	}
+	// 不校验内容归属的话，任何合法 JSON（比如 state.json）都会被当成"一个空间"读写。
+	if !spaceIDPattern.MatchString(sp.ID) {
+		return sp, ErrInvalidID
 	}
 	return sp, nil
 }
@@ -159,7 +209,11 @@ func (s *Store) Get(id string) (Space, error) {
 	if strings.TrimSpace(id) == "" {
 		id = DefaultID
 	}
-	return s.readOne(s.path(id))
+	path, err := s.path(id)
+	if err != nil {
+		return Space{}, err
+	}
+	return s.readOne(path)
 }
 
 // ActiveID 返回当前激活空间 ID。
@@ -172,7 +226,10 @@ func (s *Store) ActiveID() (string, error) {
 	if err := json.Unmarshal(data, &st); err != nil || strings.TrimSpace(st.ActiveID) == "" {
 		return "", fmt.Errorf("active space 未设置")
 	}
-	if _, err := os.Stat(s.path(st.ActiveID)); err != nil {
+	if _, err := s.path(st.ActiveID); err != nil { // state 内容不可信，先验形再 Stat
+		return "", fmt.Errorf("active space 不存在")
+	}
+	if _, err := os.Stat(s.pathLocked(st.ActiveID)); err != nil {
 		return "", fmt.Errorf("active space 不存在")
 	}
 	return st.ActiveID, nil
@@ -182,8 +239,12 @@ func (s *Store) ActiveID() (string, error) {
 func (s *Store) SetActive(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := os.Stat(s.path(id)); err != nil {
-		return fmt.Errorf("空间不存在: %s", id)
+	path, err := s.path(id)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("空间不存在: %w", ErrNotFound)
 	}
 	return s.writeStateLocked(id)
 }
@@ -221,7 +282,11 @@ func (s *Store) Create(name, path string) (Space, error) {
 func (s *Store) Rename(id, name string) (Space, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sp, err := s.readOne(s.path(id))
+	path, err := s.path(id)
+	if err != nil {
+		return Space{}, err
+	}
+	sp, err := s.readOne(path)
 	if err != nil {
 		return Space{}, err
 	}
@@ -239,7 +304,11 @@ func (s *Store) Rename(id, name string) (Space, error) {
 func (s *Store) SetPath(id, path string) (Space, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sp, err := s.readOne(s.path(id))
+	p, err := s.path(id)
+	if err != nil {
+		return Space{}, err
+	}
+	sp, err := s.readOne(p)
 	if err != nil {
 		return Space{}, err
 	}
@@ -257,15 +326,19 @@ func (s *Store) Delete(id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.readOne(s.path(id)); err != nil {
+	path, err := s.path(id)
+	if err != nil {
 		return err
 	}
-	if err := os.Remove(s.path(id)); err != nil {
+	if _, err := s.readOne(path); err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
 		return err
 	}
 	// 若删的是当前激活空间，回落默认空间
 	if active, err := s.ActiveID(); err == nil && active == id {
-		if _, err := os.Stat(s.path(DefaultID)); err == nil {
+		if _, err := os.Stat(s.pathLocked(DefaultID)); err == nil {
 			_ = s.writeStateLocked(DefaultID)
 		}
 	}

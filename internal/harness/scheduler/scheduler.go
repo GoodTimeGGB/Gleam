@@ -298,6 +298,10 @@ func (s *Scheduler) AddJobDetailed(name, cron string, intervalSec int, goal, mod
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// 任务名是主键：静默覆盖会让用户"新建"变成"改掉旧任务"，且原配置悄无声息丢失。
+	if _, exists := s.jobs[name]; exists {
+		return Job{}, fmt.Errorf("任务名 %q 已存在，请换一个", name)
+	}
 	job := &Job{
 		Name: name, Cron: cron, IntervalSec: intervalSec, Goal: goal, Mode: mode,
 		Enabled: true, WhenText: trim(whenText), ScheduleText: trim(scheduleText),

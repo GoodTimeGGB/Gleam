@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -31,11 +32,12 @@ type Manager struct {
 }
 
 type pendingOAuth struct {
-	provider string
-	verifier string
-	codeCh   chan string
-	errCh    chan error
-	redirect string
+	provider      string
+	verifier      string
+	codeCh        chan string
+	errCh         chan error
+	redirect      string
+	expectedState string
 }
 
 // New 创建认证管理器。
@@ -300,6 +302,13 @@ func (m *Manager) StartOAuth(provider string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// CSRF 防护：随机 state 随授权 URL 发出，回调必须原样带回并核对，
+	// 否则攻击者可用自己发起的 code 顶替当前登录（session fixation）。
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return "", err
+	}
+	state := base64.RawURLEncoding.EncodeToString(stateBytes)
 
 	// 本地回环监听器：接收 provider 重定向回来的 code
 	ln, err := newLoopbackListener()
@@ -309,21 +318,30 @@ func (m *Manager) StartOAuth(provider string) (string, error) {
 	redirect := fmt.Sprintf("http://127.0.0.1:%d/callback", ln.Port())
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
+	// 校验失败的回调只回页面、不进 channel：errCh 只有 1 格，塞进去会让后续
+	// 合法回调的 code 永久阻塞（缓冲满）。取消登录由 5 分钟超时兜底。
+	reject := func(w http.ResponseWriter, reason string) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, callbackPage(false, "登录失败："+reason))
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		// 先核对 state：不匹配说明回调不是本会话发起，直接拒绝，绝不接受 code。
+		if got := q.Get("state"); got == "" || got != state {
+			reject(w, "登录状态校验失败，请重新发起登录")
+			return
+		}
 		if e := q.Get("error_description"); e != "" {
 			errCh <- errors.New(e)
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = io.WriteString(w, callbackPage(false, "登录失败："+e))
+			reject(w, e)
 			return
 		}
 		code := q.Get("code")
 		if code == "" {
 			errCh <- errors.New("回调缺少授权码")
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = io.WriteString(w, callbackPage(false, "登录失败：缺少授权码"))
+			reject(w, "缺少授权码")
 			return
 		}
 		codeCh <- code
@@ -333,12 +351,13 @@ func (m *Manager) StartOAuth(provider string) (string, error) {
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
 
+	pending := &pendingOAuth{provider: provider, verifier: verifier, codeCh: codeCh, errCh: errCh, redirect: redirect, expectedState: state}
 	m.mu.Lock()
-	m.pending = &pendingOAuth{provider: provider, verifier: verifier, codeCh: codeCh, errCh: errCh, redirect: redirect}
+	m.pending = pending
 	m.listener = srv
 	m.mu.Unlock()
 
-	go m.finishOAuth(ln, srv)
+	go m.finishOAuth(ln, srv, pending)
 
 	u, err := url.Parse(c.SupabaseURL + "/auth/v1/authorize")
 	if err != nil {
@@ -349,19 +368,20 @@ func (m *Manager) StartOAuth(provider string) (string, error) {
 	q.Set("redirect_to", redirect)
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
+	q.Set("state", state)
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
 
-func (m *Manager) finishOAuth(ln io.Closer, srv *http.Server) {
+func (m *Manager) finishOAuth(ln io.Closer, srv *http.Server, p *pendingOAuth) {
 	defer func() {
 		_ = srv.Close()
 		_ = ln.Close()
 	}()
 	var code string
 	select {
-	case code = <-m.pending.codeCh:
-	case err := <-m.pending.errCh:
+	case code = <-p.codeCh:
+	case err := <-p.errCh:
 		_ = err
 		return
 	case <-time.After(5 * time.Minute):
@@ -370,7 +390,7 @@ func (m *Manager) finishOAuth(ln io.Closer, srv *http.Server) {
 	body := url.Values{}
 	body.Set("grant_type", "pkce")
 	body.Set("code", code)
-	body.Set("code_verifier", m.pending.verifier)
+	body.Set("code_verifier", p.verifier)
 	c, err := m.cfg()
 	if err != nil {
 		return
@@ -385,7 +405,7 @@ func (m *Manager) finishOAuth(ln io.Closer, srv *http.Server) {
 	if err != nil {
 		return
 	}
-	_ = m.saveSession(t, m.pending.provider)
+	_ = m.saveSession(t, p.provider)
 }
 
 // EnsureFreshToken 访问令牌临近过期时用 refresh_token 续期。
@@ -449,6 +469,8 @@ func callbackPage(ok bool, msg string) string {
 	if !ok {
 		color = "#EF4444"
 	}
+	// msg 可能含 provider 回传的 error_description（外部可控），必须转义后再进 HTML。
+	msg = html.EscapeString(msg)
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>登录</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0B0D12;color:#E6EAF2;
 font-family:"Segoe UI",-apple-system,sans-serif}.card{text-align:center;padding:40px}

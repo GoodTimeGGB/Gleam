@@ -16,6 +16,21 @@ func (s *Server) requireSpaces(w http.ResponseWriter) bool {
 	return true
 }
 
+// writeSpaceErr 空间操作错误 → 状态码：非法 ID（含 `..`、`\`、保留名 state）→400、
+// 不存在→404、默认空间受保护→400、其余→400 回吐可读原因（如工作文件夹无效）。
+func writeSpaceErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, space.ErrInvalidID):
+		writeErr(w, 400, "%v", err)
+	case errors.Is(err, space.ErrNotFound):
+		writeErr(w, 404, "空间不存在")
+	case errors.Is(err, space.ErrDefaultSpace):
+		writeErr(w, 400, "默认空间不能删除")
+	default:
+		writeErr(w, 400, "%v", err)
+	}
+}
+
 // handleSpaceList 返回空间视图（空间列表含会话计数、激活空间、工作区）。
 func (s *Server) handleSpaceList(w http.ResponseWriter, _ *http.Request) {
 	if !s.requireSpaces(w) {
@@ -41,7 +56,7 @@ func (s *Server) handleSpaceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.Agent.SpaceCreate(body.Name, body.Path)
 	if err != nil {
-		writeErr(w, 400, "%v", err)
+		writeSpaceErr(w, err)
 		return
 	}
 	writeJSON(w, 200, view)
@@ -64,7 +79,7 @@ func (s *Server) handleSpaceRename(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.Agent.SpaceRename(id, body.Name)
 	if err != nil {
-		writeErr(w, 400, "%v", err)
+		writeSpaceErr(w, err)
 		return
 	}
 	writeJSON(w, 200, view)
@@ -78,7 +93,7 @@ func (s *Server) handleSpaceActivate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	view, err := s.Agent.SpaceActivate(id)
 	if err != nil {
-		writeErr(w, 400, "%v", err)
+		writeSpaceErr(w, err)
 		return
 	}
 	writeJSON(w, 200, view)
@@ -92,11 +107,7 @@ func (s *Server) handleSpaceDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	view, err := s.Agent.SpaceDelete(id)
 	if err != nil {
-		if errors.Is(err, space.ErrDefaultSpace) {
-			writeErr(w, 400, "默认空间不能删除")
-			return
-		}
-		writeErr(w, 400, "%v", err)
+		writeSpaceErr(w, err)
 		return
 	}
 	writeJSON(w, 200, view)

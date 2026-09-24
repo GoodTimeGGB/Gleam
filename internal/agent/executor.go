@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -402,7 +403,11 @@ func (e *Executor) Execute(ctx context.Context, plan types.Plan, taskID, mode st
 				return
 			}
 
-			state.results[i] = e.runStep(ctx, state, step, taskID, mode, preApproved, timeout, sem)
+			// 走 guard：一次工具 panic 只该让**这一步**失败，不该让整批的结果一起消失。
+			// 收尾（close / 落盘 / 计数 / 进度）刻意留在 guard 之外——它在 defer 里，
+			// 而 recover 之后 goroutine 的剩余语句会被跳过，收尾放进去就会漏掉，
+			// 依赖这一步的下游会永远等不到放行。
+			state.results[i] = e.runStepGuarded(ctx, state, step, taskID, mode, preApproved, timeout, sem)
 			close(state.finished[i])
 			// 落盘放在 close 之后：依赖方不必等写文件，而"记录到哪一步"最多落后一步，
 			// 不会出现"结果已放行、日志里却没有"的顺序倒挂。
@@ -478,6 +483,59 @@ func (e *Executor) Execute(ctx context.Context, plan types.Plan, taskID, mode st
 	// 代价是每跑一个任务扫一次目录，与"无界增长"比可以忽略。
 	PruneSpill(e.DataDir, spillMaxTasks)
 	return res
+}
+
+// runStepGuarded 是 runStep 的 panic 边界：工具炸了只让这一步失败，不让整批陪葬。
+//
+// 为什么必须有它：工具实现在**同进程**里执行，一次 nil deref / 越界 / 对空 map 写入
+// 就会终止整个进程。而执行器早就把「步骤失败」建模成一等状态（StepFailed + ErrorKind），
+// 没有任何理由让一次工具 panic 表现得比"这一步失败"更严重。真正被它救回来的场景是**批**：
+// `gleam eval` 跑 200 条用例时，第 5 条的工具 panic 不该让另外 199 条的结果一起消失——
+// 那些结果已经花掉了模型调用，而且重跑还要再花一次。
+//
+// 边界为什么放在这里、而不是放在调用方：panic 发生在**子 goroutine** 里
+// （见 Execute 里 `go func(i int)`），Go 的 recover 只在**同一个 goroutine 的 defer** 里有效，
+// 所以 eval runner / cmdGoal / webui handler 各自加 recover 都接不住。
+// 加在这一处，四条执行路径（eval / goal / webui / 定时任务）一起受益——一个事实一个 owner。
+//
+// 为什么 Error 里要带栈：recover 之后 Go 不再打印任何东西，只留一个 panic 值的话，
+// 「哪一行炸的」就彻底丢了，而那正是修它唯一需要的信息。
+// 为什么要压栈：Error 会进 tasks/*.json 与 runs/*.jsonl，完整栈几十行、几 KB，
+// 灌进去会让任务记录被一条诊断信息淹掉（本仓库对无界输出一贯的做法是先截断）。
+func (e *Executor) runStepGuarded(ctx context.Context, state *execState, step types.Step, taskID, mode string, preApproved bool, timeout time.Duration, sem chan struct{}) (r types.StepResult) {
+	started := time.Now()
+	defer func() {
+		p := recover()
+		if p == nil {
+			return
+		}
+		r = types.StepResult{
+			StepID:    step.ID,
+			Tool:      step.Tool,
+			Status:    types.StepFailed,
+			ErrorKind: types.ErrInternal,
+			Error:     panicBrief(p),
+			// 没有 Output / Outcome：这一步**没有跑完**，不是"跑完了但业务失败"。
+			// 编一个 Outcome 出来会让下游的归因把它当成业务失败去重试，方向就错了。
+			StartedAt:  started,
+			FinishedAt: time.Now(),
+		}
+	}()
+	return e.runStep(ctx, state, step, taskID, mode, preApproved, timeout, sem)
+}
+
+// panicBrief 把 panic 压成"能定位、又有界"的一段文本。
+//
+// 前缀固定为「工具 panic」：能走到这个 recover 的 panic 绝大多数发生在工具实现里
+// （门控与输出处理是本仓库代码、且有测试），用最可能的来源命名，读的人一眼知道去哪儿找；
+// 栈的前几帧会把真实位置钉死，所以即使偶尔不是工具，也不会被这个前缀误导。
+func panicBrief(p any) string {
+	lines := strings.Split(string(debug.Stack()), "\n")
+	// 第 0 行是 "goroutine N [running]:"，1..6 帧足够看出炸在哪个函数。
+	if len(lines) > 7 {
+		lines = lines[:7]
+	}
+	return fmt.Sprintf("工具 panic: %v\n%s", p, strings.TrimRight(strings.Join(lines, "\n"), "\n"))
 }
 
 // runStep 执行单步：安全门控审批 → 参数引用替换 → 调用工具（带超时）。

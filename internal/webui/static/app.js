@@ -47,6 +47,8 @@ async function api(method, url, body) {
 function toast(text, kind = 'info', ms = 4500) {
   const region = $('#toast-region');
   const t = el('div', `toast toast--${kind}`, text);
+  t.title = '点击关闭';
+  t.addEventListener('click', () => t.remove()); // 长文案/报错允许手动关掉，不必等超时
   region.appendChild(t);
   while (region.children.length > 4) region.firstChild.remove();
   setTimeout(() => {
@@ -56,26 +58,39 @@ function toast(text, kind = 'info', ms = 4500) {
 }
 
 /* ---------- 模态（焦点圈 + Esc + 焦点归还） ---------- */
+// Esc/点遮罩/✕ 关闭必须等价于「取消」：注册了 onCancel 的确认框若被这样关掉，
+// Promise 也要落地，否则 await 它的流程永远挂起（2026-09-24 交互走查）。
 const Modal = (() => {
   let lastFocus = null;
+  let cancelHook = null;
   const overlay = $('#modal-overlay');
   const box = $('#modal');
-  function open(titleHTML, buildContent) {
+  function open(titleHTML, buildContent, onCancel) {
     lastFocus = document.activeElement;
-    box.innerHTML = `<h2 class="modal-title" id="modal-title">${titleHTML}</h2>`;
+    cancelHook = onCancel || null;
+    box.innerHTML = `<div class="modal-head"><h2 class="modal-title" id="modal-title">${titleHTML}</h2>` +
+      `<button class="modal-close" type="button" aria-label="关闭">✕</button></div>`;
+    box.querySelector('.modal-close').addEventListener('click', () => close(false));
     buildContent(box);
     overlay.hidden = false;
-    const first = box.querySelector('input, textarea, button, select');
+    // 初始焦点跳过关闭钮：确认框要落在取消/确定上，别让用户回车即关
+    const first = [...box.querySelectorAll('input, textarea, button, select')]
+      .find((e) => !e.classList.contains('modal-close'));
     (first || box).focus();
   }
-  function close() {
+  function close(byButton) {
+    if (overlay.hidden) return;
     overlay.hidden = true;
     box.innerHTML = '';
     if (lastFocus) lastFocus.focus();
+    const c = cancelHook; cancelHook = null;
+    if (!byButton && c) c();
   }
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  // settle：按钮路径关闭，视为用户已做出选择，不触发取消钩子
+  function settle(fn) { cancelHook = null; close(true); fn(); }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !overlay.hidden) close();
+    if (e.key === 'Escape' && !overlay.hidden) close(false);
     if (e.key === 'Tab' && !overlay.hidden) {
       const focusables = box.querySelectorAll('button, input, textarea, select, [tabindex]:not([tabindex="-1"])');
       if (!focusables.length) return;
@@ -84,7 +99,7 @@ const Modal = (() => {
       else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
     }
   });
-  return { open, close };
+  return { open, close: () => close(false), settle };
 })();
 
 // 应用内确认框（替代原生 confirm，避免弹出系统浏览器标题/地址）。
@@ -97,11 +112,11 @@ function confirmModal(message, title = '请确认', { okText = '确定', danger 
       const actions = el('div', 'modal-actions');
       const cancel = el('button', 'btn btn-secondary', '取消');
       const ok = el('button', danger ? 'btn btn-danger' : 'btn btn-primary', okText);
-      cancel.addEventListener('click', () => { Modal.close(); resolve(false); });
-      ok.addEventListener('click', () => { Modal.close(); resolve(true); });
+      cancel.addEventListener('click', () => Modal.settle(() => resolve(false)));
+      ok.addEventListener('click', () => Modal.settle(() => resolve(true)));
       actions.appendChild(cancel); actions.appendChild(ok);
       box.appendChild(actions);
-    });
+    }, () => resolve(false));
   });
 }
 
@@ -114,10 +129,10 @@ function alertModal(message, title = '提示') {
       box.appendChild(p);
       const actions = el('div', 'modal-actions');
       const ok = el('button', 'btn btn-primary', '我知道了');
-      ok.addEventListener('click', () => { Modal.close(); resolve(); });
+      ok.addEventListener('click', () => Modal.settle(resolve));
       actions.appendChild(ok);
       box.appendChild(actions);
-    });
+    }, resolve);
   });
 }
 
@@ -132,14 +147,14 @@ function promptModal(label, oldValue = '', title = '请输入') {
       const actions = el('div', 'modal-actions');
       const cancel = el('button', 'btn btn-secondary', '取消');
       const ok = el('button', 'btn btn-primary', '保存');
-      const done = (val) => { Modal.close(); resolve(val); };
+      const done = (val) => Modal.settle(() => resolve(val));
       cancel.addEventListener('click', () => done(null));
       ok.addEventListener('click', () => done(input.value.trim()));
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(input.value.trim()); });
+      input.addEventListener('keydown', (e) => { if (e.isComposing || e.keyCode === 229) return; if (e.key === 'Enter') done(input.value.trim()); });
       actions.appendChild(cancel); actions.appendChild(ok);
       box.appendChild(actions);
       setTimeout(() => { input.focus(); input.select(); }, 0);
-    });
+    }, () => resolve(null));
   });
 }
 
@@ -174,8 +189,16 @@ function setMoreOpen(open) {
   toggle.setAttribute('aria-expanded', String(open));
   $('#nav-more').classList.toggle('open', open);
 }
-$('#nav-more-toggle').addEventListener('click', () => {
+$('#nav-more-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
   setMoreOpen($('#nav-more-body').hidden);
+});
+// 与 + 菜单一致的收起契约：点击外部或 Esc 即收起
+document.addEventListener('click', (e) => {
+  if (!$('#nav-more-body').hidden && !e.target.closest('#nav-more')) setMoreOpen(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#nav-more-body').hidden) setMoreOpen(false);
 });
 
 // 快捷任务卡：把模板作为可编辑草稿交给同一个提交流程。
@@ -249,7 +272,9 @@ $('#task-seg').addEventListener('click', (e) => {
 const goalInput = $('#goal-input');
 goalInput.addEventListener('keydown', (e) => {
   if (e.isComposing || e.keyCode === 229) return;
-  if (!mentionPop.hidden && mentionState.items.length && (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Escape')) {
+  // L4：0 结果时 Esc 也要能关弹层（导航键仍需有候选项）
+  if (!mentionPop.hidden && e.key === 'Escape') { onMentionKey(e); return; }
+  if (!mentionPop.hidden && mentionState.items.length && (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
     onMentionKey(e);
     return;
   }
@@ -264,10 +289,19 @@ goalInput.addEventListener('input', autoResize);
 setTimeout(autoResize, 0);
 $('#goal-submit').addEventListener('click', submitGoal);
 
-// 聊天区滚动到底部
-function scrollToBottom(smooth = true) {
+// 聊天区滚动到底部：只在用户本来就贴在底部时自动滚——
+// 上滑翻历史时，进度/流式事件不该把人拽回底部（滚动劫持）。
+let chatStickBottom = true;
+(function bindChatStick() {
   const sc = $('#chat-scroll');
   if (!sc) return;
+  sc.addEventListener('scroll', () => {
+    chatStickBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80;
+  }, { passive: true });
+})();
+function scrollToBottom(smooth = true) {
+  const sc = $('#chat-scroll');
+  if (!sc || !chatStickBottom) return;
   sc.scrollTo({ top: sc.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 
@@ -277,6 +311,7 @@ let API_KEY_SET = false;
 async function submitGoal() {
   const displayGoal = goalInput.value.trim();
   if (displayGoal.length < 2) { toast('请先描述目标', 'error'); goalInput.focus(); return; }
+  chatStickBottom = true; // 用户自己提交时始终跟到底部
   // 预检：真实模型但未配置 Key → 应用内弹窗引导，而不是提交后 401
   if (PROVIDER !== 'mock' && !API_KEY_SET) {
     const go = await confirmModal('还没有填写模型 API Key，现在不填的话 AI 无法回复。要现在去填写吗？（密钥只保存在本机，下次免填）', '需要配置模型密钥', { okText: '去填写' });
@@ -356,12 +391,14 @@ function insertAtCursor(text) {
 const refs = [];   // { id, kind, label, refText }
 const refsBox = $('#composer-refs');
 
+const REF_KIND_CN = { file: '文件', goal: '目标', skill: '技能', mcp: '插件', memory: '记忆' };
+
 function renderRefs() {
   refsBox.hidden = refs.length === 0;
   refsBox.innerHTML = '';
   refs.forEach((r, i) => {
     const chip = el('span', 'ref-chip');
-    chip.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${r.kind === 'file' ? '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M13 2v7h7"/>' : r.kind === 'skill' ? '<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/>' : '<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V18c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/>'}</svg><span class="ref-kind">${esc(r.kind)}</span><span class="ref-label" title="${esc(r.label)}">${esc(r.label)}</span>`;
+    chip.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${r.kind === 'file' ? '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M13 2v7h7"/>' : r.kind === 'skill' ? '<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/>' : '<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V18c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/>'}</svg><span class="ref-kind">${esc(REF_KIND_CN[r.kind] || r.kind)}</span><span class="ref-label" title="${esc(r.label)}">${esc(r.label)}</span>`;
     const x = el('button', 'ref-x');
     x.type = 'button';
     x.setAttribute('aria-label', '移除引用');
@@ -586,7 +623,11 @@ async function fetchMentions(q, request) {
 }
 
 function relPath(abs, ws) {
-  if (ws && abs.startsWith(ws)) { const r = abs.slice(ws.length).replace(/^[\/\\]+/, ''); return r || abs; }
+  // file.search 返回反斜杠路径、ws.workspace 是正斜杠——不归一 startsWith 永远失配，
+  // @提及弹层就会把整条绝对路径怼到用户眼前（2026-09-23 QA 报告 M1）。
+  const a = String(abs).replace(/\\/g, '/');
+  const w = String(ws || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (w && a.startsWith(w + '/')) { const r = a.slice(w.length + 1); return r || abs; }
   return abs;
 }
 
@@ -635,11 +676,12 @@ function highlightMention() {
 }
 
 function onMentionKey(e) {
-  if (mentionPop.hidden || !mentionState.items.length) return;
+  if (mentionPop.hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeMention(); return; }
+  if (!mentionState.items.length) return;
   if (e.key === 'ArrowDown') { e.preventDefault(); mentionState.idx = (mentionState.idx + 1) % mentionState.items.length; highlightMention(); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); mentionState.idx = (mentionState.idx - 1 + mentionState.items.length) % mentionState.items.length; highlightMention(); }
   else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionState.items[mentionState.idx]); }
-  else if (e.key === 'Escape') { e.preventDefault(); closeMention(); }
 }
 
 function pickMention(it) {
@@ -793,9 +835,10 @@ function renderTaskCard(info, prepend) {
   else feed.appendChild(card);
 
   tasks.set(info.task_id, { info, card, slots });
-  if (info.result) applyResult(info.task_id, info.result);
-  // ev.data 已是对象（json.RawMessage 直接内嵌）
+  // 先回放历史事件（会重建工具执行折叠块），再定格结果——
+  // 否则 applyResult 里的 settleRunSection 会在折叠块尚不存在时空跑，回放又把汇总刷成"进行中"
   (info.events || []).forEach((ev) => applyEvent(info.task_id, ev.type, ev.data));
+  if (info.result) applyResult(info.task_id, info.result);
   refreshWorkbench();
   scrollToBottom(false);
   return tasks.get(info.task_id);
@@ -827,10 +870,87 @@ function renderChecks(t, result) {
   slot.hidden = false;
 }
 
-function timelineItem(kind, text, state) {
-  const item = el('div', `timeline-item timeline-item--${state || ''} timeline-item--new`);
-  item.innerHTML = `<span class="tl-kind">${esc(kind)}</span>${esc(text)}`;
-  return item;
+/* Qoder 式过程呈现（借鉴其公开交互形态，不是照抄）：
+   旧版把每条进度都刷成「45% · …」长流水，噪声大。现在：
+   - 阶段推进（规划/复盘/预算等）各占一句里程碑短句，同阶段连续事件原地更新；
+   - 执行步骤明细收进折叠块，汇总句为「执行工具 N 次，其中 M 次失败」，结束后自动收起。 */
+const PHASE_CN = { plan: '规划', execute: '执行', reflect: '复盘', budget: '预算' };
+
+function demoteMilestone(live) {
+  if (live && live.state === 'active' && live.el.isConnected) {
+    live.el.className = 'timeline-item timeline-item--done';
+    live.state = 'done';
+  }
+}
+
+function renderProgressLine(t, tl, data) {
+  const msg = (data.message || '').trim();
+  if (data.phase === 'execute' && msg && !msg.startsWith('开始执行')) {
+    addRunStep(t, tl, data, msg);
+    return;
+  }
+  addMilestone(t, tl, data, msg);
+}
+
+function addMilestone(t, tl, data, msg) {
+  demoteMilestone(t.msLive);
+  const cn = PHASE_CN[data.phase] || data.phase;
+  const state = data.kind === 'error' ? 'error' : data.kind === 'warn' ? 'warn' : 'active';
+  const live = t.msLive;
+  // 同阶段且仍是最末一行：原地更新，不重复刷屏
+  if (live && live.phase === data.phase && tl.lastElementChild === live.el) {
+    live.el.className = `timeline-item timeline-item--${state}`;
+    live.el.innerHTML = `<span class="tl-kind">${esc(cn)}</span>${esc(msg || cn)}`;
+    live.state = state;
+    return;
+  }
+  const item = el('div', `timeline-item timeline-item--${state} timeline-item--new`);
+  item.innerHTML = `<span class="tl-kind">${esc(cn)}</span>${esc(msg || cn)}`;
+  tl.appendChild(item);
+  while (tl.children.length > 40) tl.firstChild.remove();
+  t.msLive = { phase: data.phase, el: item, state };
+}
+
+function ensureRunSection(t, tl) {
+  if (t.run) return t.run;
+  demoteMilestone(t.msLive);
+  t.msLive = null;
+  const section = el('details', 'tl-run');
+  section.open = true;
+  const sum = el('summary');
+  const list = el('div', 'tl-run-list');
+  section.append(sum, list);
+  tl.appendChild(section);
+  t.run = { section, sum, list, runs: 0, fails: 0 };
+  paintRunSummary(t.run, true);
+  return t.run;
+}
+
+function addRunStep(t, tl, data, msg) {
+  const p = ensureRunSection(t, tl);
+  if (msg.startsWith('✅')) p.runs++;
+  else if (msg.startsWith('❌')) { p.runs++; p.fails++; }
+  const item = el('div', `tl-run-item${data.kind === 'error' ? ' tl-run-item--error' : data.kind === 'warn' ? ' tl-run-item--warn' : ''}`);
+  item.textContent = msg;
+  p.list.appendChild(item);
+  while (p.list.children.length > 80) p.list.firstChild.remove();
+  paintRunSummary(p, true);
+}
+
+function paintRunSummary(p, running) {
+  const bits = [p.runs ? `执行工具 ${p.runs} 次` : '正在执行…'];
+  if (p.fails) bits.push(`其中 ${p.fails} 次失败`);
+  // running 只代表「本次事件到达时仍在跑」；定格（settled）后不再回弹"进行中"——
+  // 偶有 progress 事件晚于 completed 到达，否则已完成的卡会重新挂上"进行中"（2026-09-24 交互走查）
+  p.sum.textContent = bits.join('，') + ((running && !p.settled && p.runs) ? ' · 进行中' : '');
+}
+
+// settleRunSection 任务结束后定格汇总；有失败时保持展开，方便直接看到红的那行
+function settleRunSection(t) {
+  if (!t.run) return;
+  t.run.settled = true;
+  t.run.section.open = t.run.fails > 0;
+  paintRunSummary(t.run, false);
 }
 
 // ensureTask 保证目标卡存在（SSE 事件可能早于 submit 响应到达）。
@@ -870,11 +990,8 @@ function applyEvent(taskID, type, data) {
       // chat 的 info（思考中/已回复）与 error 交给 completed 事件统一展示
       return;
     }
-    const state = data.kind === 'error' ? 'error' : data.kind === 'warn' ? 'warn'
-      : data.phase === 'execute' && (data.message || '').startsWith('✅') ? 'done' : 'active';
-    tl.appendChild(timelineItem(data.phase, data.message ? `${data.progress}% · ${data.message}` : `${data.progress}%`, state));
+    renderProgressLine(t, tl, data);
     tl.scrollTop = tl.scrollHeight;
-    while (tl.children.length > 40) tl.firstChild.remove();
     scrollToBottom();
   } else if (type === 'approval') {
     renderApproval(t, data);
@@ -1036,6 +1153,8 @@ function applyResult(taskID, result) {
         + ((u.estimated_calls || 0) > 0 ? '（≈ 表示部分调用未返回用量，按字数估算）' : '');
     }
   }
+  // 任务结束：工具执行折叠块定格汇总句并收起
+  settleRunSection(t);
   renderChecks(t, result);
   // 回复渲染：对话模式已流式实时输出的内容，收尾时定格为最终结果（失败则保留已流出部分），不再重播打字机
   const summaryEl = t.slots.summary;
@@ -1331,6 +1450,9 @@ function connectSSE() {
   });
   es.addEventListener('completed', async (e) => {
     const r = JSON.parse(e.data);
+    // 目标视图里已有这张卡（如定时任务触发）时必须先定格它——
+    // 否则会话态下 completed 被对话分支接走，卡片会永远停在"运行中"
+    if (tasks.has(r.task_id)) applyResult(r.task_id, r);
     if (viewingConvo) {
       convoComplete(r.task_id, r);
       if (r.status === 'success') toast(`目标完成（${r.score}/100）`, 'success');
@@ -1345,7 +1467,7 @@ function connectSSE() {
   es.addEventListener('suggestion', async (e) => {
     const d = JSON.parse(e.data);
     if (!d.task_id) return;
-    if (viewingConvo) return; // 会话视图暂不内联主动提议
+    if (viewingConvo && !tasks.has(d.task_id)) return; // 会话视图暂不内联主动提议（目标视图已有卡片的仍要更新）
     await ensureTask(d.task_id);
     applyEvent(d.task_id, 'suggestion', d);
     // 创作产出自动分析完成后，静默刷新 GEO 板块（留档历史 + 统计）
@@ -1356,7 +1478,7 @@ function connectSSE() {
   es.addEventListener('suggest_skill', async (e) => {
     const d = JSON.parse(e.data);
     if (!d.task_id) return;
-    if (viewingConvo) return;
+    if (viewingConvo && !tasks.has(d.task_id)) return; // 同上：不抢会话视图，但已存在的卡片要更新
     await ensureTask(d.task_id);
     applyEvent(d.task_id, 'suggest_skill', d);
   });
@@ -1370,7 +1492,9 @@ async function loadSkills() {
     const { skills } = await api('GET', '/api/skills');
     grid.innerHTML = '';
     if (!skills || !skills.length) {
-      grid.innerHTML = `<div class="empty">${ICONS.zap}<div class="empty-title">还没有技能</div><p class="empty-desc">完成一次多步骤任务后，Gleam 会主动建议把流程固化为技能。</p></div>`;
+      grid.innerHTML = `<div class="empty">${ICONS.zap}<div class="empty-title">还没有技能</div><p class="empty-desc">完成一次多步骤任务后，Gleam 会主动建议把流程固化为技能；也可以去市场直接安装。</p><button class="btn btn-secondary btn-sm" id="skills-empty-market">去市场看看</button></div>`;
+      const go = grid.querySelector('#skills-empty-market');
+      if (go) go.addEventListener('click', () => showView('market'));
       return;
     }
     skills.forEach((sk) => grid.appendChild(skillCard(sk)));
@@ -1515,20 +1639,41 @@ function initMemoryOnce() {
 async function searchMemory() {
   const q = $('#memory-search').value.trim() || $('#memory-content').value.trim();
   const hits = $('#memory-hits');
-  if (!q) { hits.innerHTML = ''; return; }
+  if (!q) {
+    hits.innerHTML = `<div class="empty">${ICONS.search}<div class="empty-title">搜索你的长期记忆</div><p class="empty-desc">输入关键词回车即可；下方也可以直接写入一条新记忆。</p></div>`;
+    return;
+  }
   try {
     const { hits: list } = await api('GET', `/api/memory?q=${encodeURIComponent(q)}&k=8`);
     hits.innerHTML = '';
     if (!list || !list.length) {
-      hits.innerHTML = `<div class="empty">${ICONS.search}<div class="empty-title">没有相关记忆</div></div>`;
+      hits.innerHTML = `<div class="empty">${ICONS.search}<div class="empty-title">没有相关记忆</div><p class="empty-desc">换个关键词试试，或在下方写入这条你想让它记住的事。</p></div>`;
       return;
     }
     list.forEach((h) => {
       const row = el('div', 'row');
       row.style.padding = 'var(--space-2) 0';
-      row.innerHTML = `<span class="hit-score">${Number(h.score).toFixed(3)}</span>
-        <div class="row-main"><div class="row-sub" style="font-size: var(--fs-md); color: var(--color-fg);">${esc(h.content)}</div>
-        ${h.tags && h.tags.length ? `<div class="row-sub">${h.tags.map((t) => '#' + esc(t)).join(' ')}</div>` : ''}</div>`;
+      // score 是向量相似度（0–1），裸数字没人看得懂：换算成相关度百分比并解释口径
+      const pct = Math.round(Math.max(0, Math.min(1, Number(h.score) || 0)) * 100);
+      const main = el('div', 'row-main');
+      main.innerHTML = `<div class="row-sub" style="font-size: var(--fs-md); color: var(--color-fg);">${esc(h.content)}</div>
+        ${h.tags && h.tags.length ? `<div class="row-sub">${h.tags.map((t) => '#' + esc(t)).join(' ')}</div>` : ''}`;
+      const score = el('span', 'hit-score');
+      score.textContent = `相关度 ${pct}%`;
+      score.title = '这条记忆与搜索词的相关度（向量相似度换算），越高越相关';
+      const del = el('button', 'btn btn-ghost btn-sm mem-del');
+      del.type = 'button';
+      del.innerHTML = ICONS.trash;
+      del.title = '删除这条记忆（不再参与检索）';
+      del.setAttribute('aria-label', `删除记忆：${(h.content || '').slice(0, 20)}`);
+      del.addEventListener('click', async () => {
+        if (!await confirmModal(`删除这条记忆？\n「${(h.content || '').slice(0, 60)}」\n\n删除后不再参与检索。`, '删除记忆', { okText: '删除', danger: true })) return;
+        try { await api('DELETE', `/api/memory/${encodeURIComponent(h.id)}`); toast('记忆已删除', 'success'); searchMemory(); }
+        catch (err) { toast(err.message, 'error'); }
+      });
+      row.appendChild(score);
+      row.appendChild(main);
+      row.appendChild(del);
       hits.appendChild(row);
     });
   } catch (err) { toast(err.message, 'error'); }
@@ -1552,8 +1697,18 @@ async function loadSchedules() {
       main.innerHTML = `<div class="row-title">${esc(j.name)} <span class="badge badge--${j.enabled ? 'success' : 'cancelled'}">${j.enabled ? '启用' : '停用'}</span></div>
         <div class="row-sub">${esc(freq)} · ${esc(j.goal)}${j.next_run ? ' · 下次 ' + esc(new Date(j.next_run).toLocaleString()) : ''}</div>`;
       const actions = el('div', 'row-actions');
+      const toggle = el('button', 'btn btn-ghost btn-sm');
+      toggle.type = 'button';
+      toggle.textContent = j.enabled ? '暂停' : '恢复';
+      toggle.title = j.enabled ? '暂停后到点不再执行，随时可恢复' : '恢复按原计划执行';
+      toggle.setAttribute('aria-label', `${j.enabled ? '暂停' : '恢复'}定时任务 ${j.name}`);
+      toggle.addEventListener('click', async () => {
+        try { await api('POST', `/api/schedules/${encodeURIComponent(j.name)}/enabled`, { enabled: !j.enabled }); toast(j.enabled ? '任务已暂停' : '任务已恢复', 'success'); loadSchedules(); }
+        catch (err) { toast(err.message, 'error'); }
+      });
       const del = el('button', 'btn btn-danger btn-sm');
       del.innerHTML = ICONS.trash;
+      del.title = '删除定时任务';
       del.setAttribute('aria-label', `删除定时任务 ${j.name}`);
       del.addEventListener('click', async () => {
         const ok = await confirmModal(`删除定时任务「${j.name}」？此操作不可恢复。`, '删除任务');
@@ -1561,6 +1716,7 @@ async function loadSchedules() {
         try { await api('DELETE', `/api/schedules/${encodeURIComponent(j.name)}`); toast('已删除', 'success'); loadSchedules(); }
         catch (err) { toast(err.message, 'error'); }
       });
+      actions.appendChild(toggle);
       actions.appendChild(del);
       row.appendChild(main);
       row.appendChild(actions);
@@ -1630,7 +1786,8 @@ async function loadTools() {
         ${t.overridden ? '<span class="badge badge--mode">已覆盖</span>' : ''}</div>
         <div class="row-sub">${esc(t.description)}</div>`;
       const details = el('details', 'schema');
-      details.innerHTML = `<summary>参数 schema</summary><pre>${esc(JSON.stringify(t.schema, null, 2))}</pre>`;
+      details.innerHTML = `<summary>参数说明</summary>${schemaSummary(t.schema)}
+        <details class="tl-raw"><summary>查看原始 schema</summary><pre>${esc(JSON.stringify(t.schema, null, 2))}</pre></details>`;
       main.appendChild(details);
       const callBtn = el('button', 'btn btn-secondary btn-sm', '调用');
       callBtn.addEventListener('click', () => openToolCallDialog(t));
@@ -1651,6 +1808,23 @@ async function loadTools() {
       });
     });
   } catch (err) { toast(err.message, 'error'); }
+}
+
+// schemaSummary（L6，2026-09-23 QA）：JSON Schema 直 dump 对不写代码的人是天书，
+// 先渲染「参数名 · 类型 · 必填 · 一句话说明」表，原始 JSON 收进二级折叠。
+function schemaSummary(schema) {
+  const props = schema && schema.properties;
+  if (!props || !Object.keys(props).length) return '<div class="row-sub">此工具不需要参数。</div>';
+  const required = new Set((schema.required || []));
+  const rows = Object.entries(props).map(([k, v]) => {
+    const type = v.type || (v.enum ? '枚举' : '任意');
+    const req = required.has(k) ? '<span class="badge badge--warn">必填</span>' : '<span class="row-sub">可选</span>';
+    const desc = esc(v.description || '—');
+    const enm = v.enum ? `<div class="row-sub">可选值：${v.enum.map((x) => esc(String(x))).join(' · ')}</div>` : '';
+    const dft = v.default !== undefined ? `<div class="row-sub">默认：${esc(JSON.stringify(v.default))}</div>` : '';
+    return `<tr><td><code>${esc(k)}</code></td><td>${esc(type)}</td><td>${req}</td><td>${desc}${enm}${dft}</td></tr>`;
+  }).join('');
+  return `<table class="schema-table"><thead><tr><th>参数</th><th>类型</th><th></th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function openToolCallDialog(t) {
@@ -1825,11 +1999,13 @@ function fillSettingsFields(s) {
 let PROVIDERS = [];
 let providersBound = false;
 async function loadProviders() {
+  // L11：/api/providers 要 0.5–1.5s，先放占位，避免下拉框出现「空列表」真空期
+  const sel = $('#set-provider');
+  sel.innerHTML = '<option value="" disabled>厂商列表加载中…</option>';
   try {
     const { providers } = await api('GET', '/api/providers');
     PROVIDERS = providers || [];
   } catch { PROVIDERS = []; }
-  const sel = $('#set-provider');
   sel.innerHTML = '<option value="">自定义 / 手动填写</option>' +
     PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   // 事件只绑一次：加载失败时 PROVIDERS 为空，若以长度作标志会重复累积监听器
@@ -1896,7 +2072,128 @@ function syncRuntimeState(s) {
     PROVIDER = s.llm.provider || 'glm';
     API_KEY_SET = !!s.llm.api_key_set;
     $('#set-api-key').placeholder = s.llm.api_key_set ? '已设置，留空表示不修改' : '未设置';
+    const clearBtn = $('#set-clear-key');
+    if (clearBtn) clearBtn.hidden = !API_KEY_SET;
   }
+}
+
+/* ---------- 模型连通性测试与密钥清除 ---------- */
+const LLM_TEST_HINTS = {
+  auth: '鉴权失败（401/403）：检查 API Key 是否正确或已过期',
+  not_found: '找不到地址或模型（404）：核对 API 端点与模型名',
+  rate_limited: '被限流（429）：稍后再试',
+  provider: '厂商侧故障（5xx）：服务暂不可用，稍后再试',
+  api: 'API 返回错误',
+  timeout: '连接超时（15 秒）：检查网络或 API 端点',
+  network: '网络不通：检查端点地址、代理或防火墙',
+  config: '配置不完整：先选择厂商或填写模型名',
+};
+
+async function testLLM() {
+  const btn = $('#set-test-llm');
+  const out = $('#llm-test-result');
+  if (!btn || !out) return;
+  btn.disabled = true;
+  out.hidden = false;
+  out.className = 'llm-test-result testing';
+  out.textContent = '正在探测…';
+  const body = {
+    provider_id: $('#set-provider').value,
+    plan: $('#set-plan').value || '',
+    protocol: $('#set-protocol').value,
+    base_url: $('#set-base-url').value.trim(),
+    model: $('#set-model').value.trim(),
+  };
+  const key = $('#set-api-key').value.trim();
+  if (key) body.api_key = key;
+  try {
+    const r = await api('POST', '/api/llm/test', body);
+    if (r.ok) {
+      const lat = Number.isFinite(r.latency_ms) ? ` · ${r.latency_ms}ms` : '';
+      out.textContent = r.kind === 'mock' ? 'Mock 模型：未发起真实网络调用' : `连接成功${lat}`;
+      out.className = 'llm-test-result ok';
+    } else {
+      out.textContent = (LLM_TEST_HINTS[r.kind] || '连接失败') + (r.message ? `（${r.message}）` : '');
+      out.className = 'llm-test-result fail';
+    }
+  } catch (err) {
+    out.textContent = `测试请求失败：${err.message}`;
+    out.className = 'llm-test-result fail';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 拉取模型列表：按表单当前值请求（不必先保存），结果填进 datalist 供点选。
+// 拉不到不阻塞——模型框仍可手输，列表只是加速器。
+async function fetchModels() {
+  const btn = $('#set-fetch-models');
+  const out = $('#llm-test-result');
+  if (!btn) return;
+  btn.disabled = true;
+  if (out) { out.hidden = false; out.className = 'llm-test-result testing'; out.textContent = '正在拉取模型列表…'; }
+  const body = {
+    provider_id: $('#set-provider').value,
+    plan: $('#set-plan').value || '',
+    protocol: $('#set-protocol').value,
+    base_url: $('#set-base-url').value.trim(),
+  };
+  const key = $('#set-api-key').value.trim();
+  if (key) body.api_key = key;
+  try {
+    const r = await api('POST', '/api/llm/models', body);
+    const dl = $('#model-list');
+    if (r.ok && dl && Array.isArray(r.models)) {
+      dl.replaceChildren(...r.models.map((m) => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        if (m.display_name) opt.label = m.id + '（' + m.display_name + '）';
+        return opt;
+      }));
+      if (out) {
+        out.textContent = r.kind === 'mock' ? 'Mock 模型：没有在线模型列表' : `已获取 ${r.count} 个模型，模型框可直接点选`;
+        out.className = 'llm-test-result ok';
+      }
+    } else if (out) {
+      out.textContent = (LLM_TEST_HINTS[r.kind] || '获取失败') + (r.message ? `（${r.message}）` : '');
+      out.className = 'llm-test-result fail';
+    }
+  } catch (err) {
+    if (out) { out.textContent = `拉取请求失败：${err.message}`; out.className = 'llm-test-result fail'; }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 两步确认：第一下只武装按钮，4 秒内再点才真正清除（误点成本 = 重新输 key）
+let clearKeyArmedAt = 0;
+let clearKeyTimer = null;
+async function clearAPIKey() {
+  const btn = $('#set-clear-key');
+  if (!btn) return;
+  if (Date.now() - clearKeyArmedAt > 4000) {
+    clearKeyArmedAt = Date.now();
+    btn.textContent = '再点一次确认清除';
+    btn.classList.add('btn-armed');
+    clearTimeout(clearKeyTimer);
+    clearKeyTimer = setTimeout(() => {
+      btn.textContent = '清除密钥';
+      btn.classList.remove('btn-armed');
+    }, 4000);
+    return;
+  }
+  clearTimeout(clearKeyTimer);
+  btn.textContent = '清除密钥';
+  btn.classList.remove('btn-armed');
+  clearKeyArmedAt = 0;
+  await saveModule('set-clear-key', { llm: { clear_api_key: true } }, {
+    onSuccess: () => {
+      $('#set-api-key').value = '';
+      const out2 = $('#llm-test-result');
+      if (out2) { out2.hidden = true; out2.textContent = ''; }
+      toast('API Key 已清除', 'success');
+    },
+  });
 }
 
 async function saveModule(btnId, patch, opts = {}) {
@@ -1905,7 +2202,8 @@ async function saveModule(btnId, patch, opts = {}) {
   btn.disabled = true;
   try {
     await api('POST', '/api/settings', patch);
-    toast('设置已保存并生效', 'success');
+    // L13：5 个分区同款按钮，toast 要说出刚保存的是哪一块
+    toast(`${opts.label || '设置'}已保存并生效`, 'success');
     try {
       const s = await api('GET', '/api/settings');
       if (s.llm) fillSettingsFields(s);
@@ -1923,7 +2221,7 @@ async function saveModule(btnId, patch, opts = {}) {
 async function savePersona() {
   await saveModule('set-save-persona', {
     persona: { name: $('#set-name').value.trim(), style: segValue('#set-style') },
-  });
+  }, { label: '人设设置' });
 }
 
 async function saveSafety() {
@@ -1934,7 +2232,7 @@ async function saveSafety() {
       approval_timeout_seconds: numValue('set-approval-timeout'),
       ai_review: $('#set-ai-review').checked,
     },
-  }, { onSuccess: () => _doSetPerm(mode, false) });
+  }, { label: '安全设置', onSuccess: () => _doSetPerm(mode, false) });
 }
 
 async function saveEngine() {
@@ -1957,16 +2255,21 @@ async function saveEngine() {
       max_tool_schemas: numValue('set-max-tool-schemas'),
       chat_acceptance: $('#set-chat-acceptance').checked,
     },
-  }, { reloadContext: true });
+  }, { label: '引擎设置', reloadContext: true });
 }
 
 async function saveMemory() {
   await saveModule('set-save-memory', {
     memory: { short_term_capacity: numValue('set-short-cap'), max_items: numValue('set-max-items') },
-  }, { reloadContext: true });
+  }, { label: '记忆设置', reloadContext: true });
 }
 
 async function saveLLM() {
+  const parsed = $('#set-tiers') ? parseTiers($('#set-tiers').value) : { tiers: undefined, bad: [] };
+  if (parsed.bad.length) {
+    toast(`档位有 ${parsed.bad.length} 行无效，本次未保存：${parsed.bad.join('；')}`, 'error', 6000);
+    return;
+  }
   const patch = {
     llm: {
       provider_id: $('#set-provider').value,
@@ -1975,7 +2278,7 @@ async function saveLLM() {
       base_url: $('#set-base-url').value.trim(),
       model: $('#set-model').value.trim(),
       fast_model: $('#set-fast-model') ? $('#set-fast-model').value.trim() : undefined,
-      tiers: $('#set-tiers') ? parseTiers($('#set-tiers').value) : undefined,
+      tiers: parsed.tiers,
       temperature: parseFloat($('#set-temperature').value) || undefined,
       max_tokens: numValue('set-max-tokens'),
       timeout_seconds: numValue('set-llm-timeout'),
@@ -1983,7 +2286,7 @@ async function saveLLM() {
   };
   const key = $('#set-api-key').value.trim();
   if (key) patch.llm.api_key = key;
-  await saveModule('set-save-llm', patch, { onSuccess: () => { $('#set-api-key').value = ''; } });
+  await saveModule('set-save-llm', patch, { label: '模型设置', onSuccess: () => { $('#set-api-key').value = ''; } });
 }
 
 if ($('#audit-refresh')) $('#audit-refresh').addEventListener('click', () => loadAudit());
@@ -1993,6 +2296,9 @@ $('#set-save-safety').addEventListener('click', saveSafety);
 $('#set-save-engine').addEventListener('click', saveEngine);
 $('#set-save-memory').addEventListener('click', saveMemory);
 $('#set-save-llm').addEventListener('click', saveLLM);
+if ($('#set-test-llm')) $('#set-test-llm').addEventListener('click', testLLM);
+if ($('#set-fetch-models')) $('#set-fetch-models').addEventListener('click', fetchModels);
+if ($('#set-clear-key')) $('#set-clear-key').addEventListener('click', clearAPIKey);
 
 /* ---------- 上下文（会话自动压缩状态） ---------- */
 function renderContext(ctx) {
@@ -2205,7 +2511,7 @@ function mcpPresetCard(p) {
   main.innerHTML = `<div class="row-title">${esc(p.name)} ${p.installed ? '<span class="badge badge--success">已安装</span>' : ''}
     ${p.params && p.params.length ? '<span class="badge badge--mode">需配置</span>' : ''}</div>
     <div class="row-sub">${esc(p.desc)}</div>
-    <div class="stat">${esc(p.command)} · 信任 ${esc(p.trust)}${p.tags && p.tags.length ? ' · ' + esc(p.tags.join(' / ')) : ''}</div>`;
+    <div class="stat">${esc(p.command)} · 信任 ${esc(PERM_LABELS[p.trust] || p.trust)}${p.tags && p.tags.length ? ' · ' + esc(p.tags.join(' / ')) : ''}</div>`;
   const actions = el('div', 'row-actions');
   const btn = el('button', 'btn btn-primary btn-sm', p.installed ? '重新安装' : '安装');
   btn.addEventListener('click', () => openMCPInstallDialog(p));
@@ -2315,7 +2621,7 @@ async function loadMCPInstalled() {
         : `<span class="badge badge--cancelled">未连接</span>`;
       main.innerHTML = `<div class="row-title">${esc(m.name)} ${state}</div>
         <div class="row-sub"><code style="font-family: var(--font-mono); font-size: var(--fs-xs);">${esc(m.command)} ${esc((m.args || []).join(' '))}</code></div>
-        <div class="stat">信任 ${esc(m.trust)} · ${m.enabled ? '启用' : '停用'}</div>`;
+        <div class="stat">信任 ${esc(PERM_LABELS[m.trust] || m.trust)} · ${m.enabled ? '启用' : '停用'}</div>`;
       const actions = el('div', 'row-actions');
       if (!m.connected) {
         const retry = el('button', 'btn btn-secondary btn-sm', '重连');
@@ -2395,7 +2701,7 @@ async function loadWorkspace() {
 function renderWorkspace(ws) {
   const text = $('#ws-chip-text');
   if (text) {
-    text.textContent = wsShort(ws.workspace);
+    text.textContent = ws.workspace ? '工作区 · ' + wsShort(ws.workspace) : '选择工作区';
     text.title = ws.workspace || '';
   }
 }
@@ -2826,10 +3132,19 @@ async function openTaskDetail(taskID) {
       if (steps.length) {
         const list = el('div', 'timeline');
         steps.forEach((st) => {
-          let out = st.output;
-          if (out != null && typeof out !== 'string') { try { out = JSON.stringify(out); } catch { out = String(out); } }
           const it = el('div', 'timeline-item');
-          it.innerHTML = `<span class="tl-kind">${esc(st.tool || '步骤')}</span>${esc(out || st.error || st.status || '')}`;
+          // reply 步骤的 .text 是人话，直接展示；其余对象输出折进「查看原始输出」，
+          // 不再把 JSON.stringify 的整坨怼到时间线上（2026-09-23 QA 报告 M2）。
+          let readable = '';
+          if (typeof st.output === 'string') readable = st.output;
+          else if (st.output && typeof st.output === 'object' && typeof st.output.text === 'string') readable = st.output.text;
+          it.innerHTML = `<span class="tl-kind">${esc(st.tool || '步骤')}</span>${esc(readable || st.error || st.status || '')}`;
+          if (st.output != null && typeof st.output === 'object') {
+            const d = document.createElement('details');
+            d.className = 'tl-raw';
+            d.innerHTML = `<summary>查看原始输出</summary><pre>${esc(JSON.stringify(st.output, null, 2))}</pre>`;
+            it.appendChild(d);
+          }
           list.appendChild(it);
         });
         box.appendChild(list);
@@ -3094,7 +3409,8 @@ function _doSetPerm(mode, persist = true) {
   document.querySelectorAll('#perm-seg button').forEach((b) =>
     b.setAttribute('aria-pressed', String(b.dataset.perm === display)));
   const sub = document.getElementById('plus-plan-sub');
-  if (sub) sub.textContent = (mode === 'plan_first' || mode === 'interactive') ? '当前是"需我批准"' : '已切换到"完全访问"';
+  // L7：菜单副标题写「下一步动作」而不是「上次切换的结果」——过去时状态放这迟早过时
+  if (sub) sub.textContent = (mode === 'plan_first' || mode === 'interactive') ? '切换「完全访问」' : '切换「请我批准」';
   if (persist) api('POST', '/api/settings', { safety: { mode } }).catch(() => {});
 }
 
@@ -3191,16 +3507,20 @@ function formatTiers(tiers) {
   return Object.keys(tiers).sort().map((k) => `${k}: ${tiers[k]}`).join('\n');
 }
 
+// parseTiers 返回 {tiers, bad}：bad 是畸形行的「第 N 行：原文」列表（L12）。
+// 静默丢弃最坑——用户粘贴了 5 行只生效 2 行，还以为都存上了。
 function parseTiers(text) {
-  const out = {};
-  String(text || '').split('\n').forEach((line) => {
+  const tiers = {};
+  const bad = [];
+  String(text || '').split('\n').forEach((line, idx) => {
+    if (!line.trim()) return;
     const i = line.indexOf(':');
-    if (i < 0) return;
-    const name = line.slice(0, i).trim();
-    const model = line.slice(i + 1).trim();
-    if (name && model) out[name] = model;
+    const name = i < 0 ? '' : line.slice(0, i).trim();
+    const model = i < 0 ? '' : line.slice(i + 1).trim();
+    if (name && model) tiers[name] = model;
+    else bad.push(`第 ${idx + 1} 行「${line.trim().slice(0, 30)}」${i < 0 ? '缺少冒号' : !name ? '档位名为空' : '模型名为空'}（格式：档位: 模型ID）`);
   });
-  return out;
+  return { tiers, bad };
 }
 
 function formatDuration(sec) {
@@ -3420,7 +3740,8 @@ async function loadAccount() {
       $('#me-account-info').innerHTML =
         '<strong>本地模式</strong><small>密钥、对话、技能、工具都只存在这台电脑</small>';
       $('#me-name').textContent = '我的';
-      $('#me-sub').textContent = s.configured ? '未登录' : '本地模式 · 未登录';
+      // L7：本地优先产品里「未登录」会被读成功能受限——说清本地模式就是完整形态
+      $('#me-sub').textContent = '本地模式 · 功能完整';
       if (s.supabase_url) { $('#me-sb-url').value = s.supabase_url; $('#me-sb-anon').value = s.supabase_anon_key || ''; }
     }
   } catch {

@@ -1,6 +1,9 @@
 package webui
 
 import (
+	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,28 +93,26 @@ func TestLoopGovernanceSettings_ZeroAccepted(t *testing.T) {
 	}
 }
 
-// TestLoopGovernanceSettings_TooSmallRejected 明显无意义的小值应被忽略，但不影响同批次的合法值。
+// TestLoopGovernanceSettings_TooSmallRejected 明显无意义的小值整次拒绝并报错，
+// 同批次的合法值也不许夹带生效——静默丢掉字段会让用户以为"保存了但没生效"。
+// （旧契约"忽略越界字段、照常应用其余"已废：H1 修复统一为越界即 400。）
 func TestLoopGovernanceSettings_TooSmallRejected(t *testing.T) {
 	f, _ := newGEOFixture(t)
-	updated := f.call("POST", "/api/settings", map[string]any{
-		"agent": map[string]any{
-			"stuck_threshold":  1,   // 太小：至少 2 轮才算打转
-			"max_output_runes": 100, // 太小：没有实际意义
-			"max_tool_schemas": 9,   // 合法，应生效
-		},
-	})
-	agentSec := updated["agent"].(map[string]any)
-	if agentSec["stuck_threshold"].(float64) == 1 {
-		t.Error("stuck_threshold=1 不应被接受")
+	b, _ := json.Marshal(map[string]any{"agent": map[string]any{
+		"stuck_threshold":  1,   // 太小：至少 2 轮才算打转
+		"max_output_runes": 100, // 太小：没有实际意义
+		"max_tool_schemas": 9,   // 合法，但不得夹带
+	}})
+	resp, err := http.Post(f.ts.URL+"/api/settings", "application/json", strings.NewReader(string(b)))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if agentSec["max_output_runes"].(float64) == 100 {
-		t.Error("max_output_runes=100 不应被接受")
+	defer resp.Body.Close()
+	if resp.StatusCode < 400 {
+		t.Errorf("越界小值应 400，实得 %d", resp.StatusCode)
 	}
-	if agentSec["max_tool_schemas"].(float64) != 9 {
-		t.Errorf("合法值应照常生效，实际 %v", agentSec["max_tool_schemas"])
-	}
-	if f.agent.Cfg.Agent.MaxToolSchemas != 9 || f.agent.Cfg.Agent.StuckThreshold == 1 {
-		t.Errorf("运行时配置不对：%+v", f.agent.Cfg.Agent)
+	if f.agent.Cfg.Agent.MaxToolSchemas == 9 || f.agent.Cfg.Agent.StuckThreshold == 1 {
+		t.Errorf("被拒请求不应有任何字段生效：%+v", f.agent.Cfg.Agent)
 	}
 }
 

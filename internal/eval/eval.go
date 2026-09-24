@@ -20,6 +20,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"gleam/pkg/types"
 )
 
 // Depth 评测深度：跑得越深越接近真实，但越依赖模型。
@@ -154,6 +156,63 @@ type observation struct {
 	Error      string
 }
 
+// CaseUsage 一条用例（或一整批）的资源消耗，**只取报告需要的字段**。
+//
+// 为什么不直接复用 types.TaskUsage：那个类型带 DurationMs，而 CaseResult 已经有
+// DurationMS（这一遍的墙钟耗时）。同一个报告里出现两个名字几乎一样、口径不同的耗时，
+// 读的人一定会拿错——而"成本"这件事最怕的就是口径含糊。耗时由 CaseResult.DurationMS
+// 负责，这里只回答"花了多少 token、调了多少次模型"。
+//
+// 为什么不直接复用 GoalResult.Usage 的类型：见上；转换点收敛在 usageFromTask 一处，
+// TaskUsage 将来加了字段，要不要进报告必须在这里显式决定一次，不会静默漂移。
+type CaseUsage struct {
+	LLMCalls         int `json:"llm_calls,omitempty"`
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	// EstimatedCalls 其中 token 为估算值（厂商未返回用量）的调用次数。
+	// 不说这个数，一行 token 合计看起来像实测值——而它可能大半是估的。
+	EstimatedCalls int `json:"estimated_calls,omitempty"`
+	// CachedTokens / CachedCalls 命中服务端提示词缓存的部分与报告了命中的调用次数。
+	// 评测的存在理由之一就是量测提示词布局对前缀缓存友不友好（§4.6.6），
+	// 而 PromptChars 只回答"提示词多长"，回答不了"它被缓存命中了没有"。
+	CachedTokens int `json:"cached_tokens,omitempty"`
+	CachedCalls  int `json:"cached_calls,omitempty"`
+	ToolCalls    int `json:"tool_calls,omitempty"`
+}
+
+// TotalTokens 输入 + 输出。
+func (u CaseUsage) TotalTokens() int { return u.PromptTokens + u.CompletionTokens }
+
+// Empty 是否一个数都没有。用来区分"计量了但确实是 0"与"没计量"。
+func (u CaseUsage) Empty() bool {
+	return u.LLMCalls == 0 && u.PromptTokens == 0 && u.CompletionTokens == 0 &&
+		u.EstimatedCalls == 0 && u.CachedTokens == 0 && u.CachedCalls == 0 && u.ToolCalls == 0
+}
+
+// add 累加一条用例的用量（报告级合计用）。
+func (u *CaseUsage) add(o CaseUsage) {
+	u.LLMCalls += o.LLMCalls
+	u.PromptTokens += o.PromptTokens
+	u.CompletionTokens += o.CompletionTokens
+	u.EstimatedCalls += o.EstimatedCalls
+	u.CachedTokens += o.CachedTokens
+	u.CachedCalls += o.CachedCalls
+	u.ToolCalls += o.ToolCalls
+}
+
+// usageFromTask 把任务级用量转成报告用的形状。唯一的转换点。
+func usageFromTask(t types.TaskUsage) *CaseUsage {
+	return &CaseUsage{
+		LLMCalls:         t.LLMCalls,
+		PromptTokens:     t.PromptTokens,
+		CompletionTokens: t.CompletionTokens,
+		EstimatedCalls:   t.EstimatedCalls,
+		CachedTokens:     t.CachedTokens,
+		CachedCalls:      t.CachedCalls,
+		ToolCalls:        t.ToolCalls,
+	}
+}
+
 // CaseResult 一条用例的实际观测与判定。
 type CaseResult struct {
 	ID         string   `json:"id"`
@@ -200,6 +259,12 @@ type CaseResult struct {
 	// 只在 Stable=false 时填：它回答"抖的是哪一部分"——通过与否、步数、还是用到的工具。
 	// 不给出这个，读报告的人只能自己再手工重跑几遍，那就白跑了。
 	Variants []string `json:"variants,omitempty"`
+	// Usage 这条用例的资源消耗。**只有 full 深度有值**（其余深度为 nil）。
+	//
+	// 用指针而不是零值：nil 表示"没计量"，零值结构表示"计量了但确实是 0"。
+	// 两者在报告里必须能分开——一个 select 深度的 0 与一次"模型没被调用"的 0
+	// 长得一样的话，读的人会以为这批评测没花钱。
+	Usage *CaseUsage `json:"usage,omitempty"`
 }
 
 // Diff 与基线的对比。
@@ -265,6 +330,12 @@ type Report struct {
 	// 失败率回答"坏了多少"，这份分布回答"这周该先修哪一层"。
 	FailureBreakdown map[string]int `json:"failure_breakdown,omitempty"`
 	PromptChars      int            `json:"prompt_chars"`
+	// Usage 整批用例的用量合计。**只有 full 深度有值**（其余为 nil，理由见 CaseResult.Usage）。
+	//
+	// 它补的是 PromptChars 的另一半：PromptChars 是**成本代理**（提示词多长），
+	// 用量是**成本本体**（实际花了多少 token）。评测的存在理由之一是"给提示词做减法"，
+	// 而减法要算账——只有代理没有本体，账就只能在终端回滚缓冲里看。
+	Usage *CaseUsage `json:"usage,omitempty"`
 	// RepeatN 每条用例重跑的遍数（1 = 未度量可重复性，报告里不出现一致率）。
 	RepeatN int `json:"repeat_n,omitempty"`
 	// StableCases / UnstableCases 重跑结果完全一致的用例数 / 不一致的用例 ID。

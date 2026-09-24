@@ -29,7 +29,7 @@ type GLMClient struct {
 // NewGLM 创建 GLM 客户端。
 func NewGLM(baseURL, apiKey, model string, temperature float64, maxTokens int, timeout time.Duration) *GLMClient {
 	return &GLMClient{
-		BaseURL:     strings.TrimRight(baseURL, "/"),
+		BaseURL:     normalizeBase(baseURL, "/chat/completions"),
 		APIKey:      apiKey,
 		Model:       model,
 		Temperature: temperature,
@@ -39,28 +39,6 @@ func NewGLM(baseURL, apiKey, model string, temperature float64, maxTokens int, t
 }
 
 func (c *GLMClient) Name() string { return c.Model }
-
-// Update 运行时热更新客户端参数（设置页保存后立即对后续调用生效）。
-func (c *GLMClient) Update(baseURL, apiKey, model string, temperature float64, maxTokens, timeoutSecs int) {
-	if baseURL != "" {
-		c.BaseURL = strings.TrimRight(baseURL, "/")
-	}
-	if apiKey != "" {
-		c.APIKey = apiKey
-	}
-	if model != "" {
-		c.Model = model
-	}
-	if temperature > 0 {
-		c.Temperature = temperature
-	}
-	if maxTokens > 0 {
-		c.MaxTokens = maxTokens
-	}
-	if timeoutSecs > 0 {
-		c.HTTP = &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second}
-	}
-}
 
 type chatMessage struct {
 	Role    string `json:"role"`

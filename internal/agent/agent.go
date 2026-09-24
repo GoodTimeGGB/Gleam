@@ -872,8 +872,12 @@ func (a *Agent) runGoalLoop(ctx context.Context, req types.GoalRequest, goal, mo
 			// 带省略量标注的摘要：「已自动压缩」要说清丢了多少，否则读者分不清全貌与残余
 			summary = a.Mem.SummaryAnnotated()
 		}
+		// 计划流只报进度，不转发内容：规划响应本身就是 JSON，逐 token 转给
+		// CLI/WebUI 会把原始 JSON 碎片打进进度行（2026-09-23 QA 报告 M5）。
+		var planChars int
 		onDelta, flush := DeltaThrottle(50, func(text string) {
-			notify("plan", "规划中: "+strings.TrimSpace(text), 5, "llm")
+			planChars += len([]rune(text))
+			notify("plan", fmt.Sprintf("规划中…（已生成 %d 字）", planChars), 5, "llm")
 		})
 		planner.OnLLMDelta = onDelta
 		// 菜单模式下把此前各轮用过的工具固定带上，避免重规划时想用却没有 schema

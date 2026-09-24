@@ -398,9 +398,9 @@ func (c *Config) apply(m map[string]any) {
 		getStr(v, "protocol", &c.LLM.Protocol)
 		getStr(v, "provider_id", &c.LLM.ProviderID)
 		getStr(v, "plan", &c.LLM.Plan)
-		getStr(v, "base_url", &c.LLM.BaseURL)
+		getStrAssign(v, "base_url", &c.LLM.BaseURL)
 		getStr(v, "model", &c.LLM.Model)
-		getStr(v, "fast_model", &c.LLM.FastModel)
+		getStrAssign(v, "fast_model", &c.LLM.FastModel)
 		if tiers, ok := v["tiers"].(map[string]any); ok {
 			c.LLM.Tiers = map[string]string{}
 			for name, model := range tiers {
@@ -413,7 +413,7 @@ func (c *Config) apply(m map[string]any) {
 				}
 			}
 		}
-		getStr(v, "api_key", &c.LLM.APIKey)
+		getStrAssign(v, "api_key", &c.LLM.APIKey)
 		getFloat(v, "temperature", &c.LLM.Temperature)
 		getInt(v, "max_tokens", &c.LLM.MaxTokens)
 		getInt(v, "timeout_seconds", &c.LLM.TimeoutSecs)
@@ -533,6 +533,15 @@ func getStr(m map[string]any, key string, dst *string) {
 		if s, ok := v.(string); ok && s != "" {
 			*dst = s
 		}
+	}
+}
+
+// getStrAssign 与 getStr 的差别只在"空串也赋值"：
+// base_url / fast_model / api_key 带显式清空语义（设置页留空=回落预设/回退主模型/删密钥），
+// 用 getStr 的话空串会被跳过，清空静默失效。
+func getStrAssign(m map[string]any, key string, dst *string) {
+	if v, ok := m[key].(string); ok {
+		*dst = v
 	}
 }
 

@@ -68,6 +68,12 @@ func (r *Runner) Run(ctx context.Context, cases []Case) Report {
 		tally(&rep, c, &res)
 		rep.PromptChars += res.PromptChars
 		rep.RetryOK += res.RetryOK
+		if res.Usage != nil {
+			if rep.Usage == nil {
+				rep.Usage = &CaseUsage{}
+			}
+			rep.Usage.add(*res.Usage)
+		}
 		for k, n := range res.FailureKinds {
 			if rep.FailureBreakdown == nil {
 				rep.FailureBreakdown = map[string]int{}
@@ -163,10 +169,27 @@ func (r *Runner) runCase(ctx context.Context, c Case) CaseResult {
 		res.Runs, res.Agreed, res.Stable = 1, 1, true
 		return res
 	}
+	// 但**用量不是"只取首遍"**：重跑的每一遍都真的调了模型、真的花了钱。
+	// 只报首遍会让 `--repeat 3` 的成本看起来与 `--repeat 1` 一样——那是账错了，
+	// 不是省了。通过率取首遍（口径可比，见 Runner.Repeat 的注释），用量取全部遍数。
+	var total CaseUsage
+	var hasUsage bool
+	acc := func(u *CaseUsage) {
+		if u == nil {
+			return
+		}
+		total.add(*u)
+		hasUsage = true
+	}
+	acc(res.Usage)
 	sigs := []string{runSignature(res.Passed, res.Steps, res.Tools)}
 	for i := 1; i < n; i++ {
 		again := r.runCaseOnce(ctx, c)
+		acc(again.Usage)
 		sigs = append(sigs, runSignature(again.Passed, again.Steps, again.Tools))
+	}
+	if hasUsage {
+		res.Usage = &total
 	}
 	_, agree := modalVariant(sigs)
 	res.Runs, res.Agreed, res.Stable = n, agree, agree == n
@@ -229,6 +252,9 @@ func (r *Runner) runCaseOnce(ctx context.Context, c Case) CaseResult {
 		obs.Error = g.Error
 		res.Status = string(g.Status)
 		res.Score = g.Score
+		// 用量：`g` 就在手上，以前只取了 Steps/Status/Score/FailureBreakdown，把 Usage 丢了。
+		// 补上它评测报告才回答得了"这批评测花了多少"——见 CaseUsage 的注释。
+		res.Usage = usageFromTask(g.Usage)
 		// 过程观测：结果绿不代表过程干净——失败步骤的归因分布与
 		// "重试后才成功"的步骤数，是把"一次就对"与"侥幸做成"分开的依据。
 		for k, n := range g.FailureBreakdown {

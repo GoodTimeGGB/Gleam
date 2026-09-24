@@ -330,6 +330,30 @@ func renderEvalReport(rep eval.Report, total int) string {
 		fmt.Fprintf(&b, " / %d 已知问题", rep.Known)
 	}
 	fmt.Fprintf(&b, "（提示词合计 %d 字符）\n", rep.PromptChars)
+	// 用量紧跟在提示词字符数后面，**同一段呈现**：一个是成本代理、一个是成本本体。
+	// 分开写会让人只看到其中一个，然后拿它当全部。
+	switch {
+	case rep.Usage != nil:
+		fmt.Fprintf(&b, "用量：%d 次模型调用，%d token（输入 %d / 输出 %d",
+			rep.Usage.LLMCalls, rep.Usage.TotalTokens(), rep.Usage.PromptTokens, rep.Usage.CompletionTokens)
+		if rep.Usage.CachedTokens > 0 {
+			fmt.Fprintf(&b, "，缓存命中 %d", rep.Usage.CachedTokens)
+		}
+		fmt.Fprintf(&b, "），%d 次工具调用", rep.Usage.ToolCalls)
+		if rep.Usage.EstimatedCalls > 0 {
+			// 估出来的值必须自己说自己是估的——不说，这行 token 看起来像实测值。
+			fmt.Fprintf(&b, "；其中 %d 次调用的 token 为估算值", rep.Usage.EstimatedCalls)
+		}
+		fmt.Fprintln(&b)
+		if rep.RepeatN > 1 {
+			fmt.Fprintf(&b, "  含 --repeat %d 的每一遍：重跑也真的调了模型，所以一并计入\n", rep.RepeatN)
+		}
+	case rep.Depth == eval.DepthPlan:
+		// plan 深度**会**调模型（规划那一次），但它的调用不经过 RunGoal、没有 taskID 登记，
+		// 因此归集不到用例上。这是缺口，不是 0——不写这一句，读的人会把
+		// "没有用量这一行"当成"这批评测没花钱"。
+		fmt.Fprintln(&b, "用量：未计量（plan 深度的规划调用不经过 RunGoal，没有归集到用例上）")
+	}
 	if rep.HoldoutTotal > 0 {
 		fmt.Fprintf(&b, "保留池：%d/%d 通过（%d 条，单条结果不展示——防止调参过拟合到看得见的用例）\n",
 			rep.HoldoutPassed, rep.HoldoutTotal, rep.HoldoutTotal)

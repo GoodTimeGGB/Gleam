@@ -14,9 +14,12 @@
 #
 # 临时目录**不清理**，两个原因：
 #   ① 本机的删除操作会经过一层安全删除策略，rm -rf 可能失败或直接挂住（表现为莫名的
-#      SIGTERM）。而且 mktemp 在本机返回 Windows 形态路径（C:\…\Temp/tmp.X），钩子会把它
-#      当相对路径解析后失败（SAFE_DELETE_FAIL_CLOSED）——于是 trap 里的清理**把脚本的
-#      退出码污染成 1**：业务全过、退出码为 1。
+#      SIGTERM）；清理失败还会把脚本的**退出码污染成 1**——业务全过、退出码为 1。
+#      （这里原先写着「mktemp 在本机返回 Windows 形态路径 C:\…\Temp/tmp.X」，
+#      2026-09-23 复核发现**这条已经不成立**：同一个 shell 里 `mktemp -d` 稳定返回
+#      `/tmp/tmp.X`。返回形态取决于挂载与 TMPDIR，两种都出现过——所以真正的教训不是
+#      "它返回哪种"，而是**任何路径都不能依赖 mktemp 的返回形态**：交给二进制的路径
+#      一律过一次 cygpath，见下面的 `*C` 变量。这一条没做到就是第 5 层整层挂掉。）
 #   ② 出问题时现场还在，可以直接翻。
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -52,18 +55,27 @@ EOF
 
 WS="$TMP/ws"; DATA="$TMP/data"; mkdir -p "$WS" || exit 1
 
-# 传给 HTTP 的路径必须用**正斜杠**形态。
+# 交给**二进制**（Windows 程序）与 HTTP 的路径，一律转成 cygpath 形态。
 #
-# 为什么：JSON 字符串里的反斜杠是转义符，而 mktemp 在本机给出的是
-# `C:\Users\…\Temp/tmp.X` 这种混合形态——直接拼进 JSON 会变成非法转义（\U \A \L …），
-# 接口返 400，检查失败。以前这条失败被 `set -e` 对 `&&` 列表的豁免吞掉了，
-# 而紧接着的"已持久化"检查因为启动参数写过同一个路径**蒙对了**——两处都是假象。
+# 两个理由，指向同一件事——**bash 眼里的路径和 Windows 程序眼里的路径不是一套**：
+#   * 二进制：Windows 拿到 POSIX 形态的 `/tmp/tmp.X` 会解析成 `<当前盘>:\tmp\tmp.X`，
+#     报 "The system cannot find the file specified"，而且是在**进程启动前**就失败。
+#     后果不成比例：整个第 5 层以 0 通过收场，看起来像"产品全坏了"，其实只是路径形态不对。
+#   * HTTP/JSON：JSON 字符串里的反斜杠是转义符，Windows 形态直接拼进去会变成非法转义
+#     （\U \A \L …），接口返 400。以前这条失败被 `set -e` 对 `&&` 列表的豁免吞掉了，
+#     而紧接着的"已持久化"检查因为启动参数写过同一个路径**蒙对了**——两处都是假象。
+#
+# 命名约定：**`*C` 结尾 = 已转换（converted），只给二进制/HTTP 用**；
+# 不带后缀的（`$WS` / `$DATA` / `$TMP`）留给 shell 自己用（`[ -f "$WS/smoke.txt" ]`）。
+# 混用这两种是这类脚本最常见的错，所以名字上就分开。
 slash() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
-WSJ=$(slash "$WS")
+TMPC=$(slash "$TMP")
+WSC=$(slash "$WS")
+DATAC=$(slash "$DATA")
 # 切到一个**新**目录，这样"已持久化"才是真的在证明"切换生效了"，
 # 而不是在证明"启动参数写过这个路径"。
 WS2="$TMP/ws2"; mkdir -p "$WS2" || exit 1
-WS2J=$(slash "$WS2")
+WS2C=$(slash "$WS2")
 
 OUT="$TMP/session.out"
 {
@@ -85,7 +97,7 @@ OUT="$TMP/session.out"
   sleep 0.3
   printf '%s\n' '{"jsonrpc":"2.0","id":9,"method":"shutdown","params":{}}'
   sleep 1
-} | GLEAM_NO_SYS_NOTIFY=1 "$BIN" serve --mock-llm --mock-script "$TMP/script.json" --workspace "$WS" --data-dir "$DATA" > "$OUT" 2>"$TMP/err.log"
+} | GLEAM_NO_SYS_NOTIFY=1 "$BIN" serve --mock-llm --mock-script "$TMPC/script.json" --workspace "$WSC" --data-dir "$DATAC" > "$OUT" 2>"$TMP/err.log"
 
 echo "===== 会话输出（关键行） ====="
 grep -q '"method":"goal/progress"' "$OUT" && ok "goal/progress 推送" || bad "goal/progress 推送"
@@ -108,7 +120,7 @@ PORT=8791
 # GLEAM_NO_SYS_NOTIFY=1：冒烟会真的触发定时任务，不禁用就会在开发机上弹系统通知。
 # 禁用**不是**静默丢弃——待发内容会打到 stderr（webui.out），所以"通知到底发了没有"
 # 仍然可断言。这条断言正是本批 P0 的端到端出口：判据对但线没接，本仓库栽过四次。
-GLEAM_NO_SYS_NOTIFY=1 "$BIN" webui --addr "127.0.0.1:$PORT" --mock-llm --mock-script "$TMP/script.json" --workspace "$WS" --data-dir "$DATA" > "$TMP/webui.out" 2>&1 &
+GLEAM_NO_SYS_NOTIFY=1 "$BIN" webui --addr "127.0.0.1:$PORT" --mock-llm --mock-script "$TMPC/script.json" --workspace "$WSC" --data-dir "$DATAC" > "$TMP/webui.out" 2>&1 &
 WEBPID=$!
 trap 'kill "${WEBPID:-}" 2>/dev/null || true' EXIT
 sleep 1.5
@@ -151,9 +163,9 @@ curl -sf -X POST "http://127.0.0.1:$PORT/api/settings" -H "Content-Type: applica
 grep -q "style: gentle" "$DATA/settings.yaml" && ok "设置覆盖层已持久化 settings.yaml" || bad "设置覆盖层已持久化 settings.yaml"
 curl -sf "http://127.0.0.1:$PORT/api/context" | grep -q '"short_turns"' && ok "上下文状态 /api/context" || bad "上下文状态 /api/context"
 curl -sf "http://127.0.0.1:$PORT/" | grep -q "view-settings" && ok "设置视图已内嵌首页" || bad "设置视图已内嵌首页"
-curl -sf -X POST "http://127.0.0.1:$PORT/api/workspace" -H "Content-Type: application/json" -d "{\"path\":\"$WS2J\"}" | grep -q '"workspace"' && ok "工作区切换 /api/workspace" || bad "工作区切换 /api/workspace"
+curl -sf -X POST "http://127.0.0.1:$PORT/api/workspace" -H "Content-Type: application/json" -d "{\"path\":\"$WS2C\"}" | grep -q '"workspace"' && ok "工作区切换 /api/workspace" || bad "工作区切换 /api/workspace"
 grep -q "ws2" "$DATA/settings.yaml" && ok "工作区切换已持久化（切到新目录 ws2）" || bad "工作区切换已持久化（切到新目录 ws2）"
-curl -sf "http://127.0.0.1:$PORT/api/fs?path=$WSJ" | grep -q '"dirs"' && ok "文件夹浏览 /api/fs" || bad "文件夹浏览 /api/fs"
+curl -sf "http://127.0.0.1:$PORT/api/fs?path=$WSC" | grep -q '"dirs"' && ok "文件夹浏览 /api/fs" || bad "文件夹浏览 /api/fs"
 curl -sf "http://127.0.0.1:$PORT/api/providers" | grep -q '"zhipu"' && ok "厂商预设 /api/providers（coding/agent/token 入口）" || bad "厂商预设 /api/providers（coding/agent/token 入口）"
 curl -sf "http://127.0.0.1:$PORT/api/market/mcp" | grep -q '"filesystem"' && ok "MCP 市场目录" || bad "MCP 市场目录"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/mcp" -H "Content-Type: application/json" -d '{"name":"smoke-mcp","command":"no-such-mcp-cmd","args":[]}' | grep -q '"installed":true' && ok "MCP 自定义安装（连接失败仅告警）" || bad "MCP 自定义安装（连接失败仅告警）"

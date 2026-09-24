@@ -3,7 +3,108 @@
 
 
 
+## 2026-09-24
+
+### UI 交互专项走查与修复
+
+- 模态挂起缺陷：Esc/点遮罩/关闭钮 关闭确认框时，await 它的流程（API Key 预检、删除确认等）此前永不落地、整条链路卡死。Modal 加 cancelHook，取消式关闭 resolve(false)/null，按钮式走 settle；promptModal 的 Enter 补 IME 组字守卫，关闭后焦点归还触发元素。
+- F1 过程呈现回归：已完成的折叠执行块偶尔停在「执行工具 N 次 · 进行中」不收起。根因是 renderTaskCard 里 applyResult 早于历史事件回放——先定格时折叠块尚不存在，回放又把汇总刷成进行中。改为先回放再定格，并给 run 加 settled 守卫（乱序到达的 progress 事件不再回弹进行中）。成功/失败两条路径实测：成功收起「执行工具 1 次」，失败保持展开「执行工具 2 次，其中 1 次失败」。
+- 滚动劫持：列表持续追加时会强行拽到底部，用户往上翻看被拉回。加近底判定（<80px 才自动跟随），用户自己提交时始终跟到底。
+- 「更多」导航展开后无外点/Esc 收起；toast 不支持点击提前关闭；引用芯片 kind 直显英文 file/mcp——补中文映射；定时任务暂停/恢复按钮此前建好却漏挂 DOM。
+- 走查确认无需改动：hover/active/:focus-visible 覆盖完整（含按钮禁用态、色彩令牌聚焦环）；goalInput 已有 IME 守卫；窄视口与深浅主题样式齐备。
+- **验证**：`go test ./... -count=1` 全绿；`node --check`、`gofmt`、`go vet`、`go build` 通过；浏览器实跑五路模态（Esc/遮罩/关闭钮/确定/取消）、焦点归还、prompt/alert 不挂起、F1 成功与失败定格、模态取消后删除流程不再卡死。
+
 ## 2026-09-23
+
+### QA 低风险修复批（L1-L14）与 Qoder 式回复过程呈现
+
+- 低风险 14 项全修：Mock 回显真实目标；定时任务创建后清空表单、新增暂停/恢复（`POST /api/schedules/{name}/enabled`）与删除按钮可访问名；记忆检索加相关度释义、单条删除（`DELETE /api/memory/{id}`）与空态；@ 弹层 0 结果时 Esc 可关；工作区芯片与输入框文案梳理；工具页参数人类可读摘要（表格 + 原始 schema 折叠）；+ 菜单过时状态项清理；技能空态直达市场；CLI help/用法行补全（--help 退出码 0）；表单控件 label/id/name 补齐；厂商下拉 loading 占位；模型档位畸形行报具体行号并拦截保存；保存 toast 按分区命名。
+- 测试基建：GEO 自动分析测试消除 Windows TempDir 清理竞态假红（断言前等待历史落盘完成 + stub 计数加锁），`go test -run TestGEO -count=10` 稳定。
+- 回复过程呈现改版（借鉴 Qoder 公开交互形态，未复制其代码）：里程碑短句各占一行、同阶段原地更新、去掉百分比流水；执行步骤收进折叠块，汇总句「执行工具 N 次，其中 M 次失败」，任务结束自动收起、有失败保持展开；对话流式渲染不变。
+- 顺带修两个真 bug：定时任务行的暂停/恢复按钮从未挂进 DOM；会话视图下 completed/提议事件会吞掉目标视图已有卡片的定格。
+- **验证**：`go test ./... -count=1` 全绿；浏览器实测暂停/恢复往返、折叠汇总定格、档位报错、记忆删除、Esc 关弹层、保存 toast 命名等逐条通过。
+
+### 模型列表在线拉取（拉取模型）
+
+- 配好厂商与密钥后不必再记模型 ID：设置页模型面板加「拉取模型」按钮，走新端点 `POST /api/llm/models`（按表单当前值请求，不必先保存），列表填进 datalist，「模型」与「辅助模型」输入框可直接点选；拉不到仍可手输——列表是加速器，不是唯一入口。
+- 三种线协议各自实现 `llm.ListModels`：OpenAI 兼容与 Responses 走 `GET {base}/models`，Anthropic 走 `GET {base}/v1/models`（base 以 /v1 结尾不双拼）；响应形态兼容 OpenAI 的 `data[]`、智谱的 `models[]` 与 Anthropic 的 `display_name`；空密钥省略鉴权头，与连接探测口径一致；失败按探测同一套 kind 分类（auth/not_found/rate_limited/provider/timeout/network/config）。
+- 探测与拉列表共用表单值解析 `llmFormTarget`（原 TestLLMConnection 里的重复段抽出）。
+- **验证**：`internal/llm` 端点拼接/形态解析/鉴权头测试、`internal/webui` `/api/llm/models` 端到端测试（成功、401 分类、mock 短路）；浏览器实测「已获取 3 个模型」与鉴权失败红字两条路径；smoke 45 项全绿。
+
+### QA 高中风险修复批（H1 + M1-M7）
+
+- **H1 引擎参数越界**：`ApplySettings` 给 18 项数值参数补上下限（`posInt`/`zeroOr`），越界条目**整批原子拒绝**并回 400「参数越界：max_replans=999（允许 0-20）」，不再静默钳制；前端 16 个 number 输入同步下发 min/max。max_steps=0、done_threshold=0 等「0=用默认/关闭」语义保留为合法值。
+- **M1 @提及相对路径**：`relPath` 统一斜杠并去尾部分隔符，Windows 反斜杠路径不再失配退化成绝对路径。
+- **M2 任务详情弹窗**：时间线对文本输出直接显示纯文本，对象输出收进「查看原始输出」折叠 details；弹窗头部补可见关闭按钮并让首个可聚焦元素获得焦点。
+- **M3 枚举裸奔**：安全模式显示「完全访问 / 请我批准 / 每步批准」，MCP 信任显示「只读放行 / 需我批准」，未知值原样兜底；`data-val` 仍走英文枚举不动协议。
+- **M4 mock 短路让位表单**：连接探测/拉模型时，只要表单显式填了 base_url 就照常真实请求，mock provider 不再吞掉预验证。
+- **M5 进度不泄漏 JSON**：规划流式进度改为「规划中…（已生成 N 字）」计数播报，CLI 与 Web SSE 均不再回显原始计划 JSON（新增 `TestPlanProgress_NoRawJSONLeak`）。
+- **M6 窄侧栏按钮**：`.convo-new` 加 `white-space: nowrap`，760px 视口下「新对话」不再竖排。
+- **M7 焦点环不改形状**：`:focus-visible` 只画 box-shadow 环、删掉统一 `border-radius`，胶囊组件聚焦瞬间不再形状跳变。
+- **验证**：`go test ./... -count=1` 全绿（含区间拒绝/原子 400/mock 让位/无泄漏新用例）；浏览器实测越界 toast、弹窗关闭与折叠输出、中文枚举、窄视口、999px 圆角聚焦；CLI 实测进度无 JSON。
+- **过程事故（记录）**：本批收尾写 CHANGELOG 时一次脚本先 `open('wb')` 后编码失败，把文件截断成空；已从 pack 发布包内的同版本副本重建（含此前未提交的「模型列表」与本批条目），内容经条目比对确认无丢失。
+
+
+### UI 设计系统 v3 全量重建 + 模型连接/密钥保存自测批
+
+- **UI 设计系统 v3**：`internal/webui/static` 三件套按新 Qoder 观感重建（保留全部 DOM/class/ID 契约与 Go 测试子串断言），默认强调色仍为微光绿；浅色模式修复强调色与 destructive/warning/info 状态色对比度，用 `html[data-theme="light"][data-accent=…]` 双属性选择器钉住，不被深色方案覆盖；五种强调色 × 深浅两模式逐一经浏览器计算样式核验。
+- **模型连接自测（三处修）**：
+  - base_url 双拼：配置里填完整端点（如以 `/chat/completions` 结尾）会被客户端再拼一次导致 404 —— 三种线协议统一走 `normalizeBase()` 剥端点后缀；`/v1` 是合法入口结尾，不剥。
+  - Anthropic 空密钥时照发 `x-api-key:` 空头被网关拒 —— 空密钥改为省略鉴权头。
+  - 配置 apply 的 getStr 把空字符串当「未提供」跳过，base_url / fast_model / api_key 的「显式清空」静默失效 —— 新增 getStrAssign 区分「显式空」与「缺省」。
+- **密钥加密存储**：新增 `internal/harness/credentials`，Windows 走 DPAPI（CryptProtectData，纯 stdlib syscall、零 cgo），磁盘格式 `gleam-enc:v1:` + base64，非 Windows 以 build tag 回落明文；旧明文文件可读、下次写入自动迁移；文件损坏时拒绝覆盖写入，避免静默清空旧凭据。
+- **测试连接探针**：新增 `POST /api/llm/test`——按表单当前值发起一次最小请求（不必先保存），mock 配置短路，真实调用 15 秒超时；错误按 kind 分类（ok/auth/not_found/rate_limited/provider/timeout/network/config）给对应中文提示。网页模型面板加「测试连接」与两步确认「清除密钥」按钮。
+- **验证**：`internal/llm` 连接判定测试、`internal/harness/credentials` 加密往返/迁移/损坏测试、`internal/webui` 密钥保存-清除-探针端到端测试；verify.sh 与 smoke.sh（45 项）全绿；真机 DPAPI 核验 credentials.json 无明文密钥、HTTP 响应只回 `api_key_set` 布尔不回密钥本体。
+
+### 收尾时自修的两处：闸门把 POSIX 路径交给 Windows 二进制；测试把日志写进源码树
+
+- **为什么记这一节**：批次 E/F/G 做完后按流程补跑完整闸门，**第一次红在第 5 层，45 项全挂、0 通过**。查下来两处都不是本批改坏的，但都属于「闸门自己坏了」这一类——而坏掉的闸门比没有闸门更坏（它给出的是「已验证」的错觉），所以顺手修掉并记账。
+- **① `smoke.sh` 把 POSIX 形态路径交给了 Windows 二进制。** `mktemp -d` 在本机返回 `/tmp/tmp.X`，而 `serve` / `webui` 的 `--mock-script` / `--workspace` / `--data-dir` 直接拿它拼参数——Windows 程序会把 `/tmp/...` 解析成 `<当前盘>:\tmp\...`，于是在**进程启动前**就失败（`错误: mock: 读取脚本失败: open /tmp/.../script.json: The system cannot find the file specified`）。后果不成比例：整个第 5 层以 0 通过收场，看起来像「产品全坏了」，其实只是路径形态不对。
+  - 脚本里其实早就有 `slash()`（`cygpath -m`），但只用在了**嵌进 JSON / URL** 的路径上；姊妹脚本 `smoke-replay.sh` 才是对的（它把 `$TMPC / $WSC / $DATAC` 全转换了）。**改法照抄那个约定**：新增 `TMPC / WSC / DATAC / WS2C`，命名上把「给二进制与 HTTP 的（`*C`）」与「给 shell 自己用的（`$TMP / $WS / $DATA`）」分开——混用这两种是这类脚本最常见的错。
+- **顺带纠正一条已被证伪的注释。** `smoke.sh` 头部原写「mktemp 在本机返回 Windows 形态路径（`C:\…\Temp/tmp.X`）」——2026-09-23 复核发现**已经不成立**：同一个 shell 里 `mktemp -d` 稳定返回 `/tmp/tmp.X`。返回形态取决于挂载与 TMPDIR，两种都出现过，所以真正的教训不是「它返回哪种」，而是**任何路径都不能依赖 mktemp 的返回形态**。「临时目录不清理」这个决定不变，但理由改为「清理失败会把退出码污染成 1」+ 现场可翻。
+- **② 新测试把运行日志写进了源码树。** `internal/eval/usage_test.go` 的 `fullDepthRunner` 用 `config.Default()`，其中 `DataDir` 是**空串**——那是给 CLI 用的（CLI 会经 `agent.DataDir(cfg)` 补成 `~/.gleam`），**不是给测试用的**。而运行日志路径是 `filepath.Join(DataDir, "runs")`：空串拼出来是**相对路径** `runs`，相对谁？相对 `go test` 的 cwd，也就是**包目录**。于是每跑一次 `go test ./internal/eval/` 就往源码树写 16 个 `internal/eval/runs/*.jsonl`。修法一行：`cfg.DataDir = t.TempDir()`。
+- **它为什么值得记，而不是「删掉就算了」**：这类文件**不会让任何测试变红**——`go test` 全绿、`gofmt` 干净、`go vet` 干净，只有 `git status` 多出未跟踪文件，然后一直晃到有人顺手提交进仓库。它污染的是**「工作区有没有改动」这个判断本身**，而那个判断是每一次收尾核对的前提。**删掉只清一次，改掉才是不再发生。**
+- **验证**：`bash scripts/verify.sh` **六层全过、98 秒、退出码 0**（首次红在第 5 层；修后 `smoke.sh` 45/45 全过）。全量 `go test ./...` 27 个测试包全过；`gofmt -l internal/ pkg/ cmd/` 输出为空；`go vet` 干净。
+
+### 官网补本批 3 张卡（批次 E/F/G）
+
+- `website/index.html` 的「工程质量（量得准，才敢改）」组末尾新增 3 张卡：**一步崩了，不该带走整批**（批次 E）、**这批花了多少**（批次 F-1）、**查得到的任务，界面也认**（批次 F-2）。文案按官网既有口径写：面向非技术读者、讲清「为什么这是问题」，内部术语（`max_concurrency`、`ErrInternal`、`RunGoal` 之类）一律不出现。
+- **先核实「是不是真的落后」再动手，这一步救了一次误判**：起初用关键词（`四类状态` / `panic` / `用量`）去数，命中全是 0，差点得出「官网落后四批」的结论——**这个判据是错的**：官网刻意用非技术文案，那些词本来就不会出现（`panic` 被写成「某个工具自己内部出了个错」）。改成「按卡片标题逐条对照批次主题」才看清：批次 D 其实已经含在「就绪体检」那张卡的段落里（「配置、会话、记忆、任务四类各住在哪、体量多大、谁能改」），真正缺的只有本批。**用错判据会让人去做一件没必要做的大扫除，或者反过来漏掉真的缺口。**
+- 改完核对了标签平衡（`div` 151/151、`section` 7/7、`article` 61/61）与行尾（UTF-8 + LF，与 HEAD 一致；该文件不是 CRLF）。
+
+### 步骤 panic 的边界：一次工具崩溃不该带走整批（批次 E）
+
+- **来源**：Qoder Cloud Agents 的 **Batch** 篇。它把批量的验收标准压成四个词——可追踪、可恢复、可对账、可交付，其中一条是「超时、失败和重试不会污染其他任务」。这条判据正好落在 Gleam 唯一那个「批」上：`gleam eval`。
+- **缺口**：`internal/agent/executor.go` 里每个步骤跑在自己的 goroutine 里，而**全仓没有任何 recover**（`grep -rn "recover()"` 只命中 `cmd/gleam/console_windows.go:17` 的控制台初始化）。工具实现里一次 nil deref / 越界就终止整个进程。
+- **为什么在批上才是灾难**：`gleam eval --depth full` 跑 200 条用例时，第 5 条的工具 panic 会让**已经通过的用例、已经花掉的模型调用、整份报告一起消失**，重跑还要再花一次。在单条任务上它只是"崩了"。
+- **修复点只能有一个，而且不能放在调用方**：panic 发生在**子 goroutine** 里，Go 的 recover 只在**同一个 goroutine 的 defer** 里有效——`eval.Runner`、`cmdGoal`、webui handler 各自加 recover 全都接不住。所以边界加在 `runStepGuarded`（`executor.go`）一处，四条执行路径（eval / goal / webui / 定时任务）一起受益。
+- **三条设计约束**：①**转成已有的 `StepFailed`**，不新造状态——执行器早就把"步骤失败"建模成一等状态，没有理由让一次 panic 表现得比"这一步失败"更严重；②**收尾留在 guard 之外**——goroutine 里 panic 之后，defer 之外的剩余语句全部被跳过，所以 `close(state.finished[i])` / 落盘 / 计数 / 进度这四件事刻意留在外面（那里永远会执行），挪进去会让依赖这一步的下游**永远等不到放行**（症状是任务挂住，比崩掉更难查）；③**不静默吞掉**——步骤标成 `Failed`（任务不会被判 success），`ErrorKind` 单列 `types.ErrInternal`（"要改代码"与"换方案再试"是两个不同的动作，混进 `unknown` 会让一次工具缺陷看起来像一批业务失败），`Error` 带 `工具 panic:` 前缀与**截断到 7 行**的栈（带栈是因为 recover 之后 Go 不再打印任何东西，"哪一行炸的"就丢了；截断是因为它会进 `tasks/*.json` 与 `runs/*.jsonl`，完整栈几十行会把任务记录淹掉）。
+- **测试 3 条 + 变异 6 处全响**：整批跑完 / 该步失败 / 错误含 panic 值 / 归因是 internal / 栈有界 / 同批另一步不受影响；下游必须被放行（用显式 20 秒超时把"挂住"变成一条可读的失败信息，而不是让 `go test` 的 10 分钟兜底把它变成一句看不出原因的 deadline）；panic 要**进得了归因分布**。变异：去掉 recover、标成成功、归因塞 unknown、栈不截断、丢掉 panic 值、panic 路径不释放下游——六处全响，最后一条跑了 21 秒才红，正是设计中的症状。
+
+### 评测报告回答「这批花了多少」；归档任务不再被报成「不存在」（批次 F）
+
+- **P1 · 评测用量**：`internal/eval/runner.go` 的 `runCaseOnce` 一直拿得到 `GoalResult`，却把 **`Usage` 丢了**——报告只有 `PromptChars`（**成本代理**：提示词多长），没有 token（**成本本体**：实际花了多少）。这不是新增原则，是补完已有的：`eval.go` 的注释早就写着「提示词成本与通过率必须记在同一行」。
+  - **不复用 `types.TaskUsage`，另立 `eval.CaseUsage`**：前者带 `DurationMs`，而 `CaseResult` 已有 `DurationMS`——同一个报告里两个名字几乎一样、口径不同的耗时，读的人一定会拿错。转换点收敛在 `usageFromTask` 一处，将来加字段必须在那里显式决定一次，不会静默漂移。
+  - **`--repeat N` 的每一遍都算**：重跑真的调了模型、真的花了钱；只报首遍会让 `--repeat 3` 看起来与 `--repeat 1` 一样贵——那是**账错了，不是省了**。通过率仍取首遍（口径可比），用量取全部遍数。
+  - **nil 与 0 分开**：`select` 深度零模型调用，用量**缺席**（nil）而不是 0——一个 0 会被读成"计量了但没花钱"。`plan` 深度**会**调模型（规划那一次），但它的调用不经过 `RunGoal`、没有 taskID 登记，归集不到用例上，所以报告**明写**「用量：未计量（plan 深度的规划调用不经过 RunGoal）」——**这是缺口，不是 0**。补它需要给 `Agent` 开两个公开方法（登记 + 读取），为一个次级深度的成本核算扩 API 不划算，先记为限制。
+- **P2 · 归档读回**：`internal/webui/handlers.go` 的 `handleGoalGet` **只读内存**（`s.tasks` 是纯内存表，进程重启即空，还有 `maxRetainedTasks = 200` 的淘汰上限），取不到就回 `404「任务不存在」`。而终态档案就躺在 `<DataDir>/tasks/<id>.json`，`gleam replay <id>` 读的正是它。于是**同一个事实、两个入口给出相反答案**：CLI 说有、Web UI 说 404——而 404 是一个明确、自信的答复，用户会据此认为记录丢了，然后重跑，**重复花钱**。
+  - 改法是**最小的那一半**：内存 miss 时回落读单条归档；**不接管列表**（列表要不要显示历史、要不要分页是另一个决定，也会让 `pruneTasksLocked` 的语义变含糊）。这里只修"别撒谎"这一件事。
+  - **回落读盘带来一个新攻击面**：`id` 来自 URL 且会被拼进文件路径，所以先挡 `..` 与路径分隔符——挡不住就等于把数据目录下的任意 JSON 变成一个可读接口（`settings.json` 里可能有密钥）。
+  - 两处如实差异写进了 `archivedTask` 的注释免得被当成 bug：`GoalResult` 里**没有 `Mode` 字段**（模式不参与结果，只影响怎么跑），所以归档任务的 `mode` 为空；`Events` 是 SSE 流、进程退出即散，所以时间线是空的——但 `Result.Steps` 是完整的，**时间线空不等于过程丢了**。
+  - **测试设计上踩的一个坑**：路径穿越那条的诱饵最初写成 `<dataDir>/settings.yaml`，而穿越路径 `tasks/../settings` 拼出来的是 `settings.json`——解析不到，于是接口照样回 404，**那条断言是空的**（改坏守卫也不会响）。改成 `.json` 后"守卫没挡住"才会真的读到一个文件；另外测试同时**直接调 `archivedTask`**，因为路由本身可能先挡掉一部分形态，只测 HTTP 的话守卫本身可能测不到。
+- **测试 8 条 + 变异 8 处全响**（P1 五处：不拷 Usage / 只算首遍 / 不汇总进报告 / 漏抄 CachedTokens / 抄错字段；P2 三处：去掉归档回落 / 读不到也回 200 / 去掉路径穿越守卫）。
+
+### max_concurrency 是单任务的，不是全局（批次 G）
+
+- 来源的调度判据是"受容量、顺序、闲时时段约束"。Gleam 的调度器**没有任务级容量上限**（`scheduler.go` 对每个到期 job 直接 `go fire(j)`），而且 `max_concurrency` 是**单任务的**——`executor.go` 里 `sem := make(chan struct{}, conc)` 建在**每次计划执行**里，所以 N 个任务并发时实际是 **N×8**，不是 8。
+- 加全局队列是架构变更、收益未验证（与 §4.6.24 里"不做完整断点续跑"是同一类判断），所以**不改代码**；但这个名字会被误读成全局，于是按负知识的规矩记进 `docs/known-limits.md` §一（同类先例：「场景模板的 tools 是提示不是白名单」）。
+- 措辞从 61 字符压到 58 字符——那一版超了每行 ≤60 的预算 1 个字符，且把"为什么"（每次执行各建一个信号量）放进了理由列，比原稿更直接。
+
+### 明确不做：通用批量提交接口与行级隔离（附理由）
+
+- **通用批量提交接口**（JSONL 输入 / `POST /api/goals/batch`）：来源的场景是"业务系统把 10 万条任务写进 JSONL 交给平台"。Gleam 是单机单用户，用户就坐在键盘前，没有"从上游系统接收任务流"这回事；真正需要"批"的地方只有评测，而它已经有 `--cases` + 分层 + 基线。加一个通用批接口 = 为不存在的场景建一套架构（还要带上幂等、配额、对账）。
+- **行级隔离（坏一行跳过、其余继续）—— 这条方向相反。** 来源的"行"是**数据**（客服会话、合同），坏一行是脏数据，跳过是对的。Gleam 的"批"是**用例集**：受版本控制的代码资产，坏一条是**测试集自身的 bug**。静默跳过会让评测**悄悄少跑一条而通过率看起来没变**，正是 `cases.go` 注释里防的那件事（"没有任何期望的用例永远会通过……评测最容易被这样悄悄架空"）。所以 `Validate` 保持"遇第一条即 return"。**判据：问一句它说的那个「一行」，在我的语境里是数据还是代码？** 是数据 → 跳过对；是代码/配置 → 必须整批拒绝，否则就是把 bug 静默化。
+- 其余：闲时调度 / 错峰折扣（单机没有在线业务要避让、也没有计费对象）、`output.jsonl` / `error.jsonl` 分文件（`--json` 已给出完整的机器可读报告，再分两个文件是同一份数据的第二种形状，会立刻产生"两处各写一遍然后漂移"的问题）、单批 10000 项上限（用例集是人工维护的几十条）、自动断点续跑（`pending.go` 已记为"收益未验证"的刻意不做）、`identity_id` / 多租户 / Template 引用（上一份清单已判不做）。
 
 ### 四类状态：各自住在哪、活多久、谁能改（批次 D）
 

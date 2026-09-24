@@ -104,6 +104,26 @@ func TestRunGoal_ReferencesAndRoleReachPlanner(t *testing.T) {
 	}
 }
 
+// TestPlanProgress_NoRawJSONLeak 规划流只报进度、不转发内容（2026-09-23 QA 报告 M5）：
+// 规划响应本身就是 JSON，逐 token 转发会把 {"steps":... 碎片打进 CLI/WebUI 的进度行。
+func TestPlanProgress_NoRawJSONLeak(t *testing.T) {
+	f := newFixture(t, []llm.Scripted{
+		planScript(`{"steps":[{"id":"s1","description":"回复","tool":"reply","args":{"text":"你好"}}]}`),
+		reflectScript(90, "done", "ok"),
+	})
+	f.a.RunGoal(context.Background(), types.GoalRequest{Goal: "打个招呼", Mode: "auto"})
+	f.notify.mu.Lock()
+	defer f.notify.mu.Unlock()
+	if len(f.notify.progress) == 0 {
+		t.Fatal("没有任何进度事件")
+	}
+	for _, ev := range f.notify.progress {
+		if ev.Phase == "plan" && (strings.Contains(ev.Message, `"steps"`) || strings.Contains(ev.Message, `{"`)) {
+			t.Errorf("plan 进度泄漏原始 JSON：%q", ev.Message)
+		}
+	}
+}
+
 func TestValidateGoalRequest(t *testing.T) {
 	if err := ValidateGoalRequest(types.GoalRequest{}); err != nil {
 		t.Fatalf("空值应使用默认配置: %v", err)

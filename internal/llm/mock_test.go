@@ -97,3 +97,38 @@ func TestMockClient_ExtractGoal(t *testing.T) {
 		t.Errorf("默认计划应包含目标: %q", out)
 	}
 }
+
+// L1（2026-09-23 QA）：规划器实际把目标原样放在最后一条 user 消息里，
+// mock 必须回显真实目标而不是「未指定目标」；对话模式只回显最后一条用户消息。
+func TestMockClient_EchoesRealGoal(t *testing.T) {
+	m := NewMock()
+	out, _ := m.Chat(context.Background(), ChatRequest{
+		System:   "[GLEAM-TASK:PLAN] 你是规划器……",
+		Messages: []Message{{Role: RoleUser, Content: "请把季度报告排版成公众号文章"}},
+	})
+	if !strings.Contains(out, "请把季度报告排版成公众号文章") {
+		t.Errorf("计划回显应含真实目标: %q", out)
+	}
+	if strings.Contains(out, "未指定目标") {
+		t.Errorf("不应再出现「未指定目标」: %q", out)
+	}
+	// 带引用前缀时取标记后首行
+	out2, _ := m.Chat(context.Background(), ChatRequest{
+		System:   "[GLEAM-TASK:PLAN]",
+		Messages: []Message{{Role: RoleUser, Content: "[file] 计划.md: @x\n用户目标：整理引用\n后续指令不要带上"}},
+	})
+	if !strings.Contains(out2, "整理引用") || strings.Contains(out2, "后续指令") {
+		t.Errorf("标记后首行提取错误: %q", out2)
+	}
+	chat, _ := m.Chat(context.Background(), ChatRequest{
+		System: "[GLEAM-TASK:CHAT]",
+		Messages: []Message{
+			{Role: RoleUser, Content: "第一轮老问题"},
+			{Role: RoleAssistant, Content: "第一轮回答"},
+			{Role: RoleUser, Content: "只回显我这一句"},
+		},
+	})
+	if chat != "（Mock 对话）只回显我这一句" {
+		t.Errorf("chat_mode 应只回显最后一条用户消息: %q", chat)
+	}
+}

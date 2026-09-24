@@ -1,6 +1,6 @@
 // Package credentials 管理 Gleam 的本地敏感凭证：LLM API Key 与云端登录会话。
-// 所有数据仅存于本地独立文件（dataDir/credentials.json，权限 0600），
-// 不随 settings.yaml 序列化，绝不上传云端。
+// 所有数据仅存于本地独立文件（dataDir/credentials.json，权限 0600；Windows 上内容
+// 经 DPAPI 当前用户域加密），不随 settings.yaml 序列化，绝不上传云端。
 package credentials
 
 import (
@@ -68,6 +68,10 @@ func (s *Store) read() (*file, error) {
 		}
 		return nil, err
 	}
+	data, err = decrypt(data)
+	if err != nil {
+		return nil, err
+	}
 	var f file
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, err
@@ -75,9 +79,13 @@ func (s *Store) read() (*file, error) {
 	return &f, nil
 }
 
-// write 原子落盘并收紧权限（0600）。
+// write 原子落盘并收紧权限（0600）；Windows 上内容经 DPAPI 加密后写出。
 func (s *Store) write(f *file) error {
 	data, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	data, err = encrypt(data)
 	if err != nil {
 		return err
 	}

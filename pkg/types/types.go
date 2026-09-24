@@ -95,6 +95,13 @@ const (
 	ErrTimeout    ErrorKind = "timeout"    // 超时/限流：退避重试
 	ErrUpstream   ErrorKind = "upstream"   // 上游 5xx：有限重试
 	ErrUnknown    ErrorKind = "unknown"    // 归不了类的，如实记 unknown，不硬塞
+	// ErrInternal 工具自身缺陷（panic / 内部不一致）：重试无用，要修代码。
+	//
+	// 单独一类而不是塞进 unknown：归因分布的判据是「能不能回答该先修哪层」，
+	// 而「要改代码」与「换方案再试」是两个完全不同的动作——混在一起看，
+	// 一次工具缺陷会显得像一批业务失败。定类**不走 ClassifyError**：
+	// panic 是结构性事实（执行器自己 recover 到的），不需要从文本猜。
+	ErrInternal ErrorKind = "internal"
 )
 
 // ClassifyError 按错误文本归类。执行器里结构已知的错误（审批拒绝、超时、

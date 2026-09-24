@@ -5,13 +5,42 @@ package llm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 const maxBodyBytes = 16 << 20 // 16MB 上限，防异常响应撑爆内存
+
+// StatusCode 从客户端调用错误中提取 HTTP 状态码；非状态类错误（传输层）返回 0。
+// 供上层做连接诊断分类（401 鉴权 / 404 路径或模型 / 429 限流 / 5xx 厂商）。
+func StatusCode(err error) int {
+	var se *statusError
+	if errors.As(err, &se) {
+		return se.code
+	}
+	return 0
+}
+
+// normalizeBase 归一化 base_url：去尾斜杠，并剥掉用户从文档整段复制带来的端点后缀。
+// 各客户端构造时调用，之后拼端点就不会出现 /chat/completions/chat/completions 这类双拼 404。
+func normalizeBase(base string, suffixes ...string) string {
+	base = strings.TrimRight(base, "/")
+	changed := true
+	for changed {
+		changed = false
+		for _, s := range suffixes {
+			if strings.HasSuffix(base, s) && len(base) > len(s) {
+				base = strings.TrimSuffix(base, s)
+				changed = true
+			}
+		}
+	}
+	return base
+}
 
 func postJSONOnce(ctx context.Context, hc *http.Client, url string, headers map[string]string, body []byte) ([]byte, error) {
 	// 出网留痕：只记主机名与请求字节数（见 egress.go 的边界说明）。

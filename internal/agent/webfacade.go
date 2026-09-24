@@ -124,6 +124,14 @@ func (a *Agent) MemorySearch(query string, k int) []types.MemoryHitView {
 	return out
 }
 
+// MemoryDelete 软删除一条长期记忆（检索立即跳过，条目保留可改判）。
+func (a *Agent) MemoryDelete(id string) bool {
+	if a.Mem == nil || a.Mem.Long == nil {
+		return false
+	}
+	return a.Mem.Long.SoftDelete(id)
+}
+
 // MemorySave 写入长期记忆。
 func (a *Agent) MemorySave(content string, tags []string) (string, error) {
 	if a.Mem == nil {
@@ -203,6 +211,17 @@ func (a *Agent) ScheduleSetNotify(name, policy string) (types.ScheduleJobView, e
 		return types.ScheduleJobView{}, fmt.Errorf("调度器未启用")
 	}
 	if err := a.Sched.SetNotify(name, policy); err != nil {
+		return types.ScheduleJobView{}, err
+	}
+	return a.scheduleView(name), nil
+}
+
+// ScheduleSetEnabled 启停已有定时任务（暂停/恢复）。
+func (a *Agent) ScheduleSetEnabled(name string, enabled bool) (types.ScheduleJobView, error) {
+	if a.Sched == nil {
+		return types.ScheduleJobView{}, fmt.Errorf("调度器未启用")
+	}
+	if err := a.Sched.SetEnabled(name, enabled); err != nil {
 		return types.ScheduleJobView{}, err
 	}
 	return a.scheduleView(name), nil
@@ -325,10 +344,27 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		}
 		return 0, false
 	}
-	posInt := func(section, key string, v any, min int) {
-		if i, ok := asInt(v); ok && i >= min {
-			sub(section)[key] = i
+	// 越界字段收集器：posInt 曾因只有下限，done_threshold=150 / max_replans=999
+	// 被"保存成功"静默接受并写进 overlay。现在越界整次拒绝、明确报错。
+	var outOfRange []string
+	posInt := func(section, key string, v any, min, max int) {
+		i, ok := asInt(v)
+		if !ok {
+			return // 非数字维持旧语义：忽略该字段
 		}
+		if i < min || i > max {
+			outOfRange = append(outOfRange, fmt.Sprintf("%s=%d（允许 %d–%d）", key, i, min, max))
+			return
+		}
+		sub(section)[key] = i
+	}
+	// zeroOr：0 表示"关闭/不限"，开启时必须在 [min,max] 内才有意义
+	zeroOr := func(section, key string, v any, min, max int) {
+		if i, ok := asInt(v); ok && i == 0 {
+			sub(section)[key] = 0
+			return
+		}
+		posInt(section, key, v, min, max)
 	}
 
 	if pm, ok := patch["persona"].(map[string]any); ok {
@@ -344,16 +380,28 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 			sub("safety")["mode"] = v
 		}
 		if v, ok := sm["approval_timeout_seconds"]; ok {
-			posInt("safety", "approval_timeout_seconds", v, 5)
+			posInt("safety", "approval_timeout_seconds", v, 5, 3600)
 		}
 		if b, ok := sm["ai_review"].(bool); ok {
 			sub("safety")["ai_review"] = b
 		}
 	}
 	if am, ok := patch["agent"].(map[string]any); ok {
-		for _, k := range []string{"max_replans", "max_steps", "step_timeout_seconds", "step_retries", "done_threshold", "max_concurrency"} {
-			if v, ok := am[k]; ok {
-				posInt("agent", k, v, 0)
+		// 上限是"配置还能叫配置"的边界：done_threshold>100 永不达标、max_replans 数百
+		// 等于烧钱开关。max_steps=0 合法（回退 DefaultMaxSteps，见 config.go）。
+		for _, f := range []struct {
+			key      string
+			min, max int
+		}{
+			{"max_replans", 0, 20},
+			{"max_steps", 0, 512},
+			{"step_timeout_seconds", 0, 3600},
+			{"step_retries", 0, 10},
+			{"done_threshold", 0, 100},
+			{"max_concurrency", 0, 16},
+		} {
+			if v, ok := am[f.key]; ok {
+				posInt("agent", f.key, v, f.min, f.max)
 			}
 		}
 		if b, ok := am["context_compress"].(bool); ok {
@@ -369,31 +417,25 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 			sub("agent")["dedupe_calls"] = b
 		}
 		if i, ok := am["max_llm_calls_per_task"]; ok {
-			posInt("agent", "max_llm_calls_per_task", i, 0)
+			zeroOr("agent", "max_llm_calls_per_task", i, 1, 10000)
 		}
 		if i, ok := am["max_tokens_per_task"]; ok {
-			posInt("agent", "max_tokens_per_task", i, 0)
+			zeroOr("agent", "max_tokens_per_task", i, 1000, 100000000)
 		}
 		if i, ok := am["max_task_duration_seconds"]; ok {
-			posInt("agent", "max_task_duration_seconds", i, 0)
+			zeroOr("agent", "max_task_duration_seconds", i, 10, 86400)
 		}
 		// 防打转阈值：0 关闭，开启时至少 2 轮才有意义
 		if i, ok := am["stuck_threshold"]; ok {
-			if v, ok2 := asInt(i); ok2 && (v == 0 || v >= 2) {
-				sub("agent")["stuck_threshold"] = v
-			}
+			zeroOr("agent", "stuck_threshold", i, 2, 100)
 		}
 		// 工具输出预算：0 不限，开启时给个下限避免设成无意义的极小值
 		if i, ok := am["max_output_runes"]; ok {
-			if v, ok2 := asInt(i); ok2 && (v == 0 || v >= 500) {
-				sub("agent")["max_output_runes"] = v
-			}
+			zeroOr("agent", "max_output_runes", i, 500, 1000000)
 		}
 		// 能力菜单阈值：0 不限（始终全量），开启时至少要够放下常用工具
 		if i, ok := am["max_tool_schemas"]; ok {
-			if v, ok2 := asInt(i); ok2 && (v == 0 || v >= 5) {
-				sub("agent")["max_tool_schemas"] = v
-			}
+			zeroOr("agent", "max_tool_schemas", i, 5, 1000)
 		}
 		// 对话模式自检：布尔开关，无需范围校验
 		if b, ok := am["chat_acceptance"].(bool); ok {
@@ -402,13 +444,13 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 	}
 	if mm, ok := patch["memory"].(map[string]any); ok {
 		if v, ok := mm["short_term_capacity"]; ok {
-			posInt("memory", "short_term_capacity", v, 2)
+			posInt("memory", "short_term_capacity", v, 2, 1000)
 		}
 		if v, ok := mm["vector_dim"]; ok {
-			posInt("memory", "vector_dim", v, 32)
+			posInt("memory", "vector_dim", v, 32, 8192)
 		}
 		if v, ok := mm["max_items"]; ok {
-			posInt("memory", "max_items", v, 10)
+			posInt("memory", "max_items", v, 10, 100000)
 		}
 	}
 	if lm, ok := patch["llm"].(map[string]any); ok {
@@ -454,23 +496,33 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 			}
 			sub("llm")["tiers"] = tiers
 		}
-		if v, ok := lm["api_key"].(string); ok && strings.TrimSpace(v) != "" {
+		// 密钥两档语义：api_key 非空=更新；clear_api_key=true=显式清除。
+		// 空串不算清除（前端留空表示"不修改"），必须走显式标志。
+		if cv, ok := lm["clear_api_key"].(bool); ok && cv {
+			sub("llm")["api_key"] = ""
+			sub("llm")["clear_api_key"] = true
+		} else if v, ok := lm["api_key"].(string); ok && strings.TrimSpace(v) != "" {
 			sub("llm")["api_key"] = strings.TrimSpace(v)
 		}
 		if v, ok := lm["temperature"].(float64); ok && v > 0 && v < 2 {
 			sub("llm")["temperature"] = v
 		}
 		if v, ok := lm["max_tokens"]; ok {
-			posInt("llm", "max_tokens", v, 64)
+			posInt("llm", "max_tokens", v, 64, 1000000)
 		}
 		if v, ok := lm["timeout_seconds"]; ok {
-			posInt("llm", "timeout_seconds", v, 3)
+			posInt("llm", "timeout_seconds", v, 3, 600)
 		}
 	}
 	if v, ok := patch["scheduler"].(map[string]any); ok {
 		if b, ok := v["enabled"].(bool); ok {
 			sub("scheduler")["enabled"] = b
 		}
+	}
+	if len(outOfRange) > 0 {
+		// 整次拒绝：静默丢掉越界字段会让用户以为"保存了但没生效"，
+		// 静默接受更糟——非法值直接进 overlay 影响每次重启。
+		return a.SettingsView(), fmt.Errorf("参数越界：%s", strings.Join(outOfRange, "；"))
 	}
 	if len(sanitized) == 0 {
 		return a.SettingsView(), fmt.Errorf("没有可应用的有效设置")
@@ -507,10 +559,14 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		}
 	}
 
-	// 持久化密钥到本地独立凭证文件（0600），重启免填；与 settings.yaml 分离
+	// 持久化密钥到本地独立凭证文件（0600 + DPAPI），重启免填；与 settings.yaml 分离
 	if a.Creds != nil {
 		if lm, ok := sanitized["llm"].(map[string]any); ok {
-			if k, ok := lm["api_key"].(string); ok && k != "" {
+			if clear, _ := lm["clear_api_key"].(bool); clear {
+				if err := a.Creds.SetLLMAPIKey(""); err != nil {
+					return a.SettingsView(), fmt.Errorf("密钥已清除但本地凭证文件更新失败: %w", err)
+				}
+			} else if k, ok := lm["api_key"].(string); ok && k != "" {
 				if err := a.Creds.SetLLMAPIKey(k); err != nil {
 					return a.SettingsView(), fmt.Errorf("密钥已生效但保存到本地失败: %w", err)
 				}
@@ -523,6 +579,136 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		return a.SettingsView(), fmt.Errorf("设置已生效但保存失败: %w", err)
 	}
 	return a.SettingsView(), nil
+}
+
+// llmFormTarget 把表单覆盖值与当前生效配置解析成完整接入目标（探测与拉模型列表共用）。
+// override 可带 provider_id/plan/base_url/model/protocol/api_key；注意 Cfg 里的 base_url
+// 已含预设回落结果，所以"显式空串"与"缺省"必须区分：缺省取生效值，显式空取显式空。
+func (a *Agent) llmFormTarget(override map[string]any) (base, model, protocol, key string) {
+	str := func(k string) string {
+		if v, ok := override[k].(string); ok {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	pid := firstNonEmpty(str("provider_id"), a.Cfg.LLM.ProviderID)
+	plan := firstNonEmpty(str("plan"), a.Cfg.LLM.Plan)
+	base = str("base_url")
+	if _, ok := override["base_url"].(string); !ok {
+		base = a.Cfg.LLM.BaseURL
+	}
+	model = firstNonEmpty(str("model"), a.Cfg.LLM.Model)
+	protocol = firstNonEmpty(str("protocol"), a.Cfg.LLM.Protocol)
+	key = firstNonEmpty(str("api_key"), a.Cfg.LLM.APIKey)
+	base, model, resolved := llm.ResolvePreset(pid, plan, base, model)
+	if resolved != "" {
+		protocol = resolved
+	}
+	if !llm.ValidProtocol(protocol) {
+		protocol = llm.ProtocolOpenAIChat
+	}
+	return
+}
+
+// probeHasExplicitTarget 表单里带了非空 base_url：用户正在预验证一套尚未生效的接入
+// （典型：还停在 mock 就填了真实网关想先测一把）。此时 mock 短路必须让位，
+// 否则"测试连接/拉取模型"在最需要它的时刻恰好失灵（2026-09-23 QA 报告 M4）。
+func probeHasExplicitTarget(override map[string]any) bool {
+	v, ok := override["base_url"].(string)
+	return ok && strings.TrimSpace(v) != ""
+}
+
+// TestLLMConnection 连通性探测：用当前生效配置（或表单覆盖值）发一次最小请求，
+// 把失败分类成人能看懂的结论。设置页"测试连接"用——配错不必等任务失败才暴露。
+// override 可带 protocol/provider_id/plan/base_url/model/api_key；api_key 留空表示用已保存的。
+func (a *Agent) TestLLMConnection(override map[string]any) map[string]any {
+	if a.Cfg.LLM.Provider == "mock" && !probeHasExplicitTarget(override) {
+		return map[string]any{"ok": true, "kind": "mock", "message": "当前为离线 Mock 模型，未发起真实网络调用"}
+	}
+	base, model, protocol, key := a.llmFormTarget(override)
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(model) == "" {
+		return map[string]any{"ok": false, "kind": "config", "message": "base_url 或模型名为空：选择厂商预设或直接填写"}
+	}
+	client := llm.New(protocol, base, key, model, 0.1, 16, 15)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	start := time.Now()
+	reply, err := client.Chat(ctx, llm.ChatRequest{
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "ping，请只回复 ok"}},
+	})
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return map[string]any{
+			"ok": false, "kind": classifyLLMError(ctx, err),
+			"http_status": llm.StatusCode(err), "latency_ms": latency,
+			"message": err.Error(),
+		}
+	}
+	preview := reply
+	if len([]rune(preview)) > 40 {
+		preview = string([]rune(preview)[:40]) + "…"
+	}
+	return map[string]any{
+		"ok": true, "kind": "ok", "latency_ms": latency,
+		"model": model, "base_url": base, "protocol": protocol,
+		"message": "连接成功", "reply_preview": preview,
+	}
+}
+
+// ListLLMModels 在线拉取厂商可用模型列表（表单覆盖值，不必先保存）。
+// 尽力而为：不少 Coding/Agent 套餐网关不实现 /models，失败按连接诊断同一套 kind 分类，
+// 前端拉不到就回到手输。
+func (a *Agent) ListLLMModels(override map[string]any) map[string]any {
+	if a.Cfg.LLM.Provider == "mock" && !probeHasExplicitTarget(override) {
+		return map[string]any{"ok": true, "kind": "mock", "models": []llm.ModelInfo{}, "message": "离线 Mock 模型没有在线模型列表"}
+	}
+	base, _, protocol, key := a.llmFormTarget(override)
+	if strings.TrimSpace(base) == "" {
+		return map[string]any{"ok": false, "kind": "config", "message": "base_url 为空：选择厂商预设或直接填写 API 地址"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	models, err := llm.ListModels(ctx, protocol, base, key, 15*time.Second)
+	if err != nil {
+		return map[string]any{
+			"ok": false, "kind": classifyLLMError(ctx, err),
+			"http_status": llm.StatusCode(err), "message": err.Error(),
+		}
+	}
+	return map[string]any{
+		"ok": true, "kind": "ok", "count": len(models), "models": models,
+		"base_url": base, "protocol": protocol, "message": "模型列表获取成功",
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// classifyLLMError 把调用错误归到诊断类别（前端按类别给中文提示与修复建议）。
+func classifyLLMError(ctx context.Context, err error) string {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "timeout"
+	}
+	switch code := llm.StatusCode(err); {
+	case code == 401 || code == 403:
+		return "auth"
+	case code == 404:
+		return "not_found"
+	case code == 429:
+		return "rate_limited"
+	case code >= 500:
+		return "provider"
+	case code > 0:
+		return "api"
+	default:
+		return "network"
+	}
 }
 
 // ContextView 上下文状态视图（含 token 估算，供设置页展示压缩收益）。

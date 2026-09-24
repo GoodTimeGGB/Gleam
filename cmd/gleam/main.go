@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -104,6 +105,10 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
+		// --help 是正常请求：flag 包已打印用法，这里安静退 0，别报「错误: flag: help requested」
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, "错误:", err)
 		os.Exit(1)
 	}
@@ -509,7 +514,9 @@ func cmdGoal(args []string) error {
 	}
 	rest := append(fs.Args(), positionals...)
 	if len(rest) == 0 {
-		return fmt.Errorf("用法: gleam goal \"目标\" [--mode auto]")
+		fs.PrintDefaults()
+		return fmt.Errorf(`用法: gleam goal "目标" [--mode auto|plan_first|interactive]
+      [--workspace DIR] [--data-dir DIR] [--config FILE] [--mock-llm] [--mock-script FILE]`)
 	}
 	goal := strings.Join(rest, " ")
 

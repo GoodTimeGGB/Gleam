@@ -101,6 +101,10 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l2.2 2.2L15.5 9"/><path d="M12 3l7.5 3.2v5.4c0 4.4-3 8.1-7.5 9.4-4.5-1.3-7.5-5-7.5-9.4V6.2z"/></svg>
               <span>就绪体检</span>
             </button>
+            <button class="nav-item" data-view="settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.99 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.99a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.23a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.62.68 1.03 1.31 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03z"/></svg>
+              <span>设置</span>
+            </button>
           </div>
         </div>
       </div>
@@ -121,7 +125,7 @@
         <span class="me-avatar" id="me-avatar" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
         </span>
-        <span class="me-meta"><strong id="me-name">我的</strong><small id="me-sub">本地模式 · 未登录</small></span>
+        <span class="me-meta"><strong id="me-name">我的</strong><small id="me-sub">本地模式 · 功能完整</small></span>
       </button>
     </aside>
 
@@ -197,7 +201,7 @@
           <div class="composer-refs" id="composer-refs" hidden></div>
           <textarea class="composer-input" id="goal-input" rows="1"
             placeholder="描述任务，输入 @ 引用文件/目标/插件/记忆"
-            aria-describedby="goal-hint"></textarea>
+            aria-label="任务输入" aria-describedby="goal-hint"></textarea>
           <div class="composer-bar">
             <div class="composer-left">
               <div class="plus-wrap">
@@ -227,11 +231,14 @@
                   </button>
                 </div>
               </div>
+              <span class="seg-label" aria-hidden="true">模式</span>
               <div class="segmented task-seg" role="group" aria-label="任务模式" id="task-seg">
                 <button aria-pressed="false" data-task="chat" title="直聊问答，不经规划执行">对话</button>
                 <button aria-pressed="true" data-task="work" title="规划 → 执行 → 反思全流程">工作</button>
                 <button aria-pressed="false" data-task="code" title="编程准则：最小 diff + 验证步骤">编程</button>
               </div>
+              <span class="seg-divider" aria-hidden="true"></span>
+              <span class="seg-label" aria-hidden="true">权限</span>
               <div class="segmented perm-seg" role="group" aria-label="权限模式" id="perm-seg">
                 <button aria-pressed="false" data-perm="plan_first" title="执行前先展示完整计划，征求你的批准">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V5l-8-3z"/></svg>
@@ -373,10 +380,10 @@
           <h2 class="section-title">自定义安装 MCP（stdio）</h2>
           <div class="settings-grid">
             <div class="field"><label class="field-label" for="mc-name">名称（可选，默认取命令名）</label><input class="input" id="mc-name" placeholder="my-server"></div>
-            <div class="field"><label class="field-label" for="mc-trust">信任级别</label>
-              <div class="segmented" id="mc-trust" role="group" aria-label="信任级别">
-                <button data-val="readonly" aria-pressed="false">readonly</button>
-                <button data-val="user_approved" aria-pressed="true">user_approved</button>
+            <div class="field"><span class="field-label" id="mc-trust-label">信任级别</span>
+              <div class="segmented" id="mc-trust" role="group" aria-labelledby="mc-trust-label">
+                <button data-val="readonly" aria-pressed="false" title="工具只读，自动放行">只读放行</button>
+                <button data-val="user_approved" aria-pressed="true" title="每次调用需要你批准">需我批准</button>
               </div>
             </div>
             <div class="field"><label class="field-label" for="mc-command">命令</label><input class="input" id="mc-command" placeholder="npx"></div>
@@ -432,14 +439,14 @@
             <div class="field">
               <label class="field-label">执行模式</label>
               <div class="segmented" role="group" aria-label="执行模式" id="set-safety-mode">
-                <button aria-pressed="false" data-val="auto" title="仅高风险操作需要批准">auto</button>
-                <button aria-pressed="false" data-val="plan_first" title="执行前确认完整计划">plan_first</button>
-                <button aria-pressed="false" data-val="interactive" title="每个写操作逐步确认">interactive</button>
+                <button aria-pressed="false" data-val="auto" title="仅高风险操作需要批准">完全访问</button>
+                <button aria-pressed="false" data-val="plan_first" title="执行前确认完整计划">请我批准</button>
+                <button aria-pressed="false" data-val="interactive" title="每个写操作逐步确认">每步批准</button>
               </div>
             </div>
             <div class="field">
               <label class="field-label" for="set-approval-timeout">审批超时（秒）</label>
-              <input class="input" id="set-approval-timeout" type="number" min="5">
+              <input class="input" id="set-approval-timeout" type="number" min="5" max="3600">
               <span class="field-hint">超时未答复将自动拒绝</span>
             </div>
             <label class="switch-row">
@@ -467,12 +474,12 @@
           <div class="card card--glass">
             <h2 class="section-title">引擎</h2>
             <div class="settings-grid">
-              <div class="field"><label class="field-label" for="set-max-replans">重规划上限</label><input class="input" id="set-max-replans" type="number" min="0"></div>
-              <div class="field"><label class="field-label" for="set-max-steps">计划步骤上限</label><input class="input" id="set-max-steps" type="number" min="1"></div>
-              <div class="field"><label class="field-label" for="set-step-timeout">单步超时（秒）</label><input class="input" id="set-step-timeout" type="number" min="3"></div>
-              <div class="field"><label class="field-label" for="set-step-retries">超时重试次数</label><input class="input" id="set-step-retries" type="number" min="0"></div>
+              <div class="field"><label class="field-label" for="set-max-replans">重规划上限</label><input class="input" id="set-max-replans" type="number" min="0" max="20"></div>
+              <div class="field"><label class="field-label" for="set-max-steps">计划步骤上限</label><input class="input" id="set-max-steps" type="number" min="1" max="512"></div>
+              <div class="field"><label class="field-label" for="set-step-timeout">单步超时（秒）</label><input class="input" id="set-step-timeout" type="number" min="3" max="3600"></div>
+              <div class="field"><label class="field-label" for="set-step-retries">超时重试次数</label><input class="input" id="set-step-retries" type="number" min="0" max="10"></div>
               <div class="field"><label class="field-label" for="set-done-threshold">完成度达标线</label><input class="input" id="set-done-threshold" type="number" min="1" max="100"></div>
-              <div class="field"><label class="field-label" for="set-max-concurrency">步骤并发上限</label><input class="input" id="set-max-concurrency" type="number" min="1"></div>
+              <div class="field"><label class="field-label" for="set-max-concurrency">步骤并发上限</label><input class="input" id="set-max-concurrency" type="number" min="1" max="16"></div>
             </div>
             <label class="switch-row">
               <input type="checkbox" class="switch" id="set-context-compress">
@@ -492,9 +499,9 @@
             <h2 class="section-title">任务预算熔断</h2>
             <p class="field-hint" style="margin-top: calc(-1 * var(--space-1));">单个任务超过预算会立即停下并征求你的确认；填 0 表示不限制该项。</p>
             <div class="settings-grid">
-              <div class="field"><label class="field-label" for="set-max-llm-calls">模型调用次数上限</label><input class="input" id="set-max-llm-calls" type="number" min="0" placeholder="0 = 不限"></div>
-              <div class="field"><label class="field-label" for="set-max-tokens-task">token 上限</label><input class="input" id="set-max-tokens-task" type="number" min="0" placeholder="0 = 不限"></div>
-              <div class="field"><label class="field-label" for="set-max-duration">任务时长上限（秒）</label><input class="input" id="set-max-duration" type="number" min="0" placeholder="0 = 不限"></div>
+              <div class="field"><label class="field-label" for="set-max-llm-calls">模型调用次数上限</label><input class="input" id="set-max-llm-calls" type="number" min="0" max="10000" placeholder="0 = 不限"></div>
+              <div class="field"><label class="field-label" for="set-max-tokens-task">token 上限</label><input class="input" id="set-max-tokens-task" type="number" min="0" max="100000000" placeholder="0 = 不限"></div>
+              <div class="field"><label class="field-label" for="set-max-duration">任务时长上限（秒）</label><input class="input" id="set-max-duration" type="number" min="0" max="86400" placeholder="0 = 不限"></div>
             </div>
           </div>
 
@@ -502,9 +509,9 @@
             <h2 class="section-title">循环与上下文治理</h2>
             <p class="field-hint" style="margin-top: calc(-1 * var(--space-1));">防止"跑飞"：卡住了要能识别，大输出要先处理再往下传。</p>
             <div class="settings-grid">
-              <div class="field"><label class="field-label" for="set-stuck-threshold">打转判定时长（轮）</label><input class="input" id="set-stuck-threshold" type="number" min="0" placeholder="0 = 不检测"><span class="field-hint">同一动作重复这么多轮就停下</span></div>
-              <div class="field"><label class="field-label" for="set-max-output-runes">工具输出预算（字）</label><input class="input" id="set-max-output-runes" type="number" min="0" placeholder="0 = 不限"><span class="field-hint">注入下游前按「头+尾」截断</span></div>
-              <div class="field"><label class="field-label" for="set-max-tool-schemas">单次规划工具上限</label><input class="input" id="set-max-tool-schemas" type="number" min="0" placeholder="0 = 全量注入"><span class="field-hint">超出改为能力菜单 + 按需筛选</span></div>
+              <div class="field"><label class="field-label" for="set-stuck-threshold">打转判定时长（轮）</label><input class="input" id="set-stuck-threshold" type="number" min="0" max="100" placeholder="0 = 不检测"><span class="field-hint">同一动作重复这么多轮就停下</span></div>
+              <div class="field"><label class="field-label" for="set-max-output-runes">工具输出预算（字）</label><input class="input" id="set-max-output-runes" type="number" min="0" max="1000000" placeholder="0 = 不限"><span class="field-hint">注入下游前按「头+尾」截断</span></div>
+              <div class="field"><label class="field-label" for="set-max-tool-schemas">单次规划工具上限</label><input class="input" id="set-max-tool-schemas" type="number" min="0" max="1000" placeholder="0 = 全量注入"><span class="field-hint">超出改为能力菜单 + 按需筛选</span></div>
             </div>
             <label class="switch-row">
               <input type="checkbox" class="switch" id="set-chat-acceptance">
@@ -522,8 +529,8 @@
           <div class="card card--glass">
             <h2 class="section-title">记忆与上下文</h2>
             <div class="settings-grid">
-              <div class="field"><label class="field-label" for="set-short-cap">短期窗口（轮）</label><input class="input" id="set-short-cap" type="number" min="2"><span class="field-hint">重启后生效</span></div>
-              <div class="field"><label class="field-label" for="set-max-items">长期记忆上限</label><input class="input" id="set-max-items" type="number" min="10"></div>
+              <div class="field"><label class="field-label" for="set-short-cap">短期窗口（轮）</label><input class="input" id="set-short-cap" type="number" min="2" max="1000"><span class="field-hint">重启后生效</span></div>
+              <div class="field"><label class="field-label" for="set-max-items">长期记忆上限</label><input class="input" id="set-max-items" type="number" min="10" max="100000"></div>
             </div>
             <div id="context-panel" class="context-panel">
               <div class="stat" id="context-stats">加载中…</div>
@@ -553,13 +560,23 @@
                   <option value="openai_responses">OpenAI Responses</option>
                   <option value="anthropic">Anthropic Messages</option>
                 </select></div>
-              <div class="field"><label class="field-label" for="set-max-tokens">最大 tokens</label><input class="input" id="set-max-tokens" type="number" min="64"></div>
+              <div class="field"><label class="field-label" for="set-max-tokens">最大 tokens</label><input class="input" id="set-max-tokens" type="number" min="64" max="1000000"></div>
               <div class="field" style="grid-column: span 2;"><label class="field-label" for="set-base-url">API 地址（留空回落厂商官方入口）</label><input class="input" id="set-base-url"></div>
               <div class="field"><label class="field-label" for="set-temperature">温度</label><input class="input" id="set-temperature" type="number" step="0.1" min="0.1" max="1.9"></div>
-              <div class="field"><label class="field-label" for="set-llm-timeout">请求超时（秒）</label><input class="input" id="set-llm-timeout" type="number" min="3"></div>
-              <div class="field"><label class="field-label" for="set-model">模型</label><input class="input" id="set-model" placeholder="glm-5.3-flash"></div>
+              <div class="field"><label class="field-label" for="set-llm-timeout">请求超时（秒）</label><input class="input" id="set-llm-timeout" type="number" min="3" max="600"></div>
+              <div class="field"><label class="field-label" for="set-model">模型</label><input class="input" id="set-model" list="model-list" placeholder="glm-5.3-flash" autocomplete="off"></div>
               <div class="field"><label class="field-label" for="set-api-key">API Key</label><input class="input" id="set-api-key" type="password" autocomplete="off" placeholder="已设置，留空表示不修改"></div>
-              <div class="field" style="grid-column: 1 / -1;"><label class="field-label" for="set-fast-model">辅助模型（可选，用于上下文压缩 / GEO 分析 / 技能优化等高频辅助调用）</label><input class="input" id="set-fast-model" placeholder="留空表示都用上面的主模型，例如填一个更便宜更快的模型"></div>
+              <div class="field" style="grid-column: 1 / -1;">
+                <div class="llm-actions">
+                  <button class="btn btn-secondary btn-sm" id="set-test-llm">测试连接</button>
+                  <button class="btn btn-secondary btn-sm" id="set-fetch-models">拉取模型</button>
+                  <button class="btn btn-secondary btn-sm" id="set-clear-key" hidden>清除密钥</button>
+                  <datalist id="model-list"></datalist>
+                  <span class="llm-test-result" id="llm-test-result" hidden></span>
+                </div>
+                <span class="field-hint">测试连接按表单当前值发起一次最小请求（不必先保存）；密钥保存在本地加密存储，不会回传页面。</span>
+              </div>
+              <div class="field" style="grid-column: 1 / -1;"><label class="field-label" for="set-fast-model">辅助模型（可选，用于上下文压缩 / GEO 分析 / 技能优化等高频辅助调用）</label><input class="input" id="set-fast-model" list="model-list" placeholder="留空表示都用上面的主模型，例如填一个更便宜更快的模型" autocomplete="off"></div>
               <div class="field" style="grid-column: 1 / -1;">
                 <label class="field-label" for="set-tiers">模型档位（可选，一行一条「档位: 模型」，供专家角色按场景挑模型）</label>
                 <textarea class="input" id="set-tiers" rows="4" placeholder="coding: deepseek-coder&#10;office: glm-5.3-flash&#10;reasoning: deepseek-reasoner&#10;economy: glm-5.3-flash"></textarea>
@@ -762,11 +779,13 @@
               <button data-atab="signin" aria-pressed="true" role="tab">登录</button>
               <button data-atab="signup" aria-pressed="false" role="tab">注册</button>
             </div>
-            <div class="me-auth-form">
-              <input class="input" id="me-email" type="email" autocomplete="username" placeholder="邮箱">
-              <input class="input" id="me-password" type="password" autocomplete="current-password" placeholder="密码（至少 6 位）">
-              <button class="btn btn-primary btn-block" id="me-auth-submit">登录</button>
-            </div>
+            <form class="me-auth-form" id="me-auth-form" onsubmit="return false">
+              <label class="sr-only" for="me-email">邮箱</label>
+              <input class="input" id="me-email" name="email" type="email" autocomplete="username" placeholder="邮箱">
+              <label class="sr-only" for="me-password">密码</label>
+              <input class="input" id="me-password" name="password" type="password" autocomplete="current-password" placeholder="密码（至少 6 位）">
+              <button class="btn btn-primary btn-block" id="me-auth-submit" type="submit">登录</button>
+            </form>
             <div class="me-oauth">
               <span class="me-divider">或使用</span>
               <div class="me-oauth-row">
@@ -777,9 +796,11 @@
             <details class="me-cloud-config">
               <summary>还没有 Supabase？点此填写项目连接（进阶）</summary>
               <div class="me-auth-form">
-                <input class="input" id="me-sb-url" placeholder="Supabase 项目地址 https://xxxx.supabase.co">
-                <input class="input" id="me-sb-anon" placeholder="anon public key">
-                <button class="btn btn-secondary btn-block" id="me-sb-save">保存连接</button>
+                <label class="sr-only" for="me-sb-url">Supabase 项目地址</label>
+                <input class="input" id="me-sb-url" name="supabase_url" placeholder="Supabase 项目地址 https://xxxx.supabase.co">
+                <label class="sr-only" for="me-sb-anon">Supabase anon key</label>
+                <input class="input" id="me-sb-anon" name="supabase_anon_key" placeholder="anon public key">
+                <button class="btn btn-secondary btn-block" id="me-sb-save" type="button">保存连接</button>
                 <small class="field-hint">只保存项目地址与公开 anon key（非机密），用于建立登录。你的业务数据仍全部在本地。</small>
               </div>
             </details>

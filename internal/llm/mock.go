@@ -119,10 +119,7 @@ func (m *MockClient) ChatStream(ctx context.Context, req ChatRequest, onDelta fu
 func (m *MockClient) defaultReply(kind string, req ChatRequest) string {
 	switch kind {
 	case "plan":
-		goal := extractGoal(req.System + "\n" + messagesText(req.Messages))
-		if goal == "" {
-			goal = "未指定目标"
-		}
+		goal := planGoal(req)
 		plan := map[string]any{
 			"steps": []map[string]any{{
 				"id":          "s1",
@@ -148,11 +145,11 @@ func (m *MockClient) defaultReply(kind string, req ChatRequest) string {
 		// Mock GEO：离线测试返回固定的中等得分建议
 		return `{"score":75,"summary":"Mock GEO 分析：结构清晰，建议补充数据支撑","strengths":["段落组织合理","核心概念明确"],"weaknesses":["缺少具体案例","关键词密度偏低"],"actionables":[{"category":"引用性","description":"补充 1-2 个具体数据或案例","priority":"high"},{"category":"关键词","description":"在小标题中自然融入核心术语","priority":"medium"}]}`
 	case "chat_mode":
-		// Mock 对话：回显用户消息（截断），保证对话模式离线可演示
-		text := messagesText(req.Messages)
-		runes := []rune(strings.TrimSpace(text))
+		// Mock 对话：只回显最后一条用户消息（截断），不把整段历史拼回来吓演示者
+		text := lastUserText(req)
+		runes := []rune(text)
 		if len(runes) > 120 {
-			runes = runes[:120]
+			runes = append([]rune(string(runes[:120])), '…')
 		}
 		return "（Mock 对话）" + string(runes)
 	default:
@@ -160,18 +157,36 @@ func (m *MockClient) defaultReply(kind string, req ChatRequest) string {
 	}
 }
 
-// extractGoal 从提示词中提取 "用户目标：" 行的内容。
-func extractGoal(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		for _, prefix := range []string{"用户目标：", "## 用户目标", "用户目标:"} {
-			if strings.HasPrefix(line, prefix) {
-				v := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-				v = strings.Trim(v, ":：")
-				if v != "" {
-					return v
-				}
-			}
+// planGoal 取本次规划的用户目标：规划器把目标原样放在最后一条 user 消息里；
+// 带引用前缀或旧装配时目标跟在「用户目标：」标记后（取标记后首行）。
+// 取不到就明说，不再谎报「未指定目标」。
+func planGoal(req ChatRequest) string {
+	text := lastUserText(req)
+	if text == "" {
+		text = strings.TrimSpace(req.System)
+	}
+	if i := strings.LastIndex(text, "用户目标："); i >= 0 {
+		rest := strings.TrimSpace(text[i+len("用户目标："):])
+		if j := strings.IndexByte(rest, '\n'); j >= 0 {
+			rest = rest[:j]
+		}
+		text = rest
+	}
+	if text == "" {
+		return "（mock 未从请求里取到目标文本）"
+	}
+	runes := []rune(text)
+	if len(runes) > 80 {
+		runes = append(runes[:80], '…')
+	}
+	return string(runes)
+}
+
+// lastUserText 返回最后一条 user 角色消息的内容。
+func lastUserText(req ChatRequest) string {
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == RoleUser {
+			return strings.TrimSpace(req.Messages[i].Content)
 		}
 	}
 	return ""

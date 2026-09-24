@@ -26,7 +26,7 @@ type AnthropicClient struct {
 // NewAnthropic 创建 Anthropic 客户端。
 func NewAnthropic(baseURL, apiKey, model string, temperature float64, maxTokens int, timeout time.Duration) *AnthropicClient {
 	return &AnthropicClient{
-		BaseURL:     strings.TrimRight(baseURL, "/"),
+		BaseURL:     normalizeBase(baseURL, "/v1/messages", "/messages"),
 		APIKey:      apiKey,
 		Model:       model,
 		Temperature: temperature,
@@ -46,10 +46,14 @@ func (c *AnthropicClient) endpoint() string {
 }
 
 func (c *AnthropicClient) headers() map[string]string {
-	return map[string]string{
-		"x-api-key":         c.APIKey,
+	h := map[string]string{
 		"anthropic-version": "2023-06-01",
 	}
+	// 与 GLM/Responses 对齐：空 key 省略鉴权头，空头会被网关判成格式错误
+	if c.APIKey != "" {
+		h["x-api-key"] = c.APIKey
+	}
+	return h
 }
 
 type anthropicPayload struct {

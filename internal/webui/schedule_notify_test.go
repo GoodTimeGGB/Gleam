@@ -127,6 +127,40 @@ func TestWebUI_ScheduleNotify_InvalidRejected(t *testing.T) {
 	}
 }
 
+// TestWebUI_ScheduleEnabled_PauseResume 暂停/恢复可改且落盘（L2，2026-09-23 QA）。
+// 启停是跑起来之后才会想改的开关，和 notify 同理：不该逼用户删掉重建。
+func TestWebUI_ScheduleEnabled_PauseResume(t *testing.T) {
+	f := newFixture(t, nil)
+	defer f.call("DELETE", "/api/schedules/en-job", nil)
+	created := f.call("POST", "/api/schedules", map[string]any{
+		"name": "en-job", "goal": "检查磁盘占用", "cron": "0 9 * * *",
+	})
+	if created["enabled"] != true {
+		t.Fatalf("新建任务应默认启用，实际 %v", created["enabled"])
+	}
+	got := f.call("POST", "/api/schedules/en-job/enabled", map[string]any{"enabled": false})
+	if got["enabled"] != false {
+		t.Errorf("暂停后应返回 enabled=false，实际 %v", got["enabled"])
+	}
+	list := f.call("GET", "/api/schedules", nil)
+	for _, it := range list["jobs"].([]any) {
+		if j := it.(map[string]any); j["name"] == "en-job" && j["enabled"] != false {
+			t.Errorf("列表里应看到停用状态，实际 %v", j["enabled"])
+		}
+	}
+	if got = f.call("POST", "/api/schedules/en-job/enabled", map[string]any{"enabled": true}); got["enabled"] != true {
+		t.Errorf("恢复后应返回 enabled=true，实际 %v", got["enabled"])
+	}
+	// 缺 enabled 字段要 400，不能当成 false 处理
+	if code, _ := f.raw("POST", "/api/schedules/en-job/enabled", map[string]any{}); code != 400 {
+		t.Errorf("缺 enabled 字段应 400，实际 %d", code)
+	}
+	// 不存在的任务要报错
+	if code, _ := f.raw("POST", "/api/schedules/en-nope/enabled", map[string]any{"enabled": false}); code != 400 {
+		t.Errorf("不存在的任务应 400，实际 %d", code)
+	}
+}
+
 // TestWebUI_ScheduleNotify_MissingJobRejected 改不存在的任务要报错，不能静默成功。
 //
 // 静默成功会让用户以为改好了——而那个任务从来就不存在，或者名字打错了。

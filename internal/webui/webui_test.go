@@ -376,6 +376,22 @@ func TestWebUI_ToolsMemorySkillsSchedules(t *testing.T) {
 	if hits["count"] == float64(0) {
 		t.Error("记忆检索无命中")
 	}
+	// L3（2026-09-23 QA）：单条软删——删后检索不再命中，误删不存在的要 404
+	firstHit := hits["hits"].([]any)[0].(map[string]any)
+	memID, _ := firstHit["id"].(string)
+	if memID == "" {
+		t.Fatal("检索结果应带 id 供删除")
+	}
+	f.call("DELETE", "/api/memory/"+memID, nil)
+	after := f.call("GET", "/api/memory?q=%E6%B7%B1%E8%89%B2%E7%95%8C%E9%9D%A2&k=3", nil)
+	for _, it := range after["hits"].([]any) {
+		if h := it.(map[string]any); h["id"] == memID {
+			t.Error("软删后该条仍被检索命中")
+		}
+	}
+	if code, _ := f.raw("DELETE", "/api/memory/nope-404", nil); code != 404 {
+		t.Errorf("删除不存在的记忆应 404，实际 %d", code)
+	}
 
 	// 技能
 	f.call("POST", "/api/skills", map[string]any{

@@ -8,6 +8,9 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	// 记忆
 	mux.HandleFunc("GET /api/memory", s.handleMemorySearch)
 	mux.HandleFunc("POST /api/memory", s.handleMemorySave)
+	mux.HandleFunc("DELETE /api/memory/{id}", s.handleMemoryDelete)
 
 	// 技能
 	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
@@ -70,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/schedules", s.handleScheduleList)
 	mux.HandleFunc("POST /api/schedules", s.handleScheduleCreate)
 	mux.HandleFunc("POST /api/schedules/{name}/notify", s.handleScheduleNotify)
+	mux.HandleFunc("POST /api/schedules/{name}/enabled", s.handleScheduleEnabled)
 	mux.HandleFunc("DELETE /api/schedules/{name}", s.handleScheduleDelete)
 
 	// HTTP 回调触发（调度器事件源）与心跳
@@ -89,6 +94,8 @@ func (s *Server) Handler() http.Handler {
 	// 设置与上下文
 	mux.HandleFunc("GET /api/settings", s.handleSettingsGet)
 	mux.HandleFunc("POST /api/settings", s.handleSettingsSave)
+	mux.HandleFunc("POST /api/llm/test", s.handleLLMTest)
+	mux.HandleFunc("POST /api/llm/models", s.handleLLMModels)
 	mux.HandleFunc("GET /api/context", s.handleContextGet)
 	mux.HandleFunc("POST /api/context/compress", s.handleContextCompress)
 	mux.HandleFunc("POST /api/context/clear", s.handleContextClear)
@@ -321,10 +328,36 @@ func (s *Server) handleGoalGet(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	if !ok {
+		// 内存表重启即空（且有淘汰上限），盘上 tasks/ 才是终态归档——
+		// 有档案却回 404 等于对真实存在的数据撒谎。
+		if archived, has := s.archivedTask(id); has {
+			writeJSON(w, 200, archived)
+			return
+		}
 		writeErr(w, 404, "任务 %q 不存在", id)
 		return
 	}
 	writeJSON(w, 200, t)
+}
+
+// safeTaskIDChars 归档回放的 id 白名单：id 会被拼进文件路径，
+// `..`、分隔符、空串等穿越形态必须一刀挡掉（数据目录下有含密钥的 settings）。
+var safeTaskIDChars = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// archivedTask 从 tasks/<id>.json 读一份终态记录（gleam replay 读的就是它）。
+func (s *Server) archivedTask(id string) (*taskInfo, bool) {
+	if !safeTaskIDChars.MatchString(id) {
+		return nil, false
+	}
+	b, err := os.ReadFile(filepath.Join(s.Agent.Cfg.DataDir, "tasks", id+".json"))
+	if err != nil {
+		return nil, false
+	}
+	var g types.GoalResult
+	if json.Unmarshal(b, &g) != nil || g.TaskID != id {
+		return nil, false
+	}
+	return &taskInfo{ID: g.TaskID, Goal: g.Goal, Status: g.Status, Result: &g, Started: g.StartedAt}, true
 }
 
 func (s *Server) handleGoalCancel(w http.ResponseWriter, r *http.Request) {
@@ -422,6 +455,20 @@ func (s *Server) handleMemorySave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"id": id, "saved": true})
+}
+
+// handleMemoryDelete 软删除单条记忆（L3，2026-09-23 QA：之前只有整库视角，删不掉记错的单条）。
+func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !safeTaskIDChars.MatchString(id) {
+		writeErr(w, 400, "非法记忆 ID")
+		return
+	}
+	if !s.Agent.MemoryDelete(id) {
+		writeErr(w, 404, "记忆 %q 不存在或已删除", id)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "deleted": true})
 }
 
 // ---------- 技能 ----------
@@ -531,6 +578,25 @@ func (s *Server) handleScheduleNotify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, job)
 }
 
+// handleScheduleEnabled 暂停/恢复定时任务。与 notify 同理：启停是跑起来之后才会想改的
+// 开关，不该逼用户删掉重建。
+func (s *Server) handleScheduleEnabled(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Enabled == nil {
+		writeErr(w, 400, "参数解析失败，需要 {\"enabled\": true|false}")
+		return
+	}
+	job, err := s.Agent.ScheduleSetEnabled(name, *body.Enabled)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, job)
+}
+
 func (s *Server) handleScheduleDelete(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	ok, err := s.Agent.ScheduleDelete(name)
@@ -590,6 +656,27 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, view)
+}
+
+// handleLLMTest 连通性探测：表单覆盖值（可缺省）→ 最小请求 → 结论分类。
+// 永远 200：探测失败是"结论"不是"服务端错误"，前端按 kind 渲染中文提示。
+func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
+	var override map[string]any
+	_ = readJSON(r, &override) // 体可缺省：空体即"用当前生效配置探测"
+	if override == nil {
+		override = map[string]any{}
+	}
+	writeJSON(w, 200, s.Agent.TestLLMConnection(override))
+}
+
+// handleLLMModels 在线拉取模型列表：与探测同一套表单覆盖值与 200-结论约定。
+func (s *Server) handleLLMModels(w http.ResponseWriter, r *http.Request) {
+	var override map[string]any
+	_ = readJSON(r, &override)
+	if override == nil {
+		override = map[string]any{}
+	}
+	writeJSON(w, 200, s.Agent.ListLLMModels(override))
 }
 
 func (s *Server) handleContextGet(w http.ResponseWriter, _ *http.Request) {

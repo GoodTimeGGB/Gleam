@@ -375,6 +375,21 @@
           <h4>来自模型的东西都要当不可信输入</h4>
           <p>步骤编号是模型在计划里自己起的，而计划校验只查了「非空」和「不重复」，没查过路径安全。所以一个形如「../../../x」的步骤编号能一路走到落盘那一步——而落盘是写，比读更严重。挡它的有两道：一道把编号净化成不含分隔符的单个路径段，另一道复用工具读写那套边界校验。两道都留是因为失效方式不同，一道漏字符、一道漏路径形态。做负例控制时把第一道关掉，第二道独立兜住了越界——这就是两道都要留的意义。</p>
         </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4H5v16h4"/><path d="M15 4h4v16h-4"/></svg></div>
+          <h4>一步崩了，不该带走整批</h4>
+          <p>跑一百条用例时，第 5 条上某个工具自己内部出了个错，以前是整批一起消失——已经跑完的结果、已经花掉的调用、整份报告全没了，重跑还得再花一次。现在把边界收到了单个步骤上：只有那一步记失败，同一批的其余照跑。失败的原因单列一类"工具自身的问题"——它要的是去改代码，不是换个方案重试，混在业务失败里会看错该先修哪层。出错的位置也留了下来，不用靠复现去猜。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg></div>
+          <h4>这批花了多少</h4>
+          <p>评测报告以前只报"提示词一共多长"——那是成本的样子，不是成本本身：提示词短不等于账小。现在直接给出这批评测实际调了多少次模型、花了多少 token、用了多少工具，每条用例各花多少也看得到，才答得上"哪条最贵、值不值"。同一批重跑三遍做稳定性检查时，三遍的开销全算进去——重跑是真花钱，只报第一遍等于把账记错。不调模型的那层不报数字；会调模型却统计不到的那层，会明写"未计量"并说明为什么，而不是拿一个 0 糊过去。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9"/><path d="M10 14h4"/></svg></div>
+          <h4>查得到的任务，界面也认</h4>
+          <p>任务记录一直存在磁盘上，命令行按编号查得到；网页界面却只认"当前运行中的"那张表，进程一重启就空了。于是同一个任务，命令行说有、界面说"不存在"——而这个"不存在"说得很确定，用户会以为记录丢了，然后重跑一遍、再花一次钱。现在界面查不到内存就回落到归档记录。顺带堵了一个口子：编号来自网址、又会被拼进文件路径，所以先挡掉"往上跳目录"的写法，免得它变成一个能读任意文件的入口。</p>
+        </article>
       </div>
     </div>
   </section>

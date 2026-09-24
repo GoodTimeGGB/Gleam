@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 
 // stubLLM 确定性假模型：创作请求回一篇够长的正文，GEO 请求回固定评分。
 type stubLLM struct {
+	mu       sync.Mutex
 	geoCalls int
 	planJSON string // 非空时，规划请求返回该 JSON（走完整 Plan-Execute 链路）
 	// reflectJSON 非空时，反思请求返回该 JSON（用于验证逐条验收判定）
@@ -39,7 +41,9 @@ const stubArticle = "远程办公不是福利，而是生产关系的重构。�
 
 func (s *stubLLM) Chat(_ context.Context, req llm.ChatRequest) (string, error) {
 	if strings.Contains(req.System, llm.MarkerGEO) {
+		s.mu.Lock()
 		s.geoCalls++
+		s.mu.Unlock()
 		text := `{"score":75,"summary":"结构清晰，建议补充数据支撑","strengths":["结论前置"],"weaknesses":["缺少具体案例"],"actionables":[{"category":"引用性","description":"补充 1-2 个具体数据","priority":"high"}]}`
 		llm.ReportUsage(req, text, llm.Usage{})
 		return text, nil
@@ -76,6 +80,13 @@ func (s *stubLLM) ChatStream(ctx context.Context, req llm.ChatRequest, onDelta f
 }
 
 func (s *stubLLM) Name() string { return "stub" }
+
+// callsN 读取 GEO 调用次数（异步分析线程写入，需加锁读）。
+func (s *stubLLM) callsN() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.geoCalls
+}
 
 func newGEOFixture(t *testing.T) (*fixture, *stubLLM) {
 	return newGEOFixtureWithPlan(t, "")
@@ -136,12 +147,33 @@ func waitGEO(f *fixture, want int, timeout time.Duration) []geo.Record {
 		var recs []geo.Record
 		_ = json.Unmarshal(raw, &recs)
 		if len(recs) >= want {
+			waitGEOPersisted(f, want)
 			return recs
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	f.t.Fatalf("等待 GEO 记录超时（期望 %d 条）", want)
 	return nil
+}
+
+// waitGEOPersisted 等待 GEO 历史文件完成落盘。自动分析先写内存再异步落盘，
+// 若测试在落盘（写 tmp + rename）结束前返回，t.TempDir 的 RemoveAll 会在
+// Windows 上偶发「文件被占用」清理失败，表现为与本断言无关的假红。
+func waitGEOPersisted(f *fixture, want int) {
+	f.t.Helper()
+	path := filepath.Join(f.dataDir, "geo_history.json")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var recs []geo.Record
+			if json.Unmarshal(data, &recs) == nil && len(recs) >= want {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	f.t.Fatalf("GEO 历史未完成落盘（期望至少 %d 条）: %s", want, path)
 }
 
 // TestGEO_AutoAnalyzeAfterCreativeTask 创作任务完成后应自动留档一条 GEO 建议。
@@ -170,7 +202,7 @@ func TestGEO_AutoAnalyzeAfterCreativeTask(t *testing.T) {
 	if len(recs[0].Actionables) == 0 {
 		t.Fatal("应包含可操作建议")
 	}
-	if stub.geoCalls == 0 {
+	if stub.callsN() == 0 {
 		t.Fatal("未调用模型做 GEO 分析")
 	}
 	out := f.call("GET", "/api/geo", nil)
@@ -210,8 +242,8 @@ func TestGEO_SkipsNonCreative(t *testing.T) {
 	id, _ := res["task_id"].(string)
 	f.waitTask(id, 8*time.Second)
 	time.Sleep(500 * time.Millisecond)
-	if stub.geoCalls != 0 {
-		t.Fatalf("非创作任务不应调用 GEO 分析，实际调用 %d 次", stub.geoCalls)
+	if n := stub.callsN(); n != 0 {
+		t.Fatalf("非创作任务不应调用 GEO 分析，实际调用 %d 次", n)
 	}
 	out := f.call("GET", "/api/geo", nil)
 	stats, _ := out["stats"].(map[string]any)

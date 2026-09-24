@@ -25,7 +25,7 @@ type ResponsesClient struct {
 // NewResponses 创建 Responses API 客户端。
 func NewResponses(baseURL, apiKey, model string, temperature float64, maxTokens int, timeout time.Duration) *ResponsesClient {
 	return &ResponsesClient{
-		BaseURL:     strings.TrimRight(baseURL, "/"),
+		BaseURL:     normalizeBase(baseURL, "/responses"),
 		APIKey:      apiKey,
 		Model:       model,
 		Temperature: temperature,

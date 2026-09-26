@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"gleam/internal/buildinfo"
 	"gleam/pkg/types"
 )
 
@@ -115,7 +116,7 @@ func Start(ctx context.Context, cfg ServerConfig, logf func(string, ...any)) (*C
 	if err := c.call(hctx, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "gleam", "version": "0.1.0"},
+		"clientInfo":      map[string]any{"name": "gleam", "version": buildinfo.Version},
 	}, &initResult); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("mcp: %s initialize 失败: %w", cfg.Name, err)

@@ -150,6 +150,8 @@ func (a *Agent) RunGoal(ctx context.Context, req types.GoalRequest) *types.GoalR
 	prog.stamp(result)
 	result.ConfigSnapshot = &snap
 	result.TaskID = taskID
+	result.Mode = mode
+	result.TaskMode = normalizeTaskMode(req.TaskMode)
 	result.StartedAt = handle.started
 	// trace_id 由「目标 + 任务模式 + 角色 + 模型」派生，刻意不含时间戳：
 	// 同一个输入配同一个模型重复出现时 ID 相同，失败聚类按 ID 分组即可——
@@ -218,6 +220,12 @@ func ValidateGoalRequest(req types.GoalRequest) error {
 	}
 	if req.Role != "" && !HasRole(req.Role) {
 		return fmt.Errorf("不支持的专家角色 %q", req.Role)
+	}
+	// task_id 会被拼成任务归档的文件名（tasks/<id>.json），所以它的形状在**入口**就得定：
+	// 放过去的话，任务会照常跑完、照常花 token，最后归档那一步默默失败——
+	// 人在 `gleam replay` 报"读不到"的时候才发现，而那次的凭据已经没了。
+	if req.TaskID != "" && SafeTaskName(req.TaskID) == "" {
+		return fmt.Errorf("task_id %q 不能作文件名：只允许字母、数字与 - _，长度不超过 128", req.TaskID)
 	}
 	return nil
 }
@@ -920,7 +928,16 @@ func (a *Agent) runGoalLoop(ctx context.Context, req types.GoalRequest, goal, mo
 				Risk: planMaxRisk(a.Reg, plan), Reason: "plan_first 模式：执行前需要确认完整计划",
 			})
 			if !resp.Approved {
-				res := &types.GoalResult{Goal: goal, Status: types.GoalCancelled, Error: "用户拒绝了执行计划", Score: 0}
+				// 这一行是用户会在卡片上读到的原因，不能一律写成"用户拒绝了执行计划"：
+				// 取消（宿主摘掉这扇门把他叫醒）和超时自动拒绝都不是用户的拒绝。
+				cause := "用户拒绝了执行计划"
+				switch {
+				case ctx.Err() != nil:
+					cause = "任务已取消"
+				case resp.Note != "":
+					cause = resp.Note
+				}
+				res := &types.GoalResult{Goal: goal, Status: types.GoalCancelled, Error: cause, Score: 0}
 				a.finalize(taskID, res, nil, req.Role)
 				return res
 			}
@@ -1294,7 +1311,7 @@ func (a *Agent) autoOptimizeSkill(ctx context.Context, taskID, name string, sk *
 	}
 	optimized := *sk
 	optimized.Steps = plan.Steps
-	if v, err := a.Skills.Save(optimized); err == nil {
+	if v, err := a.SkillSave(optimized); err == nil {
 		a.Notifier.OnProgress(types.ProgressEvent{
 			TaskID: taskID, Phase: "reflect",
 			Message:  fmt.Sprintf("技能 %s 运行失败，已自动优化参数并保存为 v%d，可重试", name, v),
@@ -1562,6 +1579,10 @@ func (a *Agent) RunSkill(ctx context.Context, name string, params map[string]str
 	if err != nil {
 		return nil, err
 	}
+	if sk.Disabled {
+		// 停用的技能连参数都留着，就是要"先别跑但别忘"。让它跑等于把停掉的东西重新挂上。
+		return nil, fmt.Errorf("技能 %q 已停用，请先在技能页启用它", name)
+	}
 	plan := types.Plan{Goal: "运行技能 " + name}
 	for i, st := range sk.Steps {
 		args, err := skill.SubstituteParams(st.Args, params)
@@ -1585,7 +1606,22 @@ func (a *Agent) RunSkill(ctx context.Context, name string, params map[string]str
 	}
 	exec := executor.Execute(ctx, plan, taskID, string(types.ModeAuto), false)
 	ok := exec.Failed == 0 && exec.Succeeded > 0
-	a.Skills.RecordRun(name, ok)
+	if err := a.Skills.RecordRun(name, ok); err != nil {
+		// 统计写不进去 = 面板上的次数与成功率偏少，而没有任何东西会报这个错。必须说出来。
+		a.Notifier.OnProgress(types.ProgressEvent{
+			TaskID: taskID, Phase: "reflect",
+			Message:  fmt.Sprintf("技能 %s 的运行统计未写入（次数与成功率会偏少）: %v", name, err),
+			Progress: 95, Kind: "warn",
+		})
+	}
+	// 成长日志：只记跑通的复用。跑坏一次也算 5 分，等级就成了「用了多少次技能」而不是
+	// 「攒下多少能用的做法」——那正是这套体系要回答的反面。
+	if ok && a.Growth != nil {
+		a.Growth.Record(growth.Entry{
+			Type: "skill_used", SkillName: name, Goal: "复用技能 " + name,
+			Steps: exec.Succeeded,
+		})
+	}
 	if !ok && !exec.Cancelled {
 		a.autoOptimizeSkill(ctx, taskID, name, sk, exec)
 	}

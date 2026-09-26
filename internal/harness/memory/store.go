@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"gleam/internal/atomicfile"
 	"gleam/pkg/types"
 )
 
@@ -127,7 +128,7 @@ func (s *Store) RememberWithSource(content, source string, tags []string) (strin
 	return id, nil
 }
 
-// Search 语义检索 top-k。
+// Search 词法检索 top-k（哈希向量余弦，同义不同形的词不相关）。
 func (s *Store) Search(query string, k int) []Hit {
 	s.mu.Lock()
 	items := append([]Item(nil), s.items...)
@@ -203,17 +204,12 @@ func (s *Store) Flush() error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := atomicfile.Write(s.path, data, 0o644); err != nil {
 		return err
 	}
 	s.dirty = false
 	return nil
 }
-
 func (s *Store) reindex() {
 	s.index = make(map[string]int, len(s.items))
 	for i, it := range s.items {
@@ -428,10 +424,24 @@ func (m *Manager) Summary() string {
 type ContextStats struct {
 	ShortTurns   int    `json:"short_turns"`   // 短期窗口内轮数
 	ShortCap     int    `json:"short_cap"`     // 窗口容量
+	FillPct      int    `json:"fill_pct"`      // 窗口占用率 0~100（见 fillPct）
 	Overflow     int    `json:"overflow"`      // 待压缩溢出轮数
 	SummaryRunes int    `json:"summary_chars"` // 滚动摘要长度（rune）
 	Summary      string `json:"summary"`       // 滚动摘要全文
 	SavedTokens  int    `json:"saved_tokens"`  // 累计压缩节省的估算 token
+}
+
+// fillPct 窗口占用率。归这里算而不是让前端各自除一遍：
+// 界面上多一处「百分比」的算法，就早晚会出现两个面板报出两个数。
+// 上限钳到 100：界面拿它画水位条，一个 105% 的宽度会直接溢出那一栏。
+func fillPct(turns, capacity int) int {
+	if capacity <= 0 {
+		return 0
+	}
+	if p := 100 * turns / capacity; p < 100 {
+		return p
+	}
+	return 100
 }
 
 // Stats 返回上下文统计快照。
@@ -441,6 +451,7 @@ func (m *Manager) Stats() ContextStats {
 	return ContextStats{
 		ShortTurns:   m.Short.Len(),
 		ShortCap:     m.Short.cap,
+		FillPct:      fillPct(m.Short.Len(), m.Short.cap),
 		Overflow:     len(m.overflow),
 		SummaryRunes: len([]rune(m.summary)),
 		Summary:      m.summary,
@@ -486,10 +497,7 @@ func (m *Manager) saveContextLocked() {
 		return
 	}
 	path := filepath.Join(m.dir, contextFile)
-	tmp := path + ".tmp"
-	if os.WriteFile(tmp, data, 0o644) == nil {
-		_ = os.Rename(tmp, path)
-	}
+	_ = atomicfile.Write(path, data, 0o644)
 }
 
 func renderTurns(turns []Turn) string {
@@ -537,7 +545,7 @@ func (m *Manager) RememberWithSource(content, source string, tags []string) (str
 	return id, nil
 }
 
-// Relevant 语义检索（供规划器注入上下文）。
+// Relevant 词法检索（供规划器注入上下文）。
 func (m *Manager) Relevant(query string, k int) []Hit {
 	return m.Long.Search(query, k)
 }

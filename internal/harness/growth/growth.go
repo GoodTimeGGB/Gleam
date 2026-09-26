@@ -11,6 +11,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"gleam/internal/atomicfile"
 )
 
 // Log 成长日志核心。
@@ -131,13 +133,15 @@ func (l *Log) Record(e Entry) {
 	l.persist()
 }
 
-// persist 持久化到磁盘。
+// persist 持久化到磁盘。整份条目表只有一个文件，写成半截就等于丢掉全部成长记录，
+// 所以走原子替换；写失败在此处只能吞掉（成长是旁路，不该让任务失败），
+// 由 doctor 的"成长日志不可读"检查在最近处兜住。
 func (l *Log) persist() {
 	data, err := json.MarshalIndent(l.entries, "", "  ")
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(l.path, data, 0644)
+	_ = atomicfile.Write(l.path, data, 0o644)
 }
 
 // Recent 返回最近的 n 条记录。

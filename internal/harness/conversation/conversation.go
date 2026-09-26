@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"gleam/internal/atomicfile"
 	"gleam/pkg/types"
 )
 
@@ -101,7 +102,7 @@ func (s *Store) migrateLegacy() error {
 		if err != nil {
 			continue
 		}
-		_ = os.WriteFile(path, out, 0o644)
+		_ = atomicfile.Write(path, out, 0o644)
 	}
 	return nil
 }
@@ -328,18 +329,14 @@ func (s *Store) readLocked(p string) (*Conversation, error) {
 	return &c, nil
 }
 
-// writeLocked 原子写入（临时文件 + rename），避免并发读到半截 JSON。
+// writeLocked 原子写入（见 atomicfile）：一份会话一个文件，读到半截 JSON 就是整段对话丢失。
 func (s *Store) writeLocked(c *Conversation) error {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("编码会话失败: %w", err)
 	}
-	tmp := filepath.Join(s.dir, c.ID+".tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := atomicfile.Write(filepath.Join(s.dir, c.ID+".json"), b, 0o644); err != nil {
 		return fmt.Errorf("写入会话失败: %w", err)
-	}
-	if err := os.Rename(tmp, filepath.Join(s.dir, c.ID+".json")); err != nil {
-		return fmt.Errorf("保存会话失败: %w", err)
 	}
 	return nil
 }

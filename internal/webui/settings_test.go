@@ -8,11 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"gleam/internal/config"
 	"gleam/internal/harness/credentials"
+	"gleam/internal/llm"
 )
+
+// glmHost 一条真实的官方入口，用来测"密钥绑到了哪台主机"。
+const glmHost = "https://open.bigmodel.cn/api/paas/v4"
+
+// scopeOf 复用生产的 host 解析，不在测试里另抄一份——抄一份就会和实现漂移。
+func scopeOf(baseURL string) string { return llm.KeyScope(baseURL) }
 
 // ---------- 设置与上下文 API ----------
 
@@ -226,6 +234,7 @@ func TestWebUI_ContextCompressAndClear(t *testing.T) {
 
 // TestWebUI_APIKeySaveAndClear 密钥保存全链路：写入凭证文件、视图只回布尔、
 // 覆盖层零泄漏、空串=不修改、clear_api_key 显式清除（内存 + 磁盘同时生效）。
+// 密钥按主机绑定，所以这里必须带上 base_url——没有主机的密钥无处可绑。
 func TestWebUI_APIKeySaveAndClear(t *testing.T) {
 	f := newFixture(t, nil)
 	cred, err := credentials.Open(f.dataDir)
@@ -235,13 +244,13 @@ func TestWebUI_APIKeySaveAndClear(t *testing.T) {
 	f.agent.Creds = cred
 
 	up := f.call("POST", "/api/settings", map[string]any{
-		"llm": map[string]any{"api_key": "sk-web-abcdef"},
+		"llm": map[string]any{"base_url": glmHost, "api_key": "sk-web-abcdef"},
 	})
 	llmSec := up["llm"].(map[string]any)
 	if llmSec["api_key_set"] != true {
 		t.Errorf("保存后 api_key_set = %v", llmSec["api_key_set"])
 	}
-	if got := cred.GetLLMAPIKey(); got != "sk-web-abcdef" {
+	if got, _ := cred.ResolveLLMAPIKey(scopeOf(glmHost)); got != "sk-web-abcdef" {
 		t.Errorf("凭证文件未落盘: %q", got)
 	}
 	if _, hasPlain := llmSec["api_key"]; hasPlain {
@@ -258,24 +267,161 @@ func TestWebUI_APIKeySaveAndClear(t *testing.T) {
 
 	// 前端"留空=不修改"：空串不得动已存的 key
 	f.call("POST", "/api/settings", map[string]any{
-		"llm": map[string]any{"api_key": "", "model": "m-next"},
+		"llm": map[string]any{"base_url": glmHost, "api_key": "", "model": "m-next"},
 	})
-	if got := cred.GetLLMAPIKey(); got != "sk-web-abcdef" {
+	if got, _ := cred.ResolveLLMAPIKey(scopeOf(glmHost)); got != "sk-web-abcdef" {
 		t.Errorf("空串不应清除，得到 %q", got)
 	}
 
 	// 显式清除：内存与磁盘同时生效
 	up2 := f.call("POST", "/api/settings", map[string]any{
-		"llm": map[string]any{"clear_api_key": true},
+		"llm": map[string]any{"base_url": glmHost, "clear_api_key": true},
 	})
 	if up2["llm"].(map[string]any)["api_key_set"] != false {
 		t.Errorf("清除后 api_key_set = %v", up2["llm"].(map[string]any)["api_key_set"])
 	}
-	if got := cred.GetLLMAPIKey(); got != "" {
-		t.Errorf("磁盘未清除: %q", got)
+	if got, host := cred.ResolveLLMAPIKey(scopeOf(glmHost)); got != "" || host != "" {
+		t.Errorf("磁盘未清除: %q / %q", got, host)
 	}
 	if f.agent.Cfg.LLM.APIKey != "" {
 		t.Errorf("内存未清除: %q", f.agent.Cfg.LLM.APIKey)
+	}
+}
+
+// authCapture 记录假厂商收到的鉴权头。按厂商各记一份，而不是按路径记：
+// 客户端会往 base_url 后面拼 /chat/completions 等路径，拼法属于 llm 层，
+// 测试若把这些写进键名，llm 一改路径这里就成假绿。
+type authCapture struct {
+	mu    sync.Mutex
+	hits  int
+	auths []string
+}
+
+func (c *authCapture) record(auth string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hits++
+	c.auths = append(c.auths, auth)
+}
+
+// summary 返回请求次数与**第一条非空鉴权头**：按"有没有一条非空"判，
+// 而不是把记录拼起来比字符串——拼法会让"两次都空"看起来像"收到过东西"。
+func (c *authCapture) summary() (hits int, nonEmptyAuth string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, a := range c.auths {
+		if a != "" {
+			return c.hits, a
+		}
+	}
+	return c.hits, ""
+}
+
+// recordingKeyServer 起一个假厂商：答应答、记下鉴权头。
+func recordingKeyServer(t *testing.T, cap *authCapture) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			auth = r.Header.Get("x-api-key")
+		}
+		cap.record(auth)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}],"data":[{"id":"m-b"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestWebUI_APIKeyNotForwardedToOtherHost 换厂商不得把上一家的密钥发出去。
+//
+// 修之前：密钥只按"有没有"管理，设置页把 base_url 从 A 改成 B 之后，
+// 新端点照样收到 A 的 Bearer 头——本地优先的产品替用户把凭证转发给了第三方，
+// 而界面上写着"已设置"，没有任何一处会提示。判据在 credentials 那层已经对，
+// 这里要证的是**线路上真的没发**（本仓库栽过的是"判据对、线没接"）。
+func TestWebUI_APIKeyNotForwardedToOtherHost(t *testing.T) {
+	var capA, capB authCapture
+	srvA := recordingKeyServer(t, &capA)
+	srvB := recordingKeyServer(t, &capB)
+	urlA, urlB := srvA.URL, srvB.URL
+
+	f := newFixture(t, nil)
+	cred, err := credentials.Open(f.dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.Creds = cred
+	f.agent.Cfg.LLM.Provider = "glm" // mock 下不建真实客户端，这条要测真实外发
+
+	// ① 给 A 家配密钥
+	v := f.call("POST", "/api/settings", map[string]any{
+		"llm": map[string]any{"base_url": urlA, "model": "m-a", "api_key": "sk-A-只属于A"},
+	})
+	if v["llm"].(map[string]any)["api_key_set"] != true {
+		t.Fatalf("A 家应显示已设置: %v", v["llm"])
+	}
+
+	// ② 只换厂商、不填密钥
+	v2 := f.call("POST", "/api/settings", map[string]any{
+		"llm": map[string]any{"base_url": urlB, "model": "m-b"},
+	})
+	l2 := v2["llm"].(map[string]any)
+	if l2["api_key_set"] != false {
+		t.Errorf("换到 B 家后不该显示已设置: %v", l2["api_key_set"])
+	}
+	if l2["api_key_host"] != scopeOf(urlA) {
+		t.Errorf("应回传密钥归属主机以便界面说明，得到 %v", l2["api_key_host"])
+	}
+	if f.agent.Cfg.LLM.APIKey != "" {
+		t.Errorf("内存里的生效密钥应已让位，得到 %q", f.agent.Cfg.LLM.APIKey)
+	}
+
+	// ③ 真往 B 发一次（连接自测走的就是 llmFormTarget 这条取密钥的路）
+	res := f.call("POST", "/api/llm/test", map[string]any{"base_url": urlB, "model": "m-b"})
+	if res["ok"] != true {
+		t.Fatalf("探测应打到本地假服务，得到 %v", res)
+	}
+	if hits, auths := capB.summary(); hits == 0 {
+		t.Fatal("B 家一次都没收到请求，这条断言就是空的")
+	} else if strings.Contains(auths, "sk-A") {
+		t.Errorf("B 家收到了 A 家的密钥：%q", auths)
+	} else if auths != "" {
+		t.Errorf("B 家不该收到任何鉴权头：%q", auths)
+	}
+
+	// ④ 换回 A：原来那把还在，不用重填
+	v3 := f.call("POST", "/api/settings", map[string]any{
+		"llm": map[string]any{"base_url": urlA, "model": "m-a"},
+	})
+	if v3["llm"].(map[string]any)["api_key_set"] != true {
+		t.Fatalf("换回 A 家应恢复已设置: %v", v3["llm"])
+	}
+	f.call("POST", "/api/llm/test", map[string]any{"base_url": urlA, "model": "m-a"})
+	if hits, auths := capA.summary(); hits == 0 || !strings.Contains(auths, "sk-A-只属于A") {
+		t.Errorf("A 家应收到原密钥（切回来免重填），得到 %d 次 / %q", hits, auths)
+	}
+}
+
+// TestWebUI_APIKeyNeedsHost 没有主机就没法绑：填了 key 却没填 base_url 必须报错，
+// 而不是悄悄存成"没绑主机的密钥"——那种记录会被下一次的补绑逻辑随手发给第一台主机。
+func TestWebUI_APIKeyNeedsHost(t *testing.T) {
+	f := newFixture(t, nil)
+	cred, err := credentials.Open(f.dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.Creds = cred
+	f.agent.Cfg.LLM.BaseURL = ""
+
+	code, msg := f.status("POST", "/api/settings", `{"llm":{"api_key":"sk-无处可绑"}}`)
+	if code != 400 {
+		t.Fatalf("状态码 = %d (%s)，应为 400", code, msg)
+	}
+	if !strings.Contains(msg, "base_url") {
+		t.Errorf("应说明缺 base_url，得到 %q", msg)
+	}
+	if got, _ := cred.ResolveLLMAPIKey(""); got != "" {
+		t.Errorf("不该落盘，得到 %q", got)
 	}
 }
 

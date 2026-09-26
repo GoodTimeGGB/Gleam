@@ -6,13 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"gleam/internal/agent"
 	"gleam/internal/eval"
-	"gleam/pkg/types"
 )
 
 // cmdEval 提示词与行为回归评测。
@@ -194,17 +192,16 @@ func loadEvalCases(path string) ([]eval.Case, error) {
 // 站点 H4 的警告必须落在草稿上：只有工程问题进回归集；"换更强模型会不会消失"
 // 是区分研究问题与工程问题的第一问，写进 note 让回流的人先回答它再入库。
 func emitCaseDraft(dataDir, taskID string) error {
-	if strings.TrimSpace(taskID) == "" || strings.ContainsAny(taskID, `/\`) {
-		return fmt.Errorf("非法任务 ID: %q", taskID)
+	path := agent.TaskArchivePath(dataDir, taskID)
+	if path == "" {
+		return fmt.Errorf("非法任务 ID: %q（含分隔符或过长——这种名字既不会写出去，也读不回来）", taskID)
 	}
-	path := filepath.Join(dataDir, "tasks", taskID+".json")
-	b, err := os.ReadFile(path)
+	g, err := agent.ReadTaskResult(dataDir, taskID)
 	if err != nil {
-		return fmt.Errorf("读取任务记录失败: %w（任务归档由 gleam goal / serve 自动写入）", err)
+		return err
 	}
-	var g types.GoalResult
-	if err := json.Unmarshal(b, &g); err != nil {
-		return fmt.Errorf("解析任务记录失败: %w", err)
+	if g == nil {
+		return fmt.Errorf("读取任务记录失败: 没有 %s（任务归档由 gleam goal / serve 自动写入）", path)
 	}
 
 	draft := eval.Case{

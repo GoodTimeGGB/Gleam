@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"gleam/internal/atomicfile"
 	"gleam/internal/tools/toolutil"
 )
 
@@ -95,7 +96,8 @@ func SpillOutput(dataDir, taskID, stepID, content string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	// 原子写：这份文件的承诺是"完整原文"，半截比缺失更坏——缺失会被读到，半截不会。
+	if err := atomicfile.Write(path, []byte(content), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil

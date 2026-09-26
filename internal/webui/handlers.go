@@ -4,12 +4,12 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"gleam/internal/agent"
+	"gleam/internal/buildinfo"
 	"gleam/internal/harness/skill"
 	"gleam/pkg/types"
 )
@@ -68,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
 	mux.HandleFunc("POST /api/skills", s.handleSkillSave)
 	mux.HandleFunc("POST /api/skills/{name}/run", s.handleSkillRun)
+	mux.HandleFunc("POST /api/skills/{name}/enabled", s.handleSkillEnabled)
 	mux.HandleFunc("DELETE /api/skills/{name}", s.handleSkillDelete)
 
 	// 定时任务
@@ -131,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/mcp", s.handleMCPInstallCustom)
 	mux.HandleFunc("DELETE /api/mcp/{name}", s.handleMCPRemove)
 	mux.HandleFunc("POST /api/mcp/{name}/reconnect", s.handleMCPRetry)
+	mux.HandleFunc("POST /api/mcp/{name}/enabled", s.handleMCPToggle)
 
 	// 专家角色与成长日志
 	mux.HandleFunc("GET /api/roles", s.handleRolesList)
@@ -154,6 +157,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/account/oauth", s.handleAccountOAuth)
 	// 我的：本地数据信息
 	mux.HandleFunc("GET /api/local-data", s.handleLocalData)
+
+	// 反馈与建议：先落本地 <DataDir>/feedback/，远端投递是可选的第二份
+	mux.HandleFunc("POST /api/feedback", s.handleFeedbackSubmit)
+	mux.HandleFunc("GET /api/feedback", s.handleFeedbackList)
+	mux.HandleFunc("GET /api/feedback/context", s.handleFeedbackContext)
+	mux.HandleFunc("POST /api/feedback/{id}/resend", s.handleFeedbackResend)
+	mux.HandleFunc("DELETE /api/feedback/{id}", s.handleFeedbackDelete)
+	mux.HandleFunc("GET /api/feedback/attachment", s.handleFeedbackAttachment)
 
 	return mux
 }
@@ -179,21 +190,30 @@ func writeErr(w http.ResponseWriter, status int, format string, args ...any) {
 }
 
 func readJSON(r *http.Request, dst any) error {
+	return readJSONCap(r, 2<<20, dst)
+}
+
+// readJSONCap 同 readJSON，只是把体积上限交给调用方：带截图的请求天然比一个表单大得多，
+// 而"大"是有限度的——上限必须贴着那一类请求的真实形状给，不能一律放到最大。
+func readJSONCap(r *http.Request, limit int64, dst any) error {
 	defer r.Body.Close()
 	// MaxBytesReader requires a non-nil ResponseWriter and may panic while
 	// reporting an oversized body. Limit the stream directly so every caller
 	// gets a normal decoder error instead.
-	r.Body = io.NopCloser(io.LimitReader(r.Body, 2<<20+1))
+	r.Body = io.NopCloser(io.LimitReader(r.Body, limit+1))
 	return json.NewDecoder(r.Body).Decode(dst)
 }
 
 func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"name":    "gleam",
-		"version": "0.1.0",
+		"version": buildinfo.Version,
 		"model":   s.Agent.LLMName(),
 		"tools":   len(s.Agent.ToolNames()),
-		"now":     time.Now(),
+		// 记忆条数由这里给，不让前端自己数：界面上一处"条数"多一个算法，
+		// 就早晚会出现两个面板报出两个数。
+		"memory": s.Agent.MemoryCount(),
+		"now":    time.Now(),
 	})
 }
 
@@ -264,7 +284,7 @@ func (s *Server) handleGoalSubmit(w http.ResponseWriter, r *http.Request) {
 	// 使用后台 context：页面关闭不应中断任务；cancel 仅用于显式取消
 	ctx, cancel := context.WithCancel(context.Background())
 
-	t := &taskInfo{ID: taskID, Goal: body.Goal, Mode: body.Mode, Status: types.GoalRunning, Started: time.Now(), Cancel: cancel}
+	t := &taskInfo{ID: taskID, Goal: body.Goal, Mode: body.Mode, TaskMode: body.TaskMode, Status: types.GoalRunning, Started: time.Now(), Cancel: cancel}
 	s.mu.Lock()
 	s.tasks[taskID] = t
 	s.mu.Unlock()
@@ -272,6 +292,13 @@ func (s *Server) handleGoalSubmit(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		result := s.Agent.RunGoal(ctx, req)
 		cancel() // 任务结束释放 context 资源
+		// 归档先于终态被外界看到。内存表能兜住"收到 completed 就拉详情"，兜不住重启：
+		// 而界面任务一旦被看到就是被认为已保存，广播之后再落盘的那几毫秒里进程若被杀，
+		// 这一次跑就彻底不存在了——`gleam replay <id>` 与评测的 badcase 回流都读这一份。
+		// （顺序本身没有断言：一个进程内测不出"广播后被杀"，见 scripts/mutation/README.md）
+		if err := agent.SaveTaskResult(s.Agent.Cfg.DataDir, result); err != nil {
+			fmt.Fprintf(os.Stderr, "[gleam] 界面任务未存档：%v\n", err)
+		}
 		s.mu.Lock()
 		t.Status = result.Status
 		t.Result = result
@@ -280,8 +307,16 @@ func (s *Server) handleGoalSubmit(w http.ResponseWriter, r *http.Request) {
 		s.broadcast(newEvent("completed", result))
 	}()
 	resp := map[string]any{"task_id": taskID, "status": "running"}
-	if s.Agent.Cfg.LLM.Provider != "mock" && strings.TrimSpace(s.Agent.Cfg.LLM.APIKey) == "" {
-		resp["warning"] = "未配置 API Key，模型调用将失败（401）。请到「设置 → 模型」填写后重试，或在启动时使用 --mock-llm 离线体验。"
+	if s.Agent.Cfg.LLM.Provider != "mock" {
+		// 问密钥的单一出口，而不是直接读 cfg.LLM.APIKey ——后者只说"当前主机上有没有生效的 key"，
+		// 说不了"配过、但配的是别家"。把后者也报成"未配置"是假的：用户明明填过，只是换厂商要重填。
+		if key, storedHost := agent.LLMKeyFor(s.Agent.Cfg, s.Agent.Creds, s.Agent.Cfg.LLM.BaseURL, ""); key == "" {
+			if storedHost != "" {
+				resp["warning"] = fmt.Sprintf("当前接入主机没有可用密钥（本机存着的是发给 %s 的那把）。密钥按接入主机绑定，请为现在的厂商重新填一次。", storedHost)
+			} else {
+				resp["warning"] = "未配置 API Key，模型调用将失败（401）。请到「设置 → 模型」填写后重试，或在启动时使用 --mock-llm 离线体验。"
+			}
+		}
 	}
 	writeJSON(w, 200, resp)
 }
@@ -311,13 +346,38 @@ func (s *Server) pruneTasksLocked(keep string) {
 	}
 }
 
+// listArchiveLimit 列表里最多带出多少条归档。
+//
+// 归档目录会一路涨，而界面显示的是"最近任务"；上限既是性能护栏，也是响应体护栏
+// （每条都带完整 result，几千条会把一次轮询变成一次下载）。
+const listArchiveLimit = 100
+
 func (s *Server) handleGoalList(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	list := make([]*taskInfo, 0, len(s.tasks))
+	seen := make(map[string]bool, len(s.tasks))
 	for _, t := range s.tasks {
 		list = append(list, t.snapshot())
+		seen[t.ID] = true
 	}
 	s.mu.Unlock()
+	// 内存表在重启（或被 maxRetainedTasks 淘汰）之后就空了，盘上的 tasks/ 才是历史。
+	// 只有详情读归档、列表不读，用户看到的就是"全部 0"——他会以为记录丢了，
+	// 而那份档案其实就在盘上（`gleam replay <id>` 也读得到）。
+	archived, skipped, err := agent.ListTaskResults(s.Agent.Cfg.DataDir, listArchiveLimit)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[gleam] 任务归档列表读不动：%v\n", err)
+	}
+	if skipped > 0 {
+		// 坏归档只该让那一条看不见，不该让人以为整段历史没了——所以要出声。
+		fmt.Fprintf(os.Stderr, "[gleam] %d 份任务归档读不动，已跳过\n", skipped)
+	}
+	for _, g := range archived {
+		if g == nil || seen[g.TaskID] {
+			continue // 内存里那份更新（可能还在跑），以它为准
+		}
+		list = append(list, archivedTaskInfo(g))
+	}
 	// 新的在前
 	sort.Slice(list, func(i, j int) bool { return list[i].Started.After(list[j].Started) })
 	writeJSON(w, 200, map[string]any{"count": len(list), "goals": list})
@@ -344,24 +404,38 @@ func (s *Server) handleGoalGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, t)
 }
 
-// safeTaskIDChars 归档回放的 id 白名单：id 会被拼进文件路径，
-// `..`、分隔符、空串等穿越形态必须一刀挡掉（数据目录下有含密钥的 settings）。
-var safeTaskIDChars = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+// safeIDChars URL 路径参数的形状白名单。这里只管"能不能当标识符"，
+// 不管落不落盘：要拼成文件名的那类 id 走 agent.SafeTaskName（读写同一条规则）。
+var safeIDChars = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // archivedTask 从 tasks/<id>.json 读一份终态记录（gleam replay 读的就是它）。
+//
+// id 会被拼进文件路径，所以先过写入侧同一条名字规则（`agent.SafeTaskName`）：
+// `..`、分隔符、空串等穿越形态必须一刀挡掉——数据目录下就有含密钥的 settings。
+// 读写共用一条规则，才不会写出一个读回来的路径形状不一样的文件。
 func (s *Server) archivedTask(id string) (*taskInfo, bool) {
-	if !safeTaskIDChars.MatchString(id) {
-		return nil, false
-	}
-	b, err := os.ReadFile(filepath.Join(s.Agent.Cfg.DataDir, "tasks", id+".json"))
+	g, err := agent.ReadTaskResult(s.Agent.Cfg.DataDir, id)
 	if err != nil {
+		// 坏文件与"从没写过"是两件事：都当成不存在，用户只会反复重跑那次任务，
+		// 而真正的问题是归档文件本身读不动。
+		fmt.Fprintf(os.Stderr, "[gleam] 任务归档 %s 读不动：%v\n", id, err)
 		return nil, false
 	}
-	var g types.GoalResult
-	if json.Unmarshal(b, &g) != nil || g.TaskID != id {
+	if g == nil {
 		return nil, false
 	}
-	return &taskInfo{ID: g.TaskID, Goal: g.Goal, Status: g.Status, Result: &g, Started: g.StartedAt}, true
+	return archivedTaskInfo(g), true
+}
+
+// archivedTaskInfo 把一份盘上归档还原成界面用的任务记录。
+//
+// 读侧只有这一个构造点：列表和详情必须给出同一种形状，否则"刚跑完"与"重启后点开"
+// 会是两套字段，前端的徽标和筛选就会在重启之后突然少一半。
+func archivedTaskInfo(g *types.GoalResult) *taskInfo {
+	return &taskInfo{
+		ID: g.TaskID, Goal: g.Goal, Mode: g.Mode, TaskMode: string(g.TaskMode),
+		Status: g.Status, Result: g, Started: g.StartedAt,
+	}
 }
 
 func (s *Server) handleGoalCancel(w http.ResponseWriter, r *http.Request) {
@@ -373,6 +447,9 @@ func (s *Server) handleGoalCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	_ = s.Agent.CancelTask(id)
+	// 取消之后必须叫醒停在审批上的那一轮：ctx 已经取消，但引擎的整计划闸门等的是
+	// 审批通道，不是 ctx。"取消返回 200、任务还在 running"就是这么来的。
+	s.dropTaskApprovals(id, "任务已取消")
 	writeJSON(w, 200, map[string]any{"task_id": id, "cancelled": ok})
 }
 
@@ -464,7 +541,7 @@ func (s *Server) handleMemorySave(w http.ResponseWriter, r *http.Request) {
 // handleMemoryDelete 软删除单条记忆（L3，2026-09-23 QA：之前只有整库视角，删不掉记错的单条）。
 func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !safeTaskIDChars.MatchString(id) {
+	if !safeIDChars.MatchString(id) {
 		writeErr(w, 400, "非法记忆 ID")
 		return
 	}
@@ -520,6 +597,24 @@ func (s *Server) handleSkillRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// handleSkillEnabled 启用 / 停用技能：与定时任务、MCP 的启停同一条形状（状态落盘，响应带回新列表）。
+func (s *Server) handleSkillEnabled(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Enabled == nil {
+		writeErr(w, 400, "需要 enabled（true 启用 / false 停用）")
+		return
+	}
+	res, err := s.Agent.SkillSetEnabled(name, *body.Enabled)
+	if err != nil {
+		writeErr(w, 404, "%v", err)
+		return
+	}
+	writeJSON(w, 200, res)
 }
 
 func (s *Server) handleSkillDelete(w http.ResponseWriter, r *http.Request) {
@@ -739,14 +834,15 @@ func (s *Server) handleMarketMCPInstall(w http.ResponseWriter, r *http.Request) 
 		ID     string            `json:"id"`
 		Params map[string]string `json:"params"`
 		Trust  string            `json:"trust"`
+		Force  bool              `json:"force"`
 	}
 	if err := readJSON(r, &body); err != nil || body.ID == "" {
 		writeErr(w, 400, "需要 id")
 		return
 	}
-	res, err := s.Agent.MCPInstallPreset(body.ID, body.Params, body.Trust)
+	res, err := s.Agent.MCPInstallPreset(body.ID, body.Params, body.Trust, body.Force)
 	if err != nil {
-		writeErr(w, 400, "%v", err)
+		writeInstallErr(w, err)
 		return
 	}
 	writeJSON(w, 200, res)
@@ -759,18 +855,29 @@ func (s *Server) handleMarketSkills(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMarketSkillInstall(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Name  string `json:"name"`
+		Force bool   `json:"force"`
 	}
 	if err := readJSON(r, &body); err != nil || body.Name == "" {
 		writeErr(w, 400, "需要 name")
 		return
 	}
-	version, err := s.Agent.SkillInstallPreset(body.Name)
+	version, err := s.Agent.SkillInstallPreset(body.Name, body.Force)
 	if err != nil {
-		writeErr(w, 400, "%v", err)
+		writeInstallErr(w, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"name": body.Name, "version": version, "installed": true})
+}
+
+// writeInstallErr 安装类错误的统一出口：409 =「已装着呢，要不要重装」（前端据此弹确认），
+// 400 = 参数真的不对。三处安装入口共用一条判断，别处再写一遍就会漂。
+func writeInstallErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, agent.ErrAlreadyInstalled) {
+		writeErr(w, 409, "%v", err)
+		return
+	}
+	writeErr(w, 400, "%v", err)
 }
 
 func (s *Server) handleMCPList(w http.ResponseWriter, _ *http.Request) {
@@ -784,16 +891,37 @@ func (s *Server) handleMCPInstallCustom(w http.ResponseWriter, r *http.Request) 
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
 		Trust   string   `json:"trust"`
+		Force   bool     `json:"force"`
 	}
 	if err := readJSON(r, &body); err != nil || body.Command == "" {
 		writeErr(w, 400, "需要 command")
 		return
 	}
-	res, err := s.Agent.MCPInstallCustom(body.Name, body.Command, body.Args, body.Trust)
+	res, err := s.Agent.MCPInstallCustom(body.Name, body.Command, body.Args, body.Trust, body.Force)
 	if err != nil {
-		writeErr(w, 400, "%v", err)
+		writeInstallErr(w, err)
 		return
 	}
+	writeJSON(w, 200, res)
+}
+
+// handleMCPToggle 启用 / 停用一台 MCP 服务器（状态落盘，与定时任务的暂停/恢复同构）。
+func (s *Server) handleMCPToggle(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Enabled == nil {
+		writeErr(w, 400, "需要 enabled（true 启用 / false 停用）")
+		return
+	}
+	res, err := s.Agent.MCPSetEnabled(name, *body.Enabled)
+	if err != nil {
+		writeErr(w, 404, "%v", err)
+		return
+	}
+	// 响应里带回完整 mcp 列表：界面按返回值刷新，比再发一条 SSE 让前端重新拉一次更直接
+	// （停用是用户自己点的那一下，不存在"别人改了状态"的并发场景）。
 	writeJSON(w, 200, res)
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"gleam/internal/atomicfile"
 	"gleam/internal/tools/toolutil"
 	"gleam/pkg/types"
 )
@@ -112,7 +113,8 @@ func (t *SnippetsTool) saveStore(m map[string]snippet) error {
 	if err := os.MkdirAll(t.dataDir, 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(t.path(), data, 0644)
+	// 原子写：整张便签表存在一个文件里，写成半截 = 全部便签一起丢
+	return atomicfile.Write(t.path(), data, 0o644)
 }
 
 func (t *SnippetsTool) list() (any, error) {

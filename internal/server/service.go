@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
 	"gleam/internal/agent"
+	"gleam/internal/buildinfo"
 	"gleam/internal/harness/skill"
 	"gleam/pkg/types"
 )
@@ -87,7 +87,7 @@ func (s *Service) handleInitialize(_ context.Context, _ json.RawMessage) (any, *
 	tools := s.Agent.Reg.Names()
 	return map[string]any{
 		"name":    "gleam",
-		"version": "0.1.0",
+		"version": buildinfo.Version,
 		"model":   s.Agent.LLM.Name(),
 		"capabilities": map[string]any{
 			"goal":      true, // 目标模式
@@ -132,15 +132,16 @@ func (s *Service) handleGoalSubmit(_ context.Context, params json.RawMessage) (a
 	if len([]rune(p.Goal)) < 2 {
 		return nil, Errf(CodeInvalidParams, "goal 不能为空")
 	}
-	req := types.GoalRequest{Goal: p.Goal, Context: p.Context, References: p.References, Mode: p.Mode, TaskMode: types.TaskMode(p.TaskMode), Role: p.Role}
-	if err := agent.ValidateGoalRequest(req); err != nil {
-		return nil, Errf(CodeInvalidParams, "%v", err)
-	}
+	// task_id 先补齐再校验：形状规则住在 ValidateGoalRequest（它会变成归档的文件名），
+	// 顺序反了就等于把外部传入的 id 放过了这一关。
 	taskID := p.TaskID
 	if taskID == "" {
 		taskID = types.NewID()
 	}
-	req.TaskID = taskID
+	req := types.GoalRequest{Goal: p.Goal, Context: p.Context, References: p.References, Mode: p.Mode, TaskMode: types.TaskMode(p.TaskMode), Role: p.Role, TaskID: taskID}
+	if err := agent.ValidateGoalRequest(req); err != nil {
+		return nil, Errf(CodeInvalidParams, "%v", err)
+	}
 	entry := &taskEntry{ID: taskID, Goal: p.Goal, Status: types.GoalRunning, Mode: p.Mode, Started: time.Now()}
 	s.mu.Lock()
 	s.tasks[taskID] = entry
@@ -156,7 +157,7 @@ func (s *Service) handleGoalSubmit(_ context.Context, params json.RawMessage) (a
 		entry.Result = result
 		s.pruneTasksLocked()
 		s.mu.Unlock()
-		// 持久化工作记忆
+		// 持久化工作记忆（归档只有一个出口，见 agent.SaveTaskResult）
 		s.saveTaskResult(result)
 		s.Conn.Notify("goal/completed", result)
 	}()
@@ -236,22 +237,14 @@ func (s *Service) pruneTasksLocked() {
 	}
 }
 
-// saveTaskResult 把任务结果持久化到数据目录（工作记忆）。
+// saveTaskResult 把任务结果归档到数据目录（工作记忆）。写入本身住在 agent.SaveTaskResult
+// ——CLI 与常驻服务共一个出口，"写成了才删运行日志"这条顺序才只有一处需要维护。
 func (s *Service) saveTaskResult(result *types.GoalResult) {
-	dir := filepath.Join(s.Agent.Cfg.DataDir, "tasks")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return
+	if err := agent.SaveTaskResult(s.Agent.Cfg.DataDir, result); err != nil {
+		// 归档失败不打断流程，但必须留下声音：runs/ 里因此保着运行日志，
+		// 不说的话没人知道这条任务在 tasks/ 里其实查不到。
+		fmt.Fprintf(os.Stderr, "[gleam] 任务未存档：%v\n", err)
 	}
-	b, err := json.MarshalIndent(result, "", " ")
-	if err != nil {
-		return
-	}
-	if err := os.WriteFile(filepath.Join(dir, result.TaskID+".json"), b, 0o644); err != nil {
-		return
-	}
-	// 终态快照写成功之后才删运行日志：反过来的话，一次写盘失败就会把
-	// 运行中唯一的凭据也一起丢掉——那正好是它最该被保留的时候。
-	agent.DiscardRunLog(s.Agent.Cfg.DataDir, result.TaskID)
 }
 
 // ---------- 工具 ----------
@@ -336,7 +329,7 @@ func (s *Service) handleMemorySave(_ context.Context, params json.RawMessage) (a
 // ---------- 技能 ----------
 
 func (s *Service) handleSkillsList(_ context.Context, _ json.RawMessage) (any, *RPCError) {
-	list := s.Agent.Skills.List()
+	list := s.Agent.SkillList()
 	return map[string]any{"count": len(list), "skills": list}, nil
 }
 
@@ -347,7 +340,7 @@ func (s *Service) handleSkillGet(_ context.Context, params json.RawMessage) (any
 	if err := json.Unmarshal(params, &p); err != nil || p.Name == "" {
 		return nil, Errf(CodeInvalidParams, "需要 name")
 	}
-	sk, err := s.Agent.Skills.Get(p.Name)
+	sk, err := s.Agent.SkillGet(p.Name)
 	if err != nil {
 		return nil, Errf(CodeInvalidParams, "%v", err)
 	}
@@ -364,7 +357,8 @@ func (s *Service) handleSkillSave(_ context.Context, params json.RawMessage) (an
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, Errf(CodeInvalidParams, "参数解析失败: %v", err)
 	}
-	version, err := s.Agent.Skills.Save(skill.Skill{
+	// 走门面而不是直摸 Skills：技能入库的成长事件只在门面那一处记，绕过去就是漏项
+	version, err := s.Agent.SkillSave(skill.Skill{
 		Name: p.Name, Description: p.Description, Params: p.Params, Steps: p.Steps,
 	})
 	if err != nil {

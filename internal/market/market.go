@@ -95,7 +95,7 @@ var MCPCatalog = []MCPPreset{
 // SkillCatalog 技能模板目录（基于内置工具，安装即可运行/继续改造）。
 var SkillCatalog = []SkillPreset{
 	{
-		Name: "quick-note", Description: "速记入库：把一句话存进长期记忆，随时可语义检索",
+		Name: "quick-note", Description: "速记入库：把一句话存进长期记忆，随时按关键词找回",
 		Params: []string{"text"},
 		Steps: []types.Step{
 			{ID: "s1", Tool: "memory.save", Args: map[string]any{"content": "{{text}}"}},

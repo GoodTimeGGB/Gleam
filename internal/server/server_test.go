@@ -299,6 +299,22 @@ func TestRPC_GoalRejectsInvalidReference(t *testing.T) {
 	}
 }
 
+// task_id 会成为归档文件名（tasks/<id>.json），所以越界形状要在**入口**拦住：
+// 放过去的话任务照跑、token 照花，最后一步归档才失败，人要等到回放时才看到"读不到"。
+func TestRPC_GoalSubmitRejectsUnsafeTaskID(t *testing.T) {
+	cl, _, _ := startServer(t, nil, false)
+	_, rpcErr, err := cl.call("goal/submit", map[string]any{"goal": "测试目标", "task_id": "abc/../def"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rpcErr == nil || rpcErr.Code != CodeInvalidParams {
+		t.Fatalf("非法 task_id 应被判 InvalidParams: %v", rpcErr)
+	}
+	if !strings.Contains(rpcErr.Message, "task_id") {
+		t.Errorf("错误信息要指出是哪个字段，实际 %q", rpcErr.Message)
+	}
+}
+
 func TestGoalListNewestFirst(t *testing.T) {
 	now := time.Now()
 	svc := &Service{tasks: map[string]*taskEntry{

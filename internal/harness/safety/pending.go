@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"gleam/internal/atomicfile"
 )
 
 // PendingApproval 一条"等待用户批准"的记录。
@@ -133,8 +135,5 @@ func (g *Gate) savePendingLocked() {
 	if err != nil {
 		return
 	}
-	tmp := g.pendingPath + ".tmp"
-	if os.WriteFile(tmp, data, 0o644) == nil {
-		_ = os.Rename(tmp, g.pendingPath)
-	}
+	_ = atomicfile.Write(g.pendingPath, data, 0o644)
 }

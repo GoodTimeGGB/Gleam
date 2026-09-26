@@ -12,6 +12,44 @@ import (
 
 // ---------- 厂商预设与套餐解析 ----------
 
+// KeyScope 决定"这把密钥允许发给谁"，判错一边就是两种事故：
+// 按整条 URL 绑 → 用户改路径就"密钥丢了"；绑得太松 → 换厂商把上一家的发出去。
+func TestKeyScope(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://open.bigmodel.cn/api/paas/v4", "open.bigmodel.cn"},
+		{"https://open.bigmodel.cn/api/coding/paas/v4", "open.bigmodel.cn"}, // 同厂不同套餐 = 同一把 key
+		{"  http://127.0.0.1:8000/v1/  ", "127.0.0.1:8000"},                 // 端口是主机的一部分
+		{"https://API.OpenAI.com/v1", "api.openai.com"},                     // 主机大小写不敏感
+		{"https://a.com", "a.com"},
+		{"", ""},
+		{"not-a-url", "not-a-url"}, // 解析不出来就按原值当独立主机，绝不当成"和谁都一样"
+	}
+	for _, c := range cases {
+		if got := KeyScope(c.in); got != c.want {
+			t.Errorf("KeyScope(%q) = %q，want %q", c.in, got, c.want)
+		}
+	}
+	// 不同厂商必须算出不同 scope，否则绑定形同虚设
+	if KeyScope("https://api.deepseek.com/v1") == KeyScope("https://open.bigmodel.cn/v1") {
+		t.Error("两家厂商算出了同一个 scope")
+	}
+}
+
+// ResolveTarget 是三处调用（启动装配 / 设置保存 / 连接自测）共用的归一化，
+// 这里钉住它的兜底链：预设协议覆盖已配协议，非法协议回落 openai_chat。
+func TestResolveTarget(t *testing.T) {
+	base, model, protocol := ResolveTarget("zhipu", PlanCoding, "", "", "")
+	if protocol != ProtocolOpenAIChat || model == "" || base == "" {
+		t.Fatalf("preset = %s %s %s", base, model, protocol)
+	}
+	if _, _, p := ResolveTarget("", "", "https://x/v1", "m", "胡来的协议"); p != ProtocolOpenAIChat {
+		t.Errorf("非法协议应回落，得到 %s", p)
+	}
+	if _, _, p := ResolveTarget("", "", "https://x/v1", "m", ProtocolAnthropic); p != ProtocolAnthropic {
+		t.Errorf("无预设时不该覆盖用户显式选的协议，得到 %s", p)
+	}
+}
+
 func TestResolvePreset_ZhipuCoding(t *testing.T) {
 	base, model, protocol := ResolvePreset("zhipu", PlanCoding, "", "")
 	if base != "https://open.bigmodel.cn/api/coding/paas/v4" {

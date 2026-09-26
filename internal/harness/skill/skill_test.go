@@ -76,8 +76,12 @@ func TestStore_Versioning(t *testing.T) {
 func TestStore_RecordRun(t *testing.T) {
 	st := newTestStore(t)
 	st.Save(sampleSkill())
-	st.RecordRun("demo-skill", true)
-	st.RecordRun("demo-skill", false)
+	if err := st.RecordRun("demo-skill", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordRun("demo-skill", false); err != nil {
+		t.Fatal(err)
+	}
 	got, err := st.Get("demo-skill")
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +94,67 @@ func TestStore_RecordRun(t *testing.T) {
 	}
 	if got.Version != 1 {
 		t.Errorf("RecordRun 不应递增版本: %d", got.Version)
+	}
+}
+
+// TestStore_DisabledSurvivesReloadAndSave 「停用」要成立，得同时满足三件事：
+// 落盘（重启后还停着）、被 Save 尊重（自动优化与市场重装都会重写这个文件）、
+// 从进规划上下文的那份清单里消失。少任何一件，界面显示的都是一句假话。
+func TestStore_DisabledSurvivesReloadAndSave(t *testing.T) {
+	st := newTestStore(t)
+	st.Save(sampleSkill())
+	if err := st.RecordRun("demo-skill", true); err != nil {
+		t.Fatal(err)
+	}
+	sk, err := st.SetDisabled("demo-skill", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sk.Disabled {
+		t.Fatal("SetDisabled 返回的状态没带上停用")
+	}
+
+	reopened, err := Open(st.dir) // 等价于重启进程：只认磁盘上的 YAML
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reopened.Get("demo-skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Disabled {
+		t.Error("停用未落盘，重启后就自己跑起来了")
+	}
+	if got.Runs != 1 || got.Successes != 1 {
+		t.Errorf("统计被改写: %+v", got)
+	}
+	if len(got.Steps) != 2 || got.Params[0] != "dir" {
+		t.Errorf("步骤或参数丢失: %+v", got)
+	}
+
+	if _, err := reopened.Save(sampleSkill()); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := reopened.Get("demo-skill")
+	if !after.Disabled {
+		t.Error("Save 把停用状态抹掉了——重新保存不是「启用」的入口")
+	}
+	if after.Version != 2 {
+		t.Errorf("Save 仍应递增版本: %d", after.Version)
+	}
+
+	if n := len(reopened.ListSummaries()); n != 0 {
+		t.Errorf("ListSummaries（进规划上下文）不应含停用技能，得到 %d 条", n)
+	}
+	if _, err := reopened.SetDisabled("demo-skill", false); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(reopened.ListSummaries()); n != 1 {
+		t.Errorf("启用后应回到清单，得到 %d 条", n)
+	}
+	// 停用一个不存在的技能要报错，而不是悄悄建一个空文件
+	if _, err := reopened.SetDisabled("no-such", true); err == nil {
+		t.Error("不存在的技能应报错")
 	}
 }
 

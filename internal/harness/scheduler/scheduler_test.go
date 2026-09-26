@@ -3,6 +3,7 @@ package scheduler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +59,46 @@ func TestScheduler_DuplicateNameRejected(t *testing.T) {
 	jobs := s.ListJobs()
 	if len(jobs) != 1 || jobs[0].Goal != "整理桌面" || jobs[0].Cron != "0 9 * * *" {
 		t.Fatalf("拒绝后原任务不应被改动: %+v", jobs)
+	}
+}
+
+// TestScheduler_JobNameMustStayAddressable 任务名是 REST 路径参数，写入口就得把它钉住。
+//
+// 反例是真实存在的：名字里带 `/` 的任务能按时跑，但 `/api/schedules/{name}/enabled`
+// 在**解码后**的路径上匹配，`a%2Fb` 也会还原成两个 segment，路由不命中返回纯文本 404
+// ——于是它既停不掉也删不掉，只能手动改 jobs 文件。
+func TestScheduler_JobNameMustStayAddressable(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "schedules.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		wantErr bool
+	}{
+		{"每日巡检 9 点", false}, // 中文、数字、空格都是正常说法
+		{"check.disk", false},
+		{"backup_2026-09", false},
+		{"每日巡检 09:00", true}, // 冒号不在允许集合里：宁可写清楚，也不要两套口径
+		{"巡检：每日", true},      // 全角冒号同理，它也不算 \p{Han}
+		{"巡检/每日", true},
+		{"a/b", true},
+		{"a\\b", true},
+		{"../../etc/passwd", true},
+		{"带?查询", true},
+		{"带#锚点", true},
+		{"带\x00控制符", true},
+		{strings.Repeat("巡检", 33), true}, // 66 字，超长
+	}
+	for _, c := range cases {
+		_, err := s.AddJob(c.name, "0 9 * * *", 0, "目标", "auto")
+		if (err != nil) != c.wantErr {
+			t.Errorf("名字 %q: err=%v wantErr=%v", c.name, err, c.wantErr)
+		}
+	}
+	// 只统计合法的那几条：被拒的不该在列表里留下半个影子
+	if got := s.Count(); got != 3 {
+		t.Errorf("被拒名字不该入库，Count = %d，期望 3", got)
 	}
 }
 

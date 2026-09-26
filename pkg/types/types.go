@@ -457,9 +457,14 @@ type ConfigSnapshot struct {
 
 // GoalResult 目标执行结果。
 type GoalResult struct {
-	TaskID     string       `json:"task_id"`
-	Goal       string       `json:"goal"`
-	Status     GoalStatus   `json:"status"`
+	TaskID string     `json:"task_id"`
+	Goal   string     `json:"goal"`
+	Status GoalStatus `json:"status"`
+	// Mode / TaskMode：这次是**按什么方式**跑的（安全模式 + 任务模式）。
+	// 请求侧的事实也要归档：重启后界面上的任务卡片只能从档案重建，缺了这两个，
+	// 「对话 / 工作 / 编程」的筛选与徽标会整列空掉——看起来像任务被改过类型。
+	Mode       string       `json:"mode,omitempty"`
+	TaskMode   TaskMode     `json:"task_mode,omitempty"`
 	Score      int          `json:"score"`
 	Summary    string       `json:"summary"`
 	Error      string       `json:"error,omitempty"`
@@ -650,4 +655,64 @@ func EstimateTokens(s string) int {
 		}
 	}
 	return cjk + (other+3)/4
+}
+
+// ---------- 用户反馈与建议 ----------
+
+// FeedbackKind 反馈类型。刻意只有两类：「报问题」要能定位，「提主意」要能排期，
+// 混成一类就没人能分开处理它们。
+type FeedbackKind string
+
+const (
+	FeedbackBug        FeedbackKind = "bug"
+	FeedbackSuggestion FeedbackKind = "suggestion"
+)
+
+// FeedbackDelivery 远端投递状态。
+//
+// **本地归档成功才算提交成功**，投递只是再送一份出去，所以这三态描述的是那一份，
+// 不是"这条反馈在不在"。把没配远端写成 failed 会让人以为提交失败了，那比如实写
+// local_only 坏：前者会让人重填一遍。
+type FeedbackDelivery string
+
+const (
+	FeedbackLocalOnly FeedbackDelivery = "local_only"
+	FeedbackSent      FeedbackDelivery = "sent"
+	FeedbackFailed    FeedbackDelivery = "failed"
+)
+
+// FeedbackAttachment 随反馈提交的截图。存的是 feedback/ 目录下的**文件名**（后端生成），
+// 不是调用方给的路径——能被提交上来的路径就不是它自己起的名了。
+type FeedbackAttachment struct {
+	Name  string `json:"name"`
+	Mime  string `json:"mime"`
+	Bytes int    `json:"bytes"`
+}
+
+// FeedbackContext 提交时自动附带的运行环境。
+//
+// 这一份会离开本机，所以字段是**白名单**而不是"把能拿到的都塞进来"：模型只留名字，
+// 接入点只留主机名（完整 URL 可能带 token 或路径型密钥），失败步骤只留工具名。
+// 绝对路径、日志正文、目标原文都不在这里（取舍理由见设计文档）。
+type FeedbackContext struct {
+	AppVersion string     `json:"app_version"`
+	GoVersion  string     `json:"go_version,omitempty"`
+	OS         string     `json:"os,omitempty"`
+	Model      string     `json:"model,omitempty"`
+	LLMHost    string     `json:"llm_host,omitempty"`
+	TaskID     string     `json:"task_id,omitempty"`
+	TaskStatus GoalStatus `json:"task_status,omitempty"`
+	FailedTool string     `json:"failed_tool,omitempty"`
+}
+
+// Feedback 一条用户反馈。落盘位置与生命周期见 internal/harness/feedback。
+type Feedback struct {
+	ID           string               `json:"id"`
+	Kind         FeedbackKind         `json:"kind"`
+	Text         string               `json:"text"`
+	Attachments  []FeedbackAttachment `json:"attachments,omitempty"`
+	Context      FeedbackContext      `json:"context"`
+	CreatedAt    time.Time            `json:"created_at"`
+	Delivery     FeedbackDelivery     `json:"delivery"`
+	DeliveryNote string               `json:"delivery_note,omitempty"`
 }

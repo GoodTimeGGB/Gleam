@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gleam/internal/config"
+	"gleam/internal/harness/growth"
 	"gleam/internal/harness/scheduler"
 	"gleam/internal/harness/skill"
 	"gleam/internal/llm"
@@ -124,6 +125,15 @@ func (a *Agent) MemorySearch(query string, k int) []types.MemoryHitView {
 	return out
 }
 
+// MemoryCount 长期记忆条目总数（含软删条目，口径与就绪体检里的「长期记忆 N 条」一致）。
+// 界面上任何一处"条数"都必须问这里：自己数一遍就会和别处对不上。
+func (a *Agent) MemoryCount() int {
+	if a.Mem == nil || a.Mem.Long == nil {
+		return 0
+	}
+	return a.Mem.Long.Count()
+}
+
 // MemoryDelete 软删除一条长期记忆（检索立即跳过，条目保留可改判）。
 func (a *Agent) MemoryDelete(id string) bool {
 	if a.Mem == nil || a.Mem.Long == nil {
@@ -143,8 +153,27 @@ func (a *Agent) MemorySave(content string, tags []string) (string, error) {
 // SkillList 技能列表。
 func (a *Agent) SkillList() []skill.Skill { return a.Skills.List() }
 
-// SkillSave 保存技能。
-func (a *Agent) SkillSave(sk skill.Skill) (int, error) { return a.Skills.Save(sk) }
+// SkillGet 读取单个技能（含步骤）：外部入口要看内容只能走这里，别直摸 harness。
+func (a *Agent) SkillGet(name string) (*skill.Skill, error) { return a.Skills.Get(name) }
+
+// SkillSave 保存技能。首次落库（v1）记一条 skill_created——等级公式里
+// TotalSkills 占 20 分，而这个事件此前没有任何生产者：技能那一栏永远是 0，
+// 用户攒了一堆技能，等级却一动不动。
+func (a *Agent) SkillSave(sk skill.Skill) (int, error) {
+	v, err := a.Skills.Save(sk)
+	if err == nil && v == 1 {
+		a.recordSkillCreated(sk.Name, sk.Description)
+	}
+	return v, err
+}
+
+// recordSkillCreated 记一条技能入库事件（Growth 未启用时静默跳过，与任务日志同一条规则）。
+func (a *Agent) recordSkillCreated(name, description string) {
+	if a.Growth == nil {
+		return
+	}
+	a.Growth.Record(growth.Entry{Type: "skill_created", SkillName: name, Goal: description})
+}
 
 // SkillRun 运行技能。
 func (a *Agent) SkillRun(ctx context.Context, name string, params map[string]string) (map[string]any, error) {
@@ -153,6 +182,19 @@ func (a *Agent) SkillRun(ctx context.Context, name string, params map[string]str
 
 // SkillDelete 删除技能。
 func (a *Agent) SkillDelete(name string) error { return a.Skills.Delete(name) }
+
+// SkillSetEnabled 启用 / 停用技能：留在库里、保留统计，只是不再进技能清单、不再可运行。
+func (a *Agent) SkillSetEnabled(name string, enabled bool) (map[string]any, error) {
+	s, err := a.Skills.SetDisabled(name, !enabled)
+	if err != nil {
+		return nil, err
+	}
+	list := a.SkillList()
+	return map[string]any{
+		"name": s.Name, "enabled": !s.Disabled, "version": s.Version,
+		"count": len(list), "skills": list,
+	}, nil
+}
 
 // ScheduleList 定时任务列表。
 func (a *Agent) ScheduleList() []types.ScheduleJobView {
@@ -254,7 +296,11 @@ var settingsModes = map[string]bool{"auto": true, "plan_first": true, "interacti
 // SettingsView 返回设置页所需的完整视图（api_key 掩码，不回传明文）。
 func (a *Agent) SettingsView() map[string]any {
 	cfg := a.Cfg
-	apiKeySet := cfg.LLM.APIKey != ""
+	// 密钥状态必须按"当前生效主机"判，而不是"凭证文件里有没有一把 key"：
+	// 后者会在换厂商后依旧显示"已设置"，而实际发出去的却是别家的凭证。
+	// keyHost 是这把 key 归属的主机，界面用它区分"没配"与"配给了别家"。
+	activeKey, keyHost := a.llmKeyFor(cfg.LLM.BaseURL, "")
+	apiKeySet := activeKey != ""
 	return map[string]any{
 		"persona": map[string]any{"name": cfg.Persona.Name, "style": cfg.Persona.Style},
 		"safety": map[string]any{
@@ -287,18 +333,20 @@ func (a *Agent) SettingsView() map[string]any {
 			"max_items":           cfg.Memory.MaxItems,
 		},
 		"llm": map[string]any{
-			"provider":        cfg.LLM.Provider,
-			"protocol":        cfg.LLM.Protocol,
-			"provider_id":     cfg.LLM.ProviderID,
-			"plan":            cfg.LLM.Plan,
-			"model":           cfg.LLM.Model,
-			"fast_model":      cfg.LLM.FastModel,
-			"tiers":           tiersView(cfg.LLM.Tiers),
-			"base_url":        cfg.LLM.BaseURL,
-			"temperature":     cfg.LLM.Temperature,
-			"max_tokens":      cfg.LLM.MaxTokens,
-			"timeout_seconds": cfg.LLM.TimeoutSecs,
-			"api_key_set":     apiKeySet,
+			"provider":         cfg.LLM.Provider,
+			"protocol":         cfg.LLM.Protocol,
+			"provider_id":      cfg.LLM.ProviderID,
+			"plan":             cfg.LLM.Plan,
+			"model":            cfg.LLM.Model,
+			"fast_model":       cfg.LLM.FastModel,
+			"tiers":            tiersView(cfg.LLM.Tiers),
+			"base_url":         cfg.LLM.BaseURL,
+			"temperature":      cfg.LLM.Temperature,
+			"max_tokens":       cfg.LLM.MaxTokens,
+			"timeout_seconds":  cfg.LLM.TimeoutSecs,
+			"api_key_set":      apiKeySet,
+			"api_key_host":     keyHost,
+			"api_key_host_cur": llm.KeyScope(cfg.LLM.BaseURL),
 		},
 		"scheduler": map[string]any{"enabled": cfg.Scheduler.Enabled},
 		"workspace": cfg.Workspace,
@@ -347,6 +395,17 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 	// 越界字段收集器：posInt 曾因只有下限，done_threshold=150 / max_replans=999
 	// 被"保存成功"静默接受并写进 overlay。现在越界整次拒绝、明确报错。
 	var outOfRange []string
+	asFloat := func(v any) (float64, bool) {
+		switch n := v.(type) {
+		case float64:
+			return n, true
+		case int:
+			return float64(n), true
+		case int64:
+			return float64(n), true
+		}
+		return 0, false
+	}
 	posInt := func(section, key string, v any, min, max int) {
 		i, ok := asInt(v)
 		if !ok {
@@ -504,8 +563,14 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		} else if v, ok := lm["api_key"].(string); ok && strings.TrimSpace(v) != "" {
 			sub("llm")["api_key"] = strings.TrimSpace(v)
 		}
-		if v, ok := lm["temperature"].(float64); ok && v > 0 && v < 2 {
-			sub("llm")["temperature"] = v
+		// 温度 0 是合法取值（确定性输出），旧的 v > 0 判断把用户输入的 0 静默丢回默认值。
+		// 越界与 posInt 同语义：整次拒绝并说明范围，不静默。
+		if v, ok := asFloat(lm["temperature"]); ok {
+			if v < 0 || v > 2 {
+				outOfRange = append(outOfRange, fmt.Sprintf("temperature=%g（允许 0–2）", v))
+			} else {
+				sub("llm")["temperature"] = v
+			}
 		}
 		if v, ok := lm["max_tokens"]; ok {
 			posInt("llm", "max_tokens", v, 64, 1000000)
@@ -530,17 +595,24 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 
 	a.Cfg.Apply(sanitized)
 
+	// ---------- 密钥：先定"这次往哪台主机发哪把 key"，再用它重建客户端 ----------
+	// 顺序不能反：重建客户端用的就是这个值。原先是先重建、后落盘，于是换了厂商的
+	// 那次保存，新客户端里装的还是上一家的密钥（而且界面上显示"已设置"）。
+	if lm, ok := sanitized["llm"].(map[string]any); ok {
+		formKey, _ := lm["api_key"].(string)
+		clearKey, _ := lm["clear_api_key"].(bool)
+		bindBase, _, _, _ := a.llmFormTarget(lm)
+		if _, err := BindLLMKey(a.Cfg, a.Creds, bindBase, formKey, clearKey); err != nil {
+			return a.SettingsView(), err
+		}
+	}
+
 	// 运行时热生效：LLM 客户端按协议工厂重建（mock 保持不变），安全门控就地更新
 	if a.Cfg.LLM.Provider != "mock" {
 		if _, hasLLM := sanitized["llm"]; hasLLM {
-			baseURL, model, protocol := llm.ResolvePreset(a.Cfg.LLM.ProviderID, a.Cfg.LLM.Plan, a.Cfg.LLM.BaseURL, a.Cfg.LLM.Model)
-			if protocol == "" {
-				protocol = a.Cfg.LLM.Protocol
-			}
-			if protocol == "" {
-				protocol = llm.ProtocolOpenAIChat
-			}
+			baseURL, model, protocol := llm.ResolveTarget(a.Cfg.LLM.ProviderID, a.Cfg.LLM.Plan, a.Cfg.LLM.BaseURL, a.Cfg.LLM.Model, a.Cfg.LLM.Protocol)
 			a.Cfg.LLM.BaseURL, a.Cfg.LLM.Model, a.Cfg.LLM.Protocol = baseURL, model, protocol
+			// 上面 BindLLMKey 已把"可发往这台主机的密钥"写进 Cfg.LLM.APIKey（拿不到就是空串）
 			a.LLM = llm.New(protocol, baseURL, a.Cfg.LLM.APIKey, model,
 				a.Cfg.LLM.Temperature, a.Cfg.LLM.MaxTokens, a.Cfg.LLM.TimeoutSecs)
 			a.RebuildFastClient()
@@ -555,21 +627,6 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 			}
 			if v, ok := m["approval_timeout_seconds"].(int); ok {
 				a.Gate.SetApprovalTimeout(time.Duration(v) * time.Second)
-			}
-		}
-	}
-
-	// 持久化密钥到本地独立凭证文件（0600 + DPAPI），重启免填；与 settings.yaml 分离
-	if a.Creds != nil {
-		if lm, ok := sanitized["llm"].(map[string]any); ok {
-			if clear, _ := lm["clear_api_key"].(bool); clear {
-				if err := a.Creds.SetLLMAPIKey(""); err != nil {
-					return a.SettingsView(), fmt.Errorf("密钥已清除但本地凭证文件更新失败: %w", err)
-				}
-			} else if k, ok := lm["api_key"].(string); ok && k != "" {
-				if err := a.Creds.SetLLMAPIKey(k); err != nil {
-					return a.SettingsView(), fmt.Errorf("密钥已生效但保存到本地失败: %w", err)
-				}
 			}
 		}
 	}
@@ -599,14 +656,11 @@ func (a *Agent) llmFormTarget(override map[string]any) (base, model, protocol, k
 	}
 	model = firstNonEmpty(str("model"), a.Cfg.LLM.Model)
 	protocol = firstNonEmpty(str("protocol"), a.Cfg.LLM.Protocol)
-	key = firstNonEmpty(str("api_key"), a.Cfg.LLM.APIKey)
-	base, model, resolved := llm.ResolvePreset(pid, plan, base, model)
-	if resolved != "" {
-		protocol = resolved
-	}
-	if !llm.ValidProtocol(protocol) {
-		protocol = llm.ProtocolOpenAIChat
-	}
+	base, model, protocol = llm.ResolveTarget(pid, plan, base, model, protocol)
+	// 密钥按"这次要发往的主机"取：表单没填就用该主机的已存密钥，别家的一概不发。
+	// 这里以前是 `firstNonEmpty(str("api_key"), a.Cfg.LLM.APIKey)`，等于把上一家厂商的
+	// 凭证发给用户正在预验证的新端点。
+	key, _ = a.llmKeyFor(base, str("api_key"))
 	return
 }
 
@@ -721,6 +775,7 @@ func (a *Agent) ContextView() map[string]any {
 		"enabled":          a.Cfg.Agent.ContextCompress,
 		"short_turns":      st.ShortTurns,
 		"short_cap":        st.ShortCap,
+		"fill_pct":         st.FillPct, // 窗口占用率：水位条只画这个数，不再自己除一遍
 		"overflow":         st.Overflow,
 		"summary":          st.Summary,
 		"summary_chars":    st.SummaryRunes,
@@ -833,21 +888,28 @@ func jobToScheduleView(j scheduler.Job) types.ScheduleJobView {
 // ProvidersView 厂商官方接入预设目录（设置页下拉数据源）。
 func (a *Agent) ProvidersView() []llm.ProviderPreset { return llm.Providers }
 
+// mcpIndex 按名字找已配置的 MCP 条目，未安装返回 -1。
+//
+// 「名字 → 条目」这件事在装/卸/启停/重连五处都要问，各自写一遍找不到的分支
+// 就会漂（比如某处忘了跳过同名，另一处没跳过）。
+func (a *Agent) mcpIndex(name string) int {
+	for i, s := range a.Cfg.MCP {
+		if s.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 // MarketMCP 搜索 MCP 市场目录（q 为空返回全部），附带已安装标记。
 func (a *Agent) MarketMCP(q string) []map[string]any {
 	presets := market.SearchMCP(q)
 	out := make([]map[string]any, 0, len(presets))
 	for _, p := range presets {
-		installed := false
-		for _, s := range a.Cfg.MCP {
-			if s.Name == p.ID {
-				installed = true
-				break
-			}
-		}
 		out = append(out, map[string]any{
 			"id": p.ID, "name": p.Name, "desc": p.Desc, "command": p.Command,
-			"params": p.Params, "trust": p.Trust, "tags": p.Tags, "installed": installed,
+			"params": p.Params, "trust": p.Trust, "tags": p.Tags,
+			"installed": a.mcpIndex(p.ID) >= 0,
 		})
 	}
 	return out
@@ -858,22 +920,29 @@ func (a *Agent) MarketSkills(q string) []map[string]any {
 	presets := market.SearchSkill(q)
 	out := make([]map[string]any, 0, len(presets))
 	for _, s := range presets {
-		_, installed := a.Skills.Get(s.Name)
+		_, err := a.Skills.Get(s.Name)
 		out = append(out, map[string]any{
 			"name": s.Name, "description": s.Description,
-			"params": s.Params, "steps": s.Steps, "tags": s.Tags, "installed": installed,
+			"params": s.Params, "steps": s.Steps, "tags": s.Tags, "installed": err == nil,
 		})
 	}
 	return out
 }
 
-// SkillInstallPreset 一键安装技能模板（已存在则升级版本）。
-func (a *Agent) SkillInstallPreset(name string) (int, error) {
+// SkillInstallPreset 一键安装技能模板。force=false 且已存在 → ErrAlreadyInstalled：
+// 技能可能已被用户改过（固化、自动优化都写同一个文件），市场版本不该静默盖掉它。
+func (a *Agent) SkillInstallPreset(name string, force bool) (int, error) {
 	p, err := market.FindSkill(name)
 	if err != nil {
 		return 0, err
 	}
-	return a.Skills.Save(skill.Skill{
+	// Get 的第二个返回值是 error，不能当「装没装」的布尔用（error 序列化成 {} 会恒真）
+	_, existed := a.Skills.Get(p.Name)
+	if existed == nil && !force {
+		return 0, fmt.Errorf("%w：重装会把它恢复成市场里的模板，你改过的步骤会被替换；只想临时别用它，请改用「停用」", ErrAlreadyInstalled)
+	}
+	// 走 SkillSave 而不是 Skills.Save：入库事件只有一个出口，第二条路忘了记就是统计漏项
+	return a.SkillSave(skill.Skill{
 		Name: p.Name, Description: p.Description, Params: p.Params, Steps: p.Steps,
 	})
 }
@@ -900,7 +969,8 @@ func (a *Agent) MCPList() []map[string]any {
 }
 
 // MCPInstallPreset 安装市场预设：参数替换 → 持久化 → 热连接。
-func (a *Agent) MCPInstallPreset(id string, params map[string]string, trust string) (map[string]any, error) {
+// force=true 表示「重装」：覆盖同名条目的命令与参数（UI 必须先二次确认）。
+func (a *Agent) MCPInstallPreset(id string, params map[string]string, trust string, force bool) (map[string]any, error) {
 	p, err := market.FindMCP(id)
 	if err != nil {
 		return nil, err
@@ -912,53 +982,146 @@ func (a *Agent) MCPInstallPreset(id string, params map[string]string, trust stri
 	if trust == "" {
 		trust = p.Trust
 	}
-	return a.mcpInstall(p.ID, p.Name, command, args, trust)
+	return a.mcpInstall(p.ID, p.Name, command, args, trust, force)
 }
 
 // MCPInstallCustom 自定义安装 MCP 服务器（stdio）。
-func (a *Agent) MCPInstallCustom(name, command string, args []string, trust string) (map[string]any, error) {
+func (a *Agent) MCPInstallCustom(name, command string, args []string, trust string, force bool) (map[string]any, error) {
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("command 不能为空")
 	}
 	display := strings.TrimSpace(name)
 	if display == "" {
 		base := filepath.Base(command)
-		if i := strings.IndexByte(base, '.'); i > 0 {
-			base = base[:i]
+		if i := strings.LastIndexByte(base, '.'); i > 0 {
+			base = base[:i] // 去掉 .exe / .cmd，名字更有辨识度，也少一次字符替换
 		}
-		display = mcpNameRe.ReplaceAllString(base, "-")
-		if display == "" || !mcpNameRe.MatchString(display) {
+		display = sanitizeMCPName(base)
+		if display == "" {
 			display = "custom"
 		}
 	}
-	return a.mcpInstall(display, display, command, args, trust)
+	return a.mcpInstall(display, display, command, args, trust, force)
 }
 
-// mcpInstall 公共安装路径：校验 → 持久化 → 热连接（尽力而为，失败仅告警）。
-func (a *Agent) mcpInstall(name, display, command string, args []string, trust string) (map[string]any, error) {
+// mcpNameUnsafe 名称里必须换掉的字符，与 mcpNameRe 互补。
+var mcpNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_\-]+`)
+
+// sanitizeMCPName 把任意命令名收敛成合法服务器名——它要做工具名的中段（mcp.<name>.<tool>）。
+//
+// 为什么不能写成 mcpNameRe.ReplaceAllString(base, "-")：那个正则匹配的是**合法**字符，
+// 替换它等于把 "npx" 变成 "---"——两台不同目录下的 npx 会撞成同一个名字，第二台永远装不上。
+// 要替换的是**非法**字符。
+func sanitizeMCPName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.Trim(mcpNameUnsafe.ReplaceAllString(s, "-"), "-")
+	if len(s) > 32 { // 按字节截：字符集已是 ASCII
+		s = strings.Trim(s[:32], "-")
+	}
+	return s
+}
+
+// ErrAlreadyInstalled 重名未确认覆盖（技能与 MCP 共用）。单独一个哨兵错误，是为了接入层
+// 能回 **409** 而不是笼统的 400：前端拿到 409 才知道该弹「已安装，要重装吗」，
+// 拿到 400 只能把后端文案原样糊在屏幕上——用户看到的是一句报错，而不是一个选择。
+var ErrAlreadyInstalled = errors.New("已经安装过了")
+
+// mcpInstall 公共安装路径：校验 → 落盘 → 热连接（连接失败仅告警，配置照留）。
+//
+// **为什么先落盘再改内存**：原顺序是「追加到内存 → 存盘」，存盘失败时内存里已经多了
+// 一个条目——界面显示"已安装"，重启就消失，而且因为重名检查挡着，用户连重装都做不了，
+// 只能重启进程。落盘失败就把切片整个还原，让用户看到"没装上"这个真实结果。
+func (a *Agent) mcpInstall(name, display, command string, args []string, trust string, force bool) (map[string]any, error) {
 	if !mcpNameRe.MatchString(name) {
 		return nil, fmt.Errorf("名称 %q 非法（仅限字母数字下划线连字符，≤32 字符）", name)
 	}
-	for _, s := range a.Cfg.MCP {
-		if s.Name == name {
-			return nil, fmt.Errorf("MCP 服务器 %q 已安装，请先卸载", name)
-		}
+	if strings.TrimSpace(command) == "" {
+		return nil, fmt.Errorf("启动命令不能为空")
+	}
+	idx := a.mcpIndex(name)
+	if idx >= 0 && !force {
+		return nil, fmt.Errorf("%w：重装会替换当前的命令与参数；只想临时别跑它，请改用「停用」", ErrAlreadyInstalled)
 	}
 	if trust != "readonly" && trust != "user_approved" && trust != "full_access" {
 		trust = "user_approved"
 	}
 	srv := config.MCPServerConfig{Name: name, Command: command, Args: args, Trust: trust, Enabled: true}
-	a.Cfg.MCP = append(a.Cfg.MCP, srv)
+	next := append([]config.MCPServerConfig{}, a.Cfg.MCP...)
+	if idx >= 0 {
+		next[idx] = srv
+		a.mcpDetach(name) // 旧连接与旧工具先摘掉，避免新旧两套工具同时挂在注册表上
+	} else {
+		next = append(next, srv)
+	}
+	prev := a.Cfg.MCP
+	a.Cfg.MCP = next
 	if err := a.Cfg.SaveOverlay(filepath.Join(a.Cfg.DataDir, config.OverlayFile)); err != nil {
-		return nil, fmt.Errorf("已加入配置但持久化失败: %w", err)
+		a.Cfg.MCP = prev
+		return nil, fmt.Errorf("配置未保存（%v），已还原为安装前的状态", err)
 	}
 	tools, err := a.mcpConnect(srv)
 	res := map[string]any{
-		"name": name, "display": display, "installed": true,
+		"name": name, "display": display, "installed": true, "replaced": idx >= 0,
 		"connected": err == nil, "tools": tools, "mcp": a.MCPList(),
 	}
 	if err != nil {
 		res["warning"] = fmt.Sprintf("已保存配置，但连接失败（首次 npx/uvx 需联网下载，可稍后在工具页查看）: %v", err)
+	}
+	return res, nil
+}
+
+// mcpDetach 摘掉某个 MCP 服务器的注册工具与进程连接（不动配置）。
+//
+// 停用一个服务器和卸载一个服务器要摘的是同一批东西，所以只留这一份实现——
+// 两处各写一遍迟早会漏一项（漏掉关连接就是留着子进程在后台跑）。
+func (a *Agent) mcpDetach(name string) int {
+	removed := 0
+	prefix := mcpToolPrefix(name)
+	for _, n := range a.Reg.Names() {
+		if strings.HasPrefix(n, prefix) {
+			if a.Reg.Unregister(n) {
+				removed++
+			}
+		}
+	}
+	a.MCP.Remove(name)
+	return removed
+}
+
+// MCPSetEnabled 启用 / 停用 MCP 服务器：状态落盘，停用立刻摘工具并关进程，启用立刻重连。
+//
+// 为什么要有"停用"而不是只有"卸载"：调试一个连不上的服务器时，用户要的是先让它别挡路、
+// 保留参数回头再看。只有卸载的话，参数就没了（定时任务的暂停/恢复早就证明过这一点）。
+func (a *Agent) MCPSetEnabled(name string, enabled bool) (map[string]any, error) {
+	idx := a.mcpIndex(name)
+	if idx < 0 {
+		return nil, fmt.Errorf("MCP 服务器 %q 未安装", name)
+	}
+	if a.Cfg.MCP[idx].Enabled == enabled {
+		return map[string]any{"name": name, "enabled": enabled, "unchanged": true, "mcp": a.MCPList()}, nil
+	}
+	prev := a.Cfg.MCP[idx].Enabled
+	a.Cfg.MCP[idx].Enabled = enabled
+	if err := a.Cfg.SaveOverlay(filepath.Join(a.Cfg.DataDir, config.OverlayFile)); err != nil {
+		a.Cfg.MCP[idx].Enabled = prev
+		return nil, fmt.Errorf("状态未保存（%v），已还原", err)
+	}
+	tools := 0
+	a.mcpDetach(name)
+	warning := ""
+	if enabled {
+		n, err := a.mcpConnect(a.Cfg.MCP[idx])
+		tools = n
+		if err != nil {
+			warning = fmt.Sprintf("已启用，但连接失败: %v", err)
+		}
+	}
+	res := map[string]any{
+		"name": name, "enabled": enabled, "connected": enabled && warning == "",
+		"tools": tools, "mcp": a.MCPList(),
+	}
+	if warning != "" {
+		res["warning"] = warning
 	}
 	return res, nil
 }
@@ -983,44 +1146,31 @@ func (a *Agent) mcpConnect(srv config.MCPServerConfig) (int, error) {
 
 // MCPRemove 卸载：删配置 + 注销工具 + 关闭连接。
 func (a *Agent) MCPRemove(name string) (map[string]any, error) {
-	idx := -1
-	for i, s := range a.Cfg.MCP {
-		if s.Name == name {
-			idx = i
-			break
-		}
-	}
+	idx := a.mcpIndex(name)
 	if idx < 0 {
 		return nil, fmt.Errorf("MCP 服务器 %q 未安装", name)
 	}
+	prev := append([]config.MCPServerConfig{}, a.Cfg.MCP...)
 	a.Cfg.MCP = append(a.Cfg.MCP[:idx], a.Cfg.MCP[idx+1:]...)
 	if err := a.Cfg.SaveOverlay(filepath.Join(a.Cfg.DataDir, config.OverlayFile)); err != nil {
-		return nil, fmt.Errorf("已移除但持久化失败: %w", err)
+		// 回滚要拿真正的副本：删元素是就地搬移，只留旧切片头会把被搬走的那条读回来。
+		a.Cfg.MCP = prev
+		return nil, fmt.Errorf("已移除但持久化失败（重启后它会回来）: %w", err)
 	}
-	removed := 0
-	prefix := mcpToolPrefix(name)
-	for _, n := range a.Reg.Names() {
-		if strings.HasPrefix(n, prefix) {
-			if a.Reg.Unregister(n) {
-				removed++
-			}
-		}
-	}
-	a.MCP.Remove(name)
+	removed := a.mcpDetach(name)
 	return map[string]any{"name": name, "removed_tools": removed, "mcp": a.MCPList()}, nil
 }
 
-// MCPRetry 对已安装但未连接的 MCP 服务器重试连接（首装 npx/uvx 下载超时常scenario）。
+// MCPRetry 对已安装但未连接的 MCP 服务器重试连接（首装 npx/uvx 下载超时是常见场景）。
 func (a *Agent) MCPRetry(name string) (map[string]any, error) {
-	var srv *config.MCPServerConfig
-	for i := range a.Cfg.MCP {
-		if a.Cfg.MCP[i].Name == name {
-			srv = &a.Cfg.MCP[i]
-			break
-		}
-	}
-	if srv == nil {
+	idx := a.mcpIndex(name)
+	if idx < 0 {
 		return nil, fmt.Errorf("MCP 服务器 %q 未安装", name)
+	}
+	srv := &a.Cfg.MCP[idx]
+	if !srv.Enabled {
+		// 停用的服务器不允许"重连"：那会让一个用户已经判定别跑的东西重新挂上工具表。
+		return nil, fmt.Errorf("MCP 服务器 %q 已停用，请先启用", name)
 	}
 	a.MCP.Remove(name) // 关闭旧连接（若有）
 	tools, err := a.mcpConnect(*srv)

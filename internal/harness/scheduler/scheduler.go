@@ -8,10 +8,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
+
+	"gleam/internal/atomicfile"
 )
+
+// JobNamePattern 任务名的合法形状。
+//
+// **为什么任务名不能有斜杠**：它是 REST 路径参数（/api/schedules/{name}/enabled）。
+// Go 的 mux 在**解码后**的路径上匹配，`a/b` 编码成 `a%2Fb` 也会先还原成两个 segment
+// ——路由直接不命中，返回纯文本 404。结果是这个任务能按时跑，却永远删不掉、停不了，
+// 只能去改 jobs 文件。名字是主键，就得在写入口把它钉成可寻址的形状。
+var JobNamePattern = regexp.MustCompile(`^[\w\p{Han}\-. ]{1,64}$`)
 
 // Job 定时任务。
 type Job struct {
@@ -279,6 +290,9 @@ func (s *Scheduler) AddJobDetailed(name, cron string, intervalSec int, goal, mod
 	if name == "" {
 		return Job{}, fmt.Errorf("任务名不能为空")
 	}
+	if !JobNamePattern.MatchString(name) {
+		return Job{}, fmt.Errorf("任务名只能使用中文字母数字与 - . _ 空格（最长 64 字），不能含 / 等路径字符")
+	}
 	if goal == "" {
 		return Job{}, fmt.Errorf("目标不能为空")
 	}
@@ -428,11 +442,7 @@ func (s *Scheduler) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return atomicfile.Write(s.path, data, 0o644)
 }
 
 func trim(s string) string {

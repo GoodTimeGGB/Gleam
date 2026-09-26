@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gleam/internal/agent"
+	"gleam/internal/harness/feedback"
 	"gleam/pkg/types"
 )
 
@@ -32,6 +33,10 @@ type Server struct {
 	// （单实例场景下，第二个进程通过该端点唤起已有实例的窗口）。
 	ShowWindowFunc func()
 
+	// feedback 用户反馈的本地仓库（<DataDir>/feedback/）。建在服务上而不是每次
+	// new 一个：数据目录在进程生命周期内不变，而"这条反馈存哪儿"不该由调用方记住。
+	feedback *feedback.Store
+
 	mu        sync.Mutex
 	tasks     map[string]*taskInfo
 	approvals map[string]*approvalWaiter
@@ -39,14 +44,15 @@ type Server struct {
 }
 
 type taskInfo struct {
-	ID      string             `json:"task_id"`
-	Goal    string             `json:"goal"`
-	Mode    string             `json:"mode"`
-	Status  types.GoalStatus   `json:"status"`
-	Result  *types.GoalResult  `json:"result,omitempty"`
-	Events  []sseEvent         `json:"events,omitempty"`
-	Started time.Time          `json:"started_at"`
-	Cancel  context.CancelFunc `json:"-"` // 不可序列化
+	ID       string             `json:"task_id"`
+	Goal     string             `json:"goal"`
+	Mode     string             `json:"mode"`
+	TaskMode string             `json:"task_mode,omitempty"` // 对话/工作/编程：卡片徽标要用，刷新后不能只剩安全模式
+	Status   types.GoalStatus   `json:"status"`
+	Result   *types.GoalResult  `json:"result,omitempty"`
+	Events   []sseEvent         `json:"events,omitempty"`
+	Started  time.Time          `json:"started_at"`
+	Cancel   context.CancelFunc `json:"-"` // 不可序列化
 }
 
 // snapshot 返回可在锁外编码的只读任务副本。
@@ -68,6 +74,7 @@ type approvalWaiter struct {
 func NewServer(a *agent.Agent) *Server {
 	s := &Server{
 		Agent:     a,
+		feedback:  feedback.NewStore(a.DataDir()),
 		tasks:     map[string]*taskInfo{},
 		approvals: map[string]*approvalWaiter{},
 		clients:   map[chan sseEvent]struct{}{},
@@ -224,6 +231,37 @@ func (s *Server) resolve(id string, resp types.ApprovalResponse) bool {
 	default:
 	}
 	return true
+}
+
+// dropTaskApprovals 摘除某个任务名下所有未裁决的审批。
+//
+// 审批等待器的寿命属于它的任务：任务都不跑了，还留着等裁决的那扇门就是假的——
+// `GET /api/approvals`、桌面端的空闲退出（PendingApprovals）、界面"需要处理"的读数
+// 都读这张表，说谎时会一致地谎。
+//
+// **为什么必须真 resolve，而不是只 delete**：plan_first 的整计划闸门是**同步**等在
+// OnApproval 里的（引擎那一行不返回，任务就永远停在 running）。只删登记，等在门后的
+// 引擎醒不过来；送一个拒绝进 w.ch，它才会走"未获批准"那条路把任务定格成已取消。
+// 逐步审批不等在这里（executor 自己 select ctx），但等待器同样会漏在表里到超时为止，
+// 所以两条路都靠这里收口。
+func (s *Server) dropTaskApprovals(taskID, note string) {
+	s.mu.Lock()
+	var stale []*approvalWaiter
+	for id, w := range s.approvals {
+		if w.Req.TaskID == taskID {
+			stale = append(stale, w)
+			delete(s.approvals, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, w := range stale {
+		resp := types.ApprovalResponse{Approved: false, Note: note}
+		// 有缓冲，取不到也只可能是已被裁决：那种情况下不该再改它的答案。
+		select {
+		case w.ch <- resp:
+		default:
+		}
+	}
 }
 
 func (w *approvalWaiter) view() map[string]any {

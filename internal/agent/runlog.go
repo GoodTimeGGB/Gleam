@@ -14,7 +14,7 @@ import (
 // RunLog 运行中的 append-only 步骤日志：<DataDir>/runs/<taskID>.jsonl。
 //
 // **为什么要有它。** 任务记录（`tasks/<id>.json`）是**跑完之后写一次的终态快照**
-// （`cmd/gleam/main.go` 与 `internal/server/service.go` 都在 `RunGoal` 返回之后才落盘）。
+// （只有一个出口：`taskstore.go` 的 `SaveTaskResult`，CLI 与常驻服务都走它）。
 // 进程若在运行中退出——用户关了窗口、机器重启、任务被强杀——那次运行**什么都没有**：
 // 没有记录就没有回放、没有归因，连"跑到哪一步了"都答不上来。
 // 审计的地基是**追加式日志**，不是终态快照；这一层补的就是中间那一段。
@@ -45,7 +45,7 @@ func (l *RunLog) RecordStep(taskID string, r types.StepResult) {
 	if l == nil {
 		return
 	}
-	name := safeRunLogName(taskID)
+	name := SafeTaskName(taskID)
 	if name == "" {
 		return
 	}
@@ -66,12 +66,16 @@ func (l *RunLog) RecordStep(taskID string, r types.StepResult) {
 	_, _ = f.Write(append(b, '\n'))
 }
 
-// safeRunLogName 把 taskID 变成安全的文件名；不安全就返回空串（不写）。
+// SafeTaskName 校验 taskID 能否直接作文件名；不安全就返回空串（调用方据此不写）。
 //
 // 为什么不"净化后照写"：把 `a/b` 与 `a_b` 映射到同一个文件，两次不同的运行会写进
 // 同一份日志——那比不写更坏，因为读的人会以为看到的是完整的一次运行。
 // 宁可不记，也不要记错。
-func safeRunLogName(taskID string) string {
+//
+// 这条规则**读写两侧共用**：任务归档的路径由 `TaskArchivePath` 按它拼，
+// 读侧（webui / gleam replay / eval）也都走那一个入口——两处各写一份迟早漂移，
+// 漂移的结果是"写得出去读不回来"。
+func SafeTaskName(taskID string) string {
 	if taskID == "" || len(taskID) > 128 {
 		return ""
 	}
@@ -87,7 +91,7 @@ func safeRunLogName(taskID string) string {
 
 // RunLogPath 运行日志的路径（不保证存在）。
 func RunLogPath(dataDir, taskID string) string {
-	name := safeRunLogName(taskID)
+	name := SafeTaskName(taskID)
 	if name == "" {
 		return ""
 	}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gleam/internal/config"
 	"gleam/pkg/types"
@@ -121,6 +122,12 @@ func TestWebUI_SubmitWithoutKeyWarns(t *testing.T) {
 	if _, has := out2["warning"]; has {
 		t.Errorf("mock 不应告警: %v", out2)
 	}
+	// 两次提交都要收尾再返回：告警只看响应，但后台那一趟会往 t.TempDir() 里写归档，
+	// 不等它就清理目录，等于让这条测试偶尔红在"目录删不掉"上。
+	id, _ := out["task_id"].(string)
+	id2, _ := out2["task_id"].(string)
+	f.waitTask(id, 10*time.Second)
+	f2.waitTask(id2, 10*time.Second)
 }
 
 func TestWebUI_ToolPermissionSetAndPersist(t *testing.T) {

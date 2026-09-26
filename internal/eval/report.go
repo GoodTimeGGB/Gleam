@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"gleam/internal/atomicfile"
 )
 
 // SaveBaseline 把一次评测报告写成基线文件。
@@ -18,7 +20,8 @@ func SaveBaseline(path string, rep Report) error {
 	if err != nil {
 		return fmt.Errorf("序列化基线失败: %w", err)
 	}
-	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+	// 原子写：基线是回归比较的分母，写成半截等于把整份基线丢掉
+	if err := atomicfile.Write(path, append(b, '\n'), 0o644); err != nil {
 		return fmt.Errorf("写入基线失败: %w", err)
 	}
 	return nil

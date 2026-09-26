@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"net/url"
 	"strings"
 	"time"
 )
@@ -106,6 +107,25 @@ var Providers = []ProviderPreset{
 	},
 }
 
+// KeyScope 把 base_url 归一成"密钥该认的那台主机"（小写 host:port，不含路径）。
+//
+// 用主机而不是整条 URL：同一家厂商的 /v1、/chat/completions 是不同端点同一把 key，
+// 按 URL 绑会把用户每次改路径都变成"密钥丢了"。也故意不认 provider_id：自建网关
+// 一个主机转发多家、同一家多个域名的情况都有，真正决定"这把 key 发给谁"的是主机。
+// 解析不出来（空串、相对路径）就退回 TrimSpace 后的原值——宁可把它当成一个独立主机，
+// 也不要把两行不同的配置判成同一台。
+func KeyScope(baseURL string) string {
+	s := strings.TrimSpace(baseURL)
+	if s == "" {
+		return ""
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return strings.ToLower(s)
+	}
+	return strings.ToLower(u.Host)
+}
+
 // FindProvider 按 ID 查厂商预设。
 func FindProvider(id string) *ProviderPreset {
 	id = strings.TrimSpace(id)
@@ -154,6 +174,22 @@ func ValidProtocol(p string) bool {
 		return true
 	}
 	return false
+}
+
+// ResolveTarget 把"用户填了什么"算成"实际往哪发"：预设解析 + 协议回退，一步到位。
+//
+// 之前这三步（ResolvePreset → 预设协议为空则沿用已配协议 → 再兜底 openai_chat）
+// 在启动装配、设置保存、连接自测三处各抄一遍，而密钥作用域恰恰要问"到底是哪台主机"：
+// 三份里任何一份漏了兜底，就会算出两个不同的 scope。收到这里来，三处只问一次。
+func ResolveTarget(providerID, plan, baseURL, model, protocol string) (string, string, string) {
+	base, model, presetProto := ResolvePreset(providerID, plan, baseURL, model)
+	if presetProto != "" {
+		protocol = presetProto
+	}
+	if !ValidProtocol(protocol) {
+		protocol = ProtocolOpenAIChat
+	}
+	return base, model, protocol
 }
 
 // New 协议工厂：按线协议构造对应客户端（全部自研实现）。timeoutSecs<=0 时用 60s。

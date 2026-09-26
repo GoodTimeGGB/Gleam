@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"gleam/internal/atomicfile"
 	"gleam/pkg/types"
 )
 
@@ -155,11 +156,7 @@ func (s *Store) persist(snapshot []Record) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return atomicfile.Write(s.path, data, 0o644)
 }
 
 // ---------- 创作意图识别 ----------

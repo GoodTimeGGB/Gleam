@@ -462,6 +462,31 @@ func (slowTool) Execute(ctx context.Context, _ map[string]any) (any, error) {
 	return nil, ctx.Err()
 }
 
+// waitApproval 等到该任务出现一条未决审批，返回它；超时即失败（不静默跳过）。
+func (f *fixture) waitApproval(taskID string) map[string]any {
+	f.t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, item := range f.call("GET", "/api/approvals", nil)["approvals"].([]any) {
+			if ap, _ := item.(map[string]any); ap["task_id"] == taskID {
+				return ap
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	f.t.Fatal("未出现审批请求")
+	return nil
+}
+
+func (f *fixture) pendingApprovals() int {
+	f.t.Helper()
+	res := f.call("GET", "/api/approvals", nil)
+	if n, ok := res["count"].(float64); ok {
+		return int(n)
+	}
+	return -1
+}
+
 // ---------- 多会话 ----------
 
 func TestWebUI_ConversationsCRUD(t *testing.T) {

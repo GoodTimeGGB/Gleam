@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gleam/internal/agent"
+	"gleam/internal/atomicfile"
 	"gleam/internal/config"
 	"gleam/internal/harness/registry"
 	"gleam/internal/harness/safety"
@@ -291,8 +292,8 @@ func loadRun(dataDir, ref string) (loadedRun, error) {
 	case strings.HasPrefix(ref, "replay:"):
 		return loadRunFrom(dataDir, strings.TrimPrefix(ref, "replay:"), "replay")
 	}
-	taskPath := filepath.Join(dataDir, "tasks", ref+".json")
-	replayPath := filepath.Join(dataDir, "replays", ref+".json")
+	taskPath := agent.TaskArchivePath(dataDir, ref)
+	replayPath := replayFile(dataDir, ref)
 	taskOK, replayOK := fileExists(taskPath), fileExists(replayPath)
 	if taskOK && replayOK {
 		return loadedRun{}, fmt.Errorf("%q 在 tasks/ 与 replays/ 里都存在，无法判断读哪一条（用 task:%s 或 replay:%s 指明）", ref, ref, ref)
@@ -314,27 +315,40 @@ func loadRun(dataDir, ref string) (loadedRun, error) {
 }
 
 func loadRunFrom(dataDir, id, kind string) (loadedRun, error) {
-	sub := "tasks"
-	if kind == "replay" {
-		sub = "replays"
+	if kind != "replay" {
+		// 任务归档的读法只有一个 owner（agent.ReadTaskResult）：路径形状、
+		// "没有这条"与"文件坏了"怎么分，写侧与读侧必须给同一个答案。
+		g, err := agent.ReadTaskResult(dataDir, id)
+		if err != nil {
+			return loadedRun{}, err
+		}
+		if g == nil {
+			return loadedRun{}, fmt.Errorf("读取%s记录失败: 没有 tasks/%s.json", kind, id)
+		}
+		return loadedRun{Ref: g.TaskID, Task: g}, nil
 	}
-	path := filepath.Join(dataDir, sub, id+".json")
+	path := replayFile(dataDir, id)
+	if path == "" {
+		return loadedRun{}, fmt.Errorf("回放 ID %q 不能作文件名", id)
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return loadedRun{}, fmt.Errorf("读取%s记录失败: %w", kind, err)
 	}
-	if kind == "replay" {
-		var r types.ReplayRecord
-		if err := json.Unmarshal(b, &r); err != nil {
-			return loadedRun{}, fmt.Errorf("解析回放记录失败: %w", err)
-		}
-		return loadedRun{Ref: r.ReplayID, Replay: &r}, nil
+	var r types.ReplayRecord
+	if err := json.Unmarshal(b, &r); err != nil {
+		return loadedRun{}, fmt.Errorf("解析回放记录失败: %w", err)
 	}
-	var g types.GoalResult
-	if err := json.Unmarshal(b, &g); err != nil {
-		return loadedRun{}, fmt.Errorf("解析任务记录失败: %w", err)
+	return loadedRun{Ref: r.ReplayID, Replay: &r}, nil
+}
+
+// replayFile 回放产物的落点（replays/<id>.json）；id 不能作文件名时返回空。
+// 名字规则与任务归档共用 agent.SafeTaskName——两套形状迟早漂移成"写得出去读不回来"。
+func replayFile(dataDir, id string) string {
+	if agent.SafeTaskName(id) == "" {
+		return ""
 	}
-	return loadedRun{Ref: g.TaskID, Task: &g}, nil
+	return filepath.Join(dataDir, "replays", id+".json")
 }
 
 func fileExists(path string) bool {
@@ -344,16 +358,18 @@ func fileExists(path string) bool {
 
 // saveReplay 把一次回放落进 replays/（**不是 tasks/**，回放不是任务）。
 func saveReplay(dataDir string, rec *types.ReplayRecord) (string, error) {
-	dir := filepath.Join(dataDir, "replays")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	path := replayFile(dataDir, rec.ReplayID)
+	if path == "" {
+		return "", fmt.Errorf("回放 ID %q 不能作文件名，未归档", rec.ReplayID)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
 	b, err := json.MarshalIndent(rec, "", " ")
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, rec.ReplayID+".json")
-	if err := os.WriteFile(path, b, 0o644); err != nil {
+	if err := atomicfile.Write(path, b, 0o644); err != nil {
 		return "", err
 	}
 	return path, nil

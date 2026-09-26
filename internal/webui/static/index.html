@@ -24,6 +24,11 @@
       if (m) m.setAttribute('content', dark ? '#0B0D0E' : '#F4F6F5');
       var cs = document.querySelector('meta[name="color-scheme"]');
       if (cs) cs.setAttribute('content', dark ? 'dark' : 'light');
+      // 现场栏的收展也在这里定：等 app.js 再设会让右栏在首帧闪一次。
+      // 没点过收展按钮 = 交给视口决定（中屏放不下三栏），点过就只认他点的。
+      var rf = prefs.railFolded;
+      document.documentElement.setAttribute('data-rail',
+        (rf == null ? window.matchMedia('(max-width: 1240px)').matches : !!rf) ? 'folded' : 'open');
     } catch (e) {}
   })();
   </script>
@@ -101,6 +106,10 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l2.2 2.2L15.5 9"/><path d="M12 3l7.5 3.2v5.4c0 4.4-3 8.1-7.5 9.4-4.5-1.3-7.5-5-7.5-9.4V6.2z"/></svg>
               <span>就绪体检</span>
             </button>
+            <button class="nav-item" data-view="feedback">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8.2L4 22.5V18a8 8 0 1 1 17-6.5z"/><path d="M9 10.5h7M9 13.5h4"/></svg>
+              <span>反馈与建议</span>
+            </button>
             <button class="nav-item" data-view="settings">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.99 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.99a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.23a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.62.68 1.03 1.31 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03z"/></svg>
               <span>设置</span>
@@ -121,7 +130,7 @@
       </div>
 
       <!-- 我的 -->
-      <button class="nav-item nav-me" id="open-me" type="button">
+      <button class="nav-item nav-me" id="open-me" type="button" aria-label="我的" title="我的">
         <span class="me-avatar" id="me-avatar" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
         </span>
@@ -229,6 +238,10 @@
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg>
                     <span>@ 引用</span><span class="plus-sub">文件 · 目标 · 插件 · 记忆</span>
                   </button>
+                  <button class="plus-item" data-plus="browser" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>
+                    <span>浏览器预览</span><span class="plus-sub">看本机跑起来的样子</span>
+                  </button>
                 </div>
               </div>
               <span class="seg-label" aria-hidden="true">模式</span>
@@ -249,12 +262,45 @@
                   全自动
                 </button>
               </div>
+              <span class="seg-divider" aria-hidden="true"></span>
+              <!-- 模型与上下文水位：设置页里那两处的**就地入口**，不是第二套数据。
+                   水位百分比由后端算（memory.fillPct），这里只画；弹层挂在 .composer 上，
+                   与 #mention-pop 同一套定位法——贴在按钮下方的小面板会在换行后溢出卡片。 -->
+              <button class="composer-meta-btn" id="cp-model" type="button"
+                aria-expanded="false" aria-controls="cp-model-pop" title="当前模型，点击切换">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M11 3v4M17 3v4M11 17v4M17 17v4M3 11h4M3 17h4M17 11h4M17 17h4"/></svg>
+                <span id="cp-model-name">模型</span>
+                <svg class="cp-caret" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <button class="composer-meta-btn" id="cp-context" type="button"
+                aria-expanded="false" aria-controls="cp-context-pop" title="上下文水位">
+                <span class="cp-meter" aria-hidden="true"><span class="cp-meter-fill" id="cp-meter-fill"></span></span>
+                <span id="cp-context-pct">—</span>
+                <span class="cp-badge" id="cp-context-badge" hidden>0</span>
+              </button>
             </div>
             <div class="composer-right">
               <span class="hint-xs" id="goal-hint">Enter 发送 · Shift+Enter 换行</span>
               <button class="send-btn" id="goal-submit" aria-label="发送" title="发送（Enter）">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
               </button>
+            </div>
+          </div>
+          <div class="cp-pop" id="cp-model-pop" aria-label="切换模型" hidden>
+            <div class="cp-pop-head">当前模型<b id="cp-model-cur">—</b><span class="cp-pop-sub" id="cp-model-provider"></span></div>
+            <div class="cp-model-list" id="cp-model-list" role="group" aria-label="可选模型"></div>
+            <div class="cp-pop-foot">
+              <button class="btn btn-secondary btn-sm" id="cp-model-fetch" type="button">拉取厂商模型</button>
+              <button class="btn btn-ghost btn-sm" id="cp-model-goto" type="button">手输 / 改厂商</button>
+            </div>
+          </div>
+          <div class="cp-pop" id="cp-context-pop" aria-label="上下文水位" hidden>
+            <div class="cp-pop-head">上下文水位</div>
+            <div class="cp-pop-read" id="cp-context-read">加载中…</div>
+            <p class="cp-pop-note">满了不是坏事：窗口外的对话会被摘要带走，不会直接丢。待压缩一直攒着，只会让下一轮更贵。</p>
+            <div class="cp-pop-foot">
+              <button class="btn btn-secondary btn-sm" id="cp-context-compress" type="button">立即压缩</button>
+              <button class="btn btn-ghost btn-sm" id="cp-context-goto" type="button">去设置查看</button>
             </div>
           </div>
           <div class="mention-pop" id="mention-pop" role="listbox" aria-label="引用建议" hidden></div>
@@ -287,8 +333,8 @@
         </div>
         <div class="card">
           <div class="field">
-            <label class="field-label" for="memory-search">语义检索</label>
-            <input class="input" id="memory-search" placeholder="输入检索词，回车搜索">
+            <label class="field-label" for="memory-search">检索记忆</label>
+            <input class="input" id="memory-search" placeholder="输入关键词，回车检索（按字面与词组匹配，不认同义词）">
           </div>
           <div class="row-list" id="memory-hits"></div>
         </div>
@@ -302,7 +348,7 @@
         </header>
         <div class="card card--glass" style="margin-bottom: var(--space-4);">
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3);">
-            <div class="field"><label class="field-label" for="sch-name">任务名</label><input class="input" id="sch-name" placeholder="每日整理"></div>
+            <div class="field"><label class="field-label" for="sch-name">任务名</label><input class="input" id="sch-name" maxlength="64" autocomplete="off" placeholder="每日整理" title="可用中文、字母、数字与 - . _ 空格；不能含 / （它是任务的寻址标识，带斜杠将无法暂停或删除）"></div>
             <div class="field" style="grid-column: span 2;"><label class="field-label" for="sch-goal">到点要做什么</label><input class="input" id="sch-goal" placeholder="整理下载目录"></div>
             <div class="field" style="grid-column: 1 / -1;">
               <label class="field-label" for="sch-when">执行时间（用话说就行）</label>
@@ -379,7 +425,7 @@
         <div class="card card--glass" style="margin-top: var(--space-4);">
           <h2 class="section-title">自定义安装 MCP（stdio）</h2>
           <div class="settings-grid">
-            <div class="field"><label class="field-label" for="mc-name">名称（可选，默认取命令名）</label><input class="input" id="mc-name" placeholder="my-server"></div>
+            <div class="field"><label class="field-label" for="mc-name">名称（可选，默认取命令名；限字母数字与 - _，≤32 字符）</label><input class="input" id="mc-name" placeholder="my-server"></div>
             <div class="field"><span class="field-label" id="mc-trust-label">信任级别</span>
               <div class="segmented" id="mc-trust" role="group" aria-labelledby="mc-trust-label">
                 <button data-val="readonly" aria-pressed="false" title="工具只读，自动放行">只读放行</button>
@@ -562,10 +608,10 @@
                 </select></div>
               <div class="field"><label class="field-label" for="set-max-tokens">最大 tokens</label><input class="input" id="set-max-tokens" type="number" min="64" max="1000000"></div>
               <div class="field" style="grid-column: span 2;"><label class="field-label" for="set-base-url">API 地址（留空回落厂商官方入口）</label><input class="input" id="set-base-url"></div>
-              <div class="field"><label class="field-label" for="set-temperature">温度</label><input class="input" id="set-temperature" type="number" step="0.1" min="0.1" max="1.9"></div>
+              <div class="field"><label class="field-label" for="set-temperature">温度</label><input class="input" id="set-temperature" type="number" step="0.1" min="0" max="2"></div>
               <div class="field"><label class="field-label" for="set-llm-timeout">请求超时（秒）</label><input class="input" id="set-llm-timeout" type="number" min="3" max="600"></div>
               <div class="field"><label class="field-label" for="set-model">模型</label><input class="input" id="set-model" list="model-list" placeholder="glm-5.3-flash" autocomplete="off"></div>
-              <div class="field"><label class="field-label" for="set-api-key">API Key</label><input class="input" id="set-api-key" type="password" autocomplete="off" placeholder="已设置，留空表示不修改"></div>
+              <div class="field"><label class="field-label" for="set-api-key">API Key（绑定当前 API 地址的主机，换厂商需重填）</label><input class="input" id="set-api-key" type="password" autocomplete="off" placeholder="未设置"></div>
               <div class="field" style="grid-column: 1 / -1;">
                 <div class="llm-actions">
                   <button class="btn btn-secondary btn-sm" id="set-test-llm">测试连接</button>
@@ -638,7 +684,7 @@
       <section class="view" id="view-growth" aria-labelledby="growth-title">
         <header class="view-header">
           <h1 class="view-title" id="growth-title">成长</h1>
-          <p class="view-desc">记录 Gleam 与你协作的每一步——任务完成、技能固化、效率提升。</p>
+          <p class="view-desc">记录 Gleam 与你协作的每一步——任务完成、技能新增、效率提升。</p>
         </header>
         <div id="growth-content">
           <div class="card card--glass" id="growth-stats-card" style="margin-bottom: var(--space-5);">
@@ -747,8 +793,160 @@
         <div class="readiness-list" id="readiness-items"></div>
       </section>
 
+      <!-- ===== 反馈与建议 ===== -->
+      <section class="view" id="view-feedback" aria-labelledby="feedback-title">
+        <header class="view-header">
+          <h1 class="view-title" id="feedback-title">反馈与建议</h1>
+          <p class="view-desc">遇到的问题、想加的功能，都写在这里。每一条<strong>先存进你这台电脑</strong>，配了远端才会再送一份出去——不配远端不是失败，只是还没人收。</p>
+        </header>
+
+        <div class="card card--glass" style="margin-bottom: var(--space-4);">
+          <div class="field">
+            <span class="field-label" id="fb-kind-label">这条是</span>
+            <div class="segmented" role="group" aria-labelledby="fb-kind-label" id="fb-kind">
+              <button type="button" data-kind="bug" aria-pressed="true" title="哪里不对、怎么遇到的一次">报问题</button>
+              <button type="button" data-kind="suggestion" aria-pressed="false" title="希望变成什么样">提建议</button>
+            </div>
+          </div>
+          <div class="field" style="margin-top: var(--space-3);">
+            <label class="field-label" for="fb-text">描述</label>
+            <textarea class="input textarea" id="fb-text" rows="5" placeholder="例如：技能页点「运行」之后转圈到底，没有任何提示，控制台也看不到原因。"></textarea>
+            <div class="fb-composer-foot">
+              <span class="field-hint" id="fb-count">0 / 20000 字</span>
+              <span class="field-hint" id="fb-ref-slot"></span>
+            </div>
+          </div>
+          <div class="field" style="margin-top: var(--space-3);">
+            <span class="field-label">截图（可选，最多 5 张）</span>
+            <div class="fb-shot-row">
+              <input type="file" id="fb-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+              <button type="button" class="btn btn-secondary btn-sm" id="fb-pick">选文件</button>
+              <span class="field-hint">也可以在这里直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴一张</span>
+            </div>
+            <div class="fb-shots" id="fb-shots"></div>
+            <p class="field-hint">截图只写进本机的 <code>feedback/</code> 目录（0600），<strong>不会</strong>跟着发给任何人。</p>
+          </div>
+          <div class="fb-context" id="fb-context"></div>
+          <div class="fb-actions">
+            <span class="field-hint" id="fb-dest">正在确认这份反馈会落在哪儿…</span>
+            <button type="button" class="btn btn-primary" id="fb-submit">提交</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">本机已提交</h2>
+            <button type="button" class="btn btn-secondary btn-sm" id="fb-refresh">刷新</button>
+          </div>
+          <p class="field-hint" id="fb-broken" hidden></p>
+          <div class="row-list" id="fb-list"></div>
+          <div class="empty" id="fb-empty" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8.2L4 22.5V18a8 8 0 1 1 17-6.5z"/></svg>
+            <div class="empty-title">还没有提交过反馈</div>
+            <p class="empty-desc">在上方写一句就行。对话里的任何一条回复，也可以点「反馈这条」直接指着那次运行说。</p>
+          </div>
+        </div>
+      </section>
+
     </main>
+
+    <!-- ===== 现场栏：引擎正在干什么，摊开在一列仪表里 =====
+         三块面板的读数都只来自一个生产者（app.js 的 LiveRail），
+         阶段轨只画引擎真会发的那几个 phase——发明一个永不亮起的格子，
+         比不画更糟：用户会以为它坏了，然后不再看这一列。 -->
+    <aside class="rail" id="rail" aria-label="现场">
+      <div class="rail-head">
+        <span class="rail-eyebrow">现场 · LIVE</span>
+        <span class="rail-pulse" id="rail-pulse" data-state="idle" aria-hidden="true"></span>
+        <button class="rail-fold" id="rail-fold" type="button" aria-expanded="true" aria-controls="rail-body" title="收起现场栏">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+        </button>
+      </div>
+
+      <!-- 收起后只剩这一条竖签：现场一直在，点开才展开细节 -->
+      <button class="rail-strip" id="rail-strip" type="button" aria-label="展开现场栏" title="展开现场栏">
+        <span class="rail-strip-dot" id="rail-strip-dot" data-state="idle" aria-hidden="true"></span>
+        <span class="rail-strip-label">现场</span>
+        <span class="rail-strip-stage" id="rail-strip-stage">空闲</span>
+      </button>
+
+      <div class="rail-body" id="rail-body">
+        <section class="gauge" aria-labelledby="rail-loop-title">
+          <h2 class="gauge-title" id="rail-loop-title">微光循环</h2>
+          <ol class="loop" id="rail-loop">
+            <li class="loop-step" data-stage="plan"><i class="loop-node" aria-hidden="true"></i><span class="loop-name">规划</span><span class="loop-note" data-note="plan">—</span></li>
+            <li class="loop-step" data-stage="execute"><i class="loop-node" aria-hidden="true"></i><span class="loop-name">执行</span><span class="loop-note" data-note="execute">—</span></li>
+            <li class="loop-step" data-stage="reflect"><i class="loop-node" aria-hidden="true"></i><span class="loop-name">复盘</span><span class="loop-note" data-note="reflect">—</span></li>
+          </ol>
+          <p class="loop-gate" id="rail-budget" data-hit="false">预算闸 · 未触发</p>
+          <p class="gauge-read" id="rail-loop-read">没有任务在跑</p>
+        </section>
+
+        <section class="gauge gauge--flow" aria-labelledby="rail-flow-title">
+          <h2 class="gauge-title" id="rail-flow-title">事件流水<span class="gauge-count" id="rail-flow-count">0</span></h2>
+          <div class="flow" id="rail-flow" role="log" aria-live="polite" aria-label="引擎事件流水">
+            <p class="flow-empty">还没有事件。跑一个目标，这里会一行行走过它调用的工具。</p>
+          </div>
+        </section>
+
+        <section class="gauge" aria-labelledby="rail-local-title">
+          <h2 class="gauge-title" id="rail-local-title">本机</h2>
+          <dl class="readout">
+            <div class="readout-row"><dt>模型</dt><dd id="ro-model">—</dd></div>
+            <div class="readout-row"><dt>接入主机</dt><dd id="ro-host">未接入</dd></div>
+            <div class="readout-row"><dt>工具</dt><dd id="ro-tools">—</dd></div>
+            <div class="readout-row"><dt>待批准</dt><dd id="ro-approvals">0</dd></div>
+            <div class="readout-row"><dt>定时任务</dt><dd id="ro-schedules">—</dd></div>
+            <div class="readout-row"><dt>记忆条目</dt><dd id="ro-memory">—</dd></div>
+            <div class="readout-row"><dt>版本</dt><dd id="ro-version">—</dd></div>
+          </dl>
+        </section>
+      </div>
+    </aside>
   </div>
+
+  <!-- 浏览器预览：非模态的右侧浮层（批次 F13）。刻意不遮中间列、不锁焦点——
+       它是"边干活边看本机 dev server"的面板，不是弹窗：开着它照样能发消息、看进度。 -->
+  <aside class="browser-pane" id="browser-pane" role="region" aria-label="浏览器预览" hidden>
+    <header class="bp-bar">
+      <div class="bp-nav" role="group" aria-label="页面导航">
+        <button class="icon-btn" id="bp-back" type="button" aria-label="上一页" title="上一页（只走我们自己的地址栈，跨站页面里我们控制不了它的历史）">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <button class="icon-btn" id="bp-fwd" type="button" aria-label="下一页" title="下一页">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <button class="icon-btn" id="bp-reload" type="button" aria-label="刷新" title="刷新（重新载入这一个地址）">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v5h-5"/></svg>
+        </button>
+      </div>
+      <form class="bp-addr" id="bp-form" autocomplete="off">
+        <label class="sr-only" for="bp-url">地址</label>
+        <input id="bp-url" name="url" type="text" inputmode="url" spellcheck="false" placeholder="127.0.0.1:5173 或完整地址">
+        <button class="btn btn-secondary btn-sm" type="submit">打开</button>
+      </form>
+      <button class="icon-btn" id="bp-external" type="button" aria-label="在系统浏览器打开" title="在系统浏览器打开（Google、GitHub 这类站点拒绝被嵌入，走这条）">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+      </button>
+      <button class="icon-btn" id="bp-close" type="button" aria-label="关闭预览面板" title="关闭（Esc）">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="bp-quick" id="bp-quick" role="group" aria-label="常用地址"></div>
+    <div class="bp-stage">
+      <!-- 空态先画着，第一次导航后才换 iframe：一个空白 iframe 看起来像坏了 -->
+      <div class="bp-empty" id="bp-empty">
+        <p class="bp-empty-title">还没有地址</p>
+        <p class="bp-empty-sub">上面输一个本机地址，或点上面常用端口。<br>很多站点（Google、GitHub、需要登录的页面）拒绝被嵌在这里，一直空白就是被拒了——用「在系统浏览器打开」。</p>
+      </div>
+      <!-- sandbox 是刻意的：不给 allow-top-navigation，所以被嵌的页面不能把整个操作台拽走；
+           给了 allow-same-origin，本机 dev server 才用得了 localStorage。 -->
+      <iframe class="bp-frame" id="bp-frame" title="预览页面" hidden
+        referrerpolicy="no-referrer"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+    </div>
+    <p class="bp-status" id="bp-status" role="status"></p>
+  </aside>
 
   <!-- 我的：右侧抽屉 -->
   <div class="drawer-overlay" id="me-overlay" hidden>
@@ -775,11 +973,11 @@
 
           <!-- 未登录 -->
           <div id="me-guest">
-            <div class="segmented seg-block" id="me-auth-tabs" role="tablist">
-              <button data-atab="signin" aria-pressed="true" role="tab">登录</button>
-              <button data-atab="signup" aria-pressed="false" role="tab">注册</button>
+            <div class="segmented seg-block" id="me-auth-tabs">
+              <button data-atab="signin" aria-pressed="true">登录</button>
+              <button data-atab="signup" aria-pressed="false">注册</button>
             </div>
-            <form class="me-auth-form" id="me-auth-form" onsubmit="return false">
+            <form class="me-auth-form" id="me-auth-form">
               <label class="sr-only" for="me-email">邮箱</label>
               <input class="input" id="me-email" name="email" type="email" autocomplete="username" placeholder="邮箱">
               <label class="sr-only" for="me-password">密码</label>

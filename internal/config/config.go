@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"gleam/internal/atomicfile"
 	"gleam/pkg/types"
 )
 
@@ -37,8 +38,13 @@ type LLMConfig struct {
 	// Tiers 模型档位表：档位名 → 模型 ID，例如 {coding: deepseek-coder, office: glm-5.3-flash}。
 	// 场景模板（专家角色）声明自己用哪一档，引擎据此换模型——"同一个 Harness，按场景换模型"，
 	// 不被单一模型绑死。档位没配就一律用主模型，所以留空是安全的。
-	Tiers       map[string]string
-	APIKey      string // 生产环境建议经环境变量注入
+	Tiers  map[string]string
+	APIKey string // 生产环境建议经环境变量注入
+	// APIKeyScope 是 APIKey 被授权发往的接入主机（见 llm.KeyScope），运行时标记，
+	// **不序列化**：覆盖层里根本没有 api_key，这把 key 的落点在凭证文件里自带同一字段。
+	// 内存里留它，是为了让"当前生效的 key"始终是单一事实——每次要发请求都去翻磁盘，
+	// 就会有人在自己的分支里读 cfg.LLM.APIKey 而忘了问一句"这把是发给谁的"。
+	APIKeyScope string
 	Temperature float64
 	MaxTokens   int
 	TimeoutSecs int
@@ -245,7 +251,11 @@ func (c *Config) Snapshot() types.ConfigSnapshot {
 // OverlayFile 数据目录下设置覆盖层的文件名。
 const OverlayFile = "settings.yaml"
 
-// SaveOverlay 把可在线修改的设置子集持久化到覆盖层文件（不含 api_key，密钥走环境变量）。
+// SaveOverlay 把可在线修改的设置子集持久化到覆盖层文件。
+//
+// 覆盖层里**没有 api_key**：settings.yaml 常被顺手截图、贴进 issue、同步进网盘，
+// 密钥一旦进去就等于公开。它只住凭证文件（0600，Windows 上再经 DPAPI），
+// 且按接入主机绑定，见 `internal/harness/credentials` 与 `internal/agent/llmkey.go`。
 //
 // ⚠ 这里是**全量快照**：不管用户有没有动过某个字段，都会写进去；MCP 列表更是故意
 // "空列表也要写"（否则覆盖不掉 config.yaml 里的旧列表），tiers 也靠空表表达"清空"。
@@ -365,11 +375,7 @@ func (c *Config) SaveOverlay(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, data, 0o644)
 }
 
 // LoadOverlay 若覆盖层文件存在则应用到 cfg（启动时恢复用户在设置页保存的值）。

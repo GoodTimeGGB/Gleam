@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"gleam/internal/atomicfile"
 	"gleam/internal/config"
 	"gleam/pkg/types"
 )
@@ -27,6 +28,9 @@ type Skill struct {
 	Runs        int          `json:"runs"`
 	Successes   int          `json:"successes"`
 	LastUsed    *time.Time   `json:"last_used,omitempty"`
+	// Disabled 停用：留在库里、保留参数与统计，但不出现在技能清单里，也不能被运行。
+	// 与「删除」的区别同 MCP：用户临时想让它别挡路时，不该把内容一起丢掉。
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // Store 技能库。
@@ -83,22 +87,26 @@ func (st *Store) Save(s Skill) (int, error) {
 		s.Runs = existing.Runs
 		s.Successes = existing.Successes
 		s.LastUsed = existing.LastUsed
+		s.Disabled = existing.Disabled // 停用是用户的判断，一次重新保存不该把它抹掉（要恢复请用启停）
 	} else {
 		s.Version = 1
 	}
-	data, err := marshalSkill(s)
-	if err != nil {
-		return 0, err
-	}
-	path := st.pathFor(s.Name)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return 0, err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := st.writeLocked(s); err != nil {
 		return 0, err
 	}
 	return s.Version, nil
+}
+
+// writeLocked 原子写入技能文件。调用方须持有 mu。
+//
+// 为什么强调原子：技能文件是用户攒下来的做法，写一半被断电或进程被杀，下次 List
+// 直接解析失败——那条技能就没了。所有写入口都走这里。
+func (st *Store) writeLocked(s Skill) error {
+	data, err := marshalSkill(s)
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(st.pathFor(s.Name), data, 0o644)
 }
 
 // Get 读取技能。
@@ -158,13 +166,14 @@ func (st *Store) List() []Skill {
 	return out
 }
 
-// RecordRun 记录一次运行结果（成功/失败统计）。
-func (st *Store) RecordRun(name string, ok bool) {
+// RecordRun 记录一次运行结果（成功/失败统计）。返回错误而不是吞掉：
+// 统计写不进去，等级公式与技能卡片上的成功率就在说谎，而用户没有任何办法发现。
+func (st *Store) RecordRun(name string, ok bool) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	s, err := st.loadLocked(name)
 	if err != nil {
-		return
+		return err
 	}
 	s.Runs++
 	if ok {
@@ -173,14 +182,29 @@ func (st *Store) RecordRun(name string, ok bool) {
 	now := time.Now()
 	s.LastUsed = &now
 	// 仅更新统计字段，版本号保持不变（版本只在 Save 时递增）
-	data, err := marshalSkill(*s)
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(st.pathFor(name), data, 0o644)
+	return st.writeLocked(*s)
 }
 
-// ListSummaries 返回摘要（供 std 工具适配）。
+// SetDisabled 停用 / 启用技能：只改这一个字段，其余原样保留，返回更新后的技能。
+func (st *Store) SetDisabled(name string, disabled bool) (Skill, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	s, err := st.loadLocked(name)
+	if err != nil {
+		return Skill{}, err
+	}
+	if s.Disabled == disabled {
+		return *s, nil
+	}
+	s.Disabled = disabled
+	if err := st.writeLocked(*s); err != nil {
+		return Skill{}, err
+	}
+	return *s, nil
+}
+
+// ListSummaries 返回摘要（供 std 工具适配）。停用的技能不在其中：
+// 这条清单会进规划上下文，列一个跑不了的技能，模型就会去调它然后拿到一句拒绝。
 func (st *Store) ListSummaries() []struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -197,6 +221,9 @@ func (st *Store) ListSummaries() []struct {
 		Successes   int    `json:"successes"`
 	}, 0, len(list))
 	for _, s := range list {
+		if s.Disabled {
+			continue
+		}
 		out = append(out, struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -256,6 +283,9 @@ func marshalSkill(s Skill) ([]byte, error) {
 	root.Set("steps", steps)
 	root.Set("runs", s.Runs)
 	root.Set("successes", s.Successes)
+	if s.Disabled {
+		root.Set("disabled", true)
+	}
 	if s.LastUsed != nil {
 		root.Set("last_used", s.LastUsed.Format(time.RFC3339))
 	}
@@ -298,6 +328,7 @@ func unmarshalSkill(data []byte) (*Skill, error) {
 	s.Version = asInt(m["version"])
 	s.Runs = asInt(m["runs"])
 	s.Successes = asInt(m["successes"])
+	s.Disabled, _ = m["disabled"].(bool)
 	if v, ok := m["last_used"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			s.LastUsed = &t

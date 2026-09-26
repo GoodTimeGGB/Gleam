@@ -31,6 +31,7 @@ import (
 
 	"gleam/internal/agent"
 	"gleam/internal/agent/geo"
+	"gleam/internal/buildinfo"
 	"gleam/internal/config"
 	"gleam/internal/harness/auth"
 	"gleam/internal/harness/conversation"
@@ -53,7 +54,7 @@ import (
 	"gleam/pkg/types"
 )
 
-const version = "0.1.0"
+const version = buildinfo.Version
 
 func main() {
 	args := os.Args[1:]
@@ -191,15 +192,12 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	// 设置覆盖层（设置页保存的用户偏好，优先于 config.yaml；命令行标志在其后仍可覆盖）
 	_ = config.LoadOverlay(cfg, filepath.Join(cfg.DataDir, config.OverlayFile))
 
-	// 本地凭证（LLM API Key / 云端会话），独立 0600 文件；环境变量优先级更高，不覆盖
+	// 本地凭证（LLM API Key / 云端会话），独立 0600 文件。
+	// 密钥的**取用**推迟到预设解析之后（applyLLMKey）：作用域是按生效主机算的，
+	// 先取密钥再解析等于拿一个还不知道要发给谁的值。
 	credStore, err := credentials.Open(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("打开本地凭证失败: %w", err)
-	}
-	if cfg.LLM.APIKey == "" {
-		if k := credStore.GetLLMAPIKey(); k != "" {
-			cfg.LLM.APIKey = k
-		}
 	}
 
 	if mockLLM {
@@ -223,15 +221,16 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 		}
 		client = m
 	} else {
-		baseURL, model, protocol := llm.ResolvePreset(cfg.LLM.ProviderID, cfg.LLM.Plan, cfg.LLM.BaseURL, cfg.LLM.Model)
-		if protocol == "" {
-			protocol = cfg.LLM.Protocol
-		}
-		if protocol == "" {
-			protocol = llm.ProtocolOpenAIChat
-		}
+		baseURL, model, protocol := llm.ResolveTarget(cfg.LLM.ProviderID, cfg.LLM.Plan, cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.Protocol)
 		cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.Protocol = baseURL, model, protocol
-		client = llm.New(protocol, baseURL, cfg.LLM.APIKey, model,
+		// 密钥按生效主机取用：先给配置/环境变量带进来的那把贴上当次主机，
+		// 再由 BindLLMKey 决定本次实际用哪把（换厂商后不会把上一家的发出去）。
+		agent.MarkInjectedLLMKey(cfg, baseURL)
+		key, keyErr := agent.BindLLMKey(cfg, credStore, baseURL, "", false)
+		if keyErr != nil {
+			return nil, fmt.Errorf("读取本地密钥失败: %w", keyErr)
+		}
+		client = llm.New(protocol, baseURL, key, model,
 			cfg.LLM.Temperature, cfg.LLM.MaxTokens, cfg.LLM.TimeoutSecs)
 	}
 
@@ -386,7 +385,12 @@ var sysNotify = func(title, message string) error {
 // 抽成独立函数而不是内联在 fire 闭包里，是为了能测"接线"：
 // 单测 `ShouldNotify` 只能证明**判据**对，证明不了**它真的被调用了**——
 // 而本仓库栽过四次的恰好是这一类（判据对、线没接）。这里可以注入假的系统通知
-// 与假的事件出口，断言"该响的时候两条都响了、该静默的时候两条都没响"。
+// 与假的事件出口，断言"该弹的时候弹了、不该弹的时候没弹，而送达两次都发生了"。
+//
+// **打扰与送达是两件事**：通知策略回答的是"这次要不要弹窗"，不是"这次跑完算不算发生过"。
+// 早先它们共用一个开关，于是 `notify: never` 的定时任务既不进界面任务表、也不进归档，
+// 跑完什么都没留下——恰好是 `Notifier.OnTaskDone` 的注释里说不能做的事：
+// 结果不送达，用户就必须一直盯着，而定时任务的整个价值就是不用盯着。
 func notifyScheduledDone(j scheduler.Job, res *types.GoalResult, sink agent.Notifier) {
 	if res == nil {
 		return
@@ -397,10 +401,9 @@ func notifyScheduledDone(j scheduler.Job, res *types.GoalResult, sink agent.Noti
 		Result: *res,
 	}
 	if !j.ShouldNotify(ev.Succeeded()) {
-		fmt.Fprintf(os.Stderr, "[schedule] %s（按通知策略静默）\n", ev.Line())
-		return
-	}
-	if err := sysNotify(ev.Title(), ev.Line()); err != nil {
+		// 静默的是弹窗，不是记录：这一行仍然打日志，"跑过了"在 stderr 上留痕。
+		fmt.Fprintf(os.Stderr, "[schedule] %s（按通知策略不弹系统通知）\n", ev.Line())
+	} else if err := sysNotify(ev.Title(), ev.Line()); err != nil {
 		// 通知送不出去不影响任务本身，但不能装作没发生——否则"没收到通知"
 		// 会被误读成"任务没跑"。
 		fmt.Fprintf(os.Stderr, "[schedule] 系统通知未送达（%v）\n", err)
@@ -436,6 +439,11 @@ func fireScheduledJob(rt *runtime, j scheduler.Job) {
 	}
 	fmt.Fprintf(os.Stderr, "[schedule] 触发任务 %q: %s\n", j.Name, types.Shorten(j.Goal, 60))
 	res := runGoalFor(rt.agent, context.Background(), types.GoalRequest{Goal: j.Goal, Mode: mode})
+	// 定时任务也要归档，而且要在这里（不是在某个宿主的 OnTaskDone 里）：一次跑完没人盯着，
+	// 留痕的价值比交互路径更高；放在宿主侧就会漏掉"这个宿主没实现落盘"的那种。
+	if err := agent.SaveTaskResult(rt.cfg.DataDir, res); err != nil {
+		fmt.Fprintf(os.Stderr, "[schedule] 任务未存档：%v\n", err)
+	}
 	notifyScheduledDone(j, res, rt.agent.Notifier)
 }
 
@@ -529,19 +537,14 @@ func cmdGoal(args []string) error {
 	bindSchedulerFire(rt)
 
 	result := rt.agent.RunGoal(context.Background(), types.GoalRequest{Goal: goal, Mode: *mode})
-	// 归档到 tasks/<id>.json（与 serve 模式同一落点）：ExecutedPlan 随结果落盘，
-	// gleam replay 才有凭据回放"当时到底打算怎么做、做成了什么样"。
-	if dir := filepath.Join(rt.cfg.DataDir, "tasks"); dir != "" {
-		if b, err := json.MarshalIndent(result, "", " "); err == nil {
-			if err := os.MkdirAll(dir, 0o755); err == nil {
-				if err := os.WriteFile(filepath.Join(dir, result.TaskID+".json"), b, 0o644); err == nil {
-					// 终态快照已经写下，运行中的步骤日志就是冗余的——删掉。
-					// runs/ 里因此只留下**没跑完**的运行，正好是唯一需要它的那批。
-					agent.DiscardRunLog(rt.cfg.DataDir, result.TaskID)
-					fmt.Fprintf(os.Stderr, "[gleam] 任务已存档：gleam replay %s 可回放（trace_id %s）\n", result.TaskID, result.TraceID)
-				}
-			}
-		}
+	// 归档到 tasks/<id>.json：与 serve 模式共用**同一个出口**（agent.SaveTaskResult）。
+	// ExecutedPlan 随结果落盘，gleam replay 才有凭据回放"当时到底打算怎么做、做成了什么样"。
+	// 归档失败要说出来：以前是静默吞掉，用户以为 `gleam replay <id>` 随时能回放，
+	// 到跟前才发现这条运行根本不存在。
+	if err := agent.SaveTaskResult(rt.cfg.DataDir, result); err != nil {
+		fmt.Fprintf(os.Stderr, "[gleam] 任务未存档：%v\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "[gleam] 任务已存档：gleam replay %s 可回放（trace_id %s）\n", result.TaskID, result.TraceID)
 	}
 	// 结果摘要到 stdout（可管道），过程在 stderr
 	fmt.Println(result.Summary)

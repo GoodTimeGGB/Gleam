@@ -116,6 +116,50 @@ func TestLoopGovernanceSettings_TooSmallRejected(t *testing.T) {
 	}
 }
 
+// TestLLMTemperature_BoundariesAccepted 温度的两个端点都要能存下。
+//
+// 0 不是「没填」：它表示要确定性输出。旧代码判 `v > 0` 才应用，用户填 0 会被静默
+// 丢回默认 0.3——保存成功、下次打开发现没变，是最难排查的那类「没报错的丢失」。
+// 2 同理：它是各家协议温度上限的合法取值，原先判 `v >= 2` 把上限本身挡在门外，
+// 前端只能把 max 写成 1.9 来绕，错误提示却说「允许 0–2」。
+func TestLLMTemperature_BoundariesAccepted(t *testing.T) {
+	f, _ := newGEOFixture(t)
+	for _, want := range []float64{0, 2} {
+		updated := f.call("POST", "/api/settings", map[string]any{
+			"llm": map[string]any{"temperature": want},
+		})
+		if got := updated["llm"].(map[string]any)["temperature"]; got != want {
+			t.Errorf("temperature=%v 应回显 %v，实际 %v", want, want, got)
+		}
+		if f.agent.Cfg.LLM.Temperature != want {
+			t.Errorf("temperature=%v 未热生效，运行时仍是 %v", want, f.agent.Cfg.LLM.Temperature)
+		}
+	}
+}
+
+// TestLLMTemperature_OutOfRangeRejected 越界温度整次拒绝，且不夹带同批其他字段。
+func TestLLMTemperature_OutOfRangeRejected(t *testing.T) {
+	f, _ := newGEOFixture(t)
+	b, _ := json.Marshal(map[string]any{"llm": map[string]any{
+		"temperature": 2.5,  // 越界
+		"max_tokens":  9216, // 合法且不同于默认 4096，但不得夹带
+	}})
+	resp, err := http.Post(f.ts.URL+"/api/settings", "application/json", strings.NewReader(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 400 {
+		t.Fatalf("越界温度应 400，实得 %d", resp.StatusCode)
+	}
+	if f.agent.Cfg.LLM.Temperature == 2.5 {
+		t.Error("越界温度写进了运行时")
+	}
+	if f.agent.Cfg.LLM.MaxTokens == 9216 {
+		t.Error("被拒请求不应有任何字段生效（max_tokens 夹带成功）")
+	}
+}
+
 // TestChatAcceptanceSetting_RoundTrip 对话模式自检开关应能保存并热生效。
 func TestChatAcceptanceSetting_RoundTrip(t *testing.T) {
 	f, _ := newGEOFixture(t)

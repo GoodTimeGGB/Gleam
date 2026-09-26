@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gleam/internal/atomicfile"
 )
 
 // DefaultID 是首次使用自动创建的「默认空间」固定 ID，
@@ -122,14 +124,7 @@ func (s *Store) statePath() string {
 	return filepath.Join(s.dir, "state.json")
 }
 
-// writeAtomic tmp+rename 落盘：半截 JSON 会让空间在下次启动时凭空消失。
-func writeAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+// 落盘统一走 atomicfile：半截 JSON 会让空间在下次启动时凭空消失。
 
 func (s *Store) writeLocked(sp Space) error {
 	sp.UpdatedAt = time.Now().UTC()
@@ -141,7 +136,7 @@ func (s *Store) writeLocked(sp Space) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, data)
+	return atomicfile.Write(path, data, 0o644)
 }
 
 func (s *Store) writeStateLocked(id string) error {
@@ -149,7 +144,7 @@ func (s *Store) writeStateLocked(id string) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(s.statePath(), data)
+	return atomicfile.Write(s.statePath(), data, 0o644)
 }
 
 func (s *Store) readOne(path string) (Space, error) {

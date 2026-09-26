@@ -15,7 +15,7 @@ Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆
 | **目标模式** | 通过 JSON-RPC 提交 `goal/submit`，实时推送进度、请求审批、回报结果（auto / plan_first / interactive 三种模式） |
 | **自研 Harness** | 工具注册表（热注册）、三层记忆、Cron 调度器、安全门控、技能系统、MCP 连接器，全部纯标准库 |
 | **安全门控与权限设置** | 三种安全模式（auto/plan_first/interactive）；每个工具可设**只读放行 / 需我批准 / 完全访问**（工具页下拉，热生效并持久化）；高风险操作执行前展示计划请求确认；信任路径与信任工具白名单 |
-| **三层记忆** | 短期环缓冲（最近 20 轮）+ 工作记忆（任务结果落盘）+ 长期记忆（自研词法哈希向量索引，支持中文语义检索，JSON 持久化） |
+| **三层记忆** | 短期环缓冲（最近 20 轮）+ 工作记忆（任务结果落盘）+ 长期记忆（自研词法索引：中文双字组 + FNV 哈希 + 余弦相似度，JSON 持久化。零第三方依赖，**不是语义向量**，口径见 `docs/known-limits.md`） |
 | **技能系统** | 执行 → 固化 → 一键复用闭环；技能 YAML 版本化，自动统计运行成功率；失败后自动优化参数并保存新版本 |
 | **主动提议** | 任务完成后给出后续建议；≥2 个工具步骤的成功任务自动建议固化为技能 |
 | **协作风格** | rigorous（严谨）/ gentle（温和）/ efficient（高效）三种风格，贯穿规划与回复提示词 |
@@ -142,6 +142,8 @@ export GLEAM_API_KEY=你的APIKey
 ```
 cmd/gleam/            主入口（app / serve / goal / webui / tools / rules / skills / schedule / memory / doctor / replay / eval / mcp-fake-server）
 internal/
+  atomicfile/         状态落盘的唯一写入口：同目录临时文件 + Sync + rename（`os.WriteFile` 失败留下的是
+                      半截 JSON，下次打开解析失败，丢的是整份状态而不是一条记录）
   agent/              自主任务引擎：planner（规划+校验）→ executor（DAG 并发+审批不占槽+超时重试+步骤三态）→ reflector（完成度评分）
                       + rules.go 稳定段规则表：规则有 ID / 落点 / 适用范围，按任务模式与模型档位条件化
                       + 规则集身份：内容派生的版本指纹 + 生效规则 ID，记进产出 / 成长日志 / 评测基线，gleam rules 回查
@@ -149,7 +151,7 @@ internal/
                       + narrator（人格化旁白，风格化阶段叙述，零 LLM）
   harness/
     registry/         工具注册表（运行时热注册/替换/注销）
-    memory/           短期环缓冲 + 自研向量索引（FNV 哈希 + 中文双字组 + 余弦检索）+ 上下文自动压缩
+    memory/           短期环缓冲 + 自研词法索引（FNV 哈希向量 + 中文双字组 + 余弦检索，非语义）+ 上下文自动压缩
     safety/           安全门控（三级权限 × 三种模式 × 信任白名单 + 全量审计落盘 + 审批等待落盘）
     scheduler/        Cron(5段) + 固定间隔 + 文件监听（轮询）+ HTTP 回调触发，任务持久化
     skill/            技能固化/版本化/复用/失败自动优化（自研 YAML 子集读写）
@@ -189,25 +191,41 @@ editor-plugin/        编辑器插件接入清单（gleam.plugin.json + 接入�
 
 ### Web UI（`gleam webui`）
 
-浏览器操作台，与 stdio 服务共享同一引擎。输入栏提供三组丝滑控件：**权限切换**（🛡️ 请我批准 / ⚡ 完全访问，对应 plan_first / auto，切换即持久化）、**加号菜单**（📎 添加文件 / 📋 计划模式 / 🧩 插件市场 / @ 引用）、**@ 自动补全**（输入 @ 触发文件·技能·记忆模糊搜索，方向键选择回车插入，文件以可移除芯片展示并自动注入目标上下文）。界面包含六个视图：**目标**（提交 + 实时进度时间线 + 审批卡 + 完成度评分环 + 技能固化建议）、**技能**（运行/删除）、**记忆**（写入 + 语义检索）、**定时任务**（Cron/间隔）、**工具**（21 个工具的权限徽标与 schema）、**设置**（协作风格/安全模式/引擎参数/记忆与上下文/模型——保存即热生效并持久化到 `~/.gleam/settings.yaml`，含会话压缩状态面板与手动压缩）。视觉体系由 `ui-ux-pro-max` 技能生成：深色玻璃拟态 + 状态绿 CTA + Fira Sans/Code 字体，支持 375-1440px 响应式、键盘导航与 `prefers-reduced-motion`。
+浏览器操作台，与 stdio 服务共享同一引擎。输入栏提供五组控件：**权限切换**（🛡️ 请我批准 / ⚡ 完全访问，对应 plan_first / auto，切换即持久化）、**加号菜单**（📎 添加文件 / 🎯 添加目标 / 📋 计划模式 / 🧩 添加插件 / @ 引用 / 🌐 浏览器预览，六项）、**@ 自动补全**（输入 @ 触发文件·技能·记忆模糊搜索，方向键选择回车插入，文件以可移除芯片展示并自动注入目标上下文）、**模型芯片**（打字那一格就知道现在是谁在用：点开设档位表与最近拉取结果就地换，下一个任务开始用它；也能就地「拉取厂商模型」，用的是**已保存**的那份配置而非输入框草稿）、**上下文水位**（窗口 N/M 轮的占用条 + 待压缩攒了几轮，就地「立即压缩」；满了不是坏事——窗口外的对话被摘要带走不会丢，一直攒着才会让下一轮更贵。两样都不新开数据源，读的是设置页已有的出口，理由见设计文档 §4.6.30）。加号菜单里的**浏览器预览**是右侧滑出的非模态浮层：输个本机地址（`127.0.0.1:5173` 会补成 `http://127.0.0.1:5173/`）就能不切窗口看跑起来的样子，带常用端口、自己的地址栈、刷新和「在系统浏览器打开」；开着它照样能发消息、看进度，中间那一列一格不让。它只做面板，读不到被嵌页面的控制台和网络，理由见设计文档 §4.6.31。界面包含十一个视图（侧栏四个常驻 + 「更多」里七个）：**目标**（提交 + 实时进度时间线 + 审批卡 + 完成度评分环 + 技能固化建议）、**技能**（运行/停用/删除）、**记忆**（写入 + 词法检索 + 单条删除）、**定时任务**（Cron/间隔、暂停与恢复）、**工具**（内置 23 个工具的权限徽标与 schema，可按工具改放行级别）、**市场**（技能与 MCP 的安装与卸载）、**成长**（等级与事件流）、**GEO**（产出归因）、**就绪体检**（九坑自检）、**反馈与建议**（报问题/提建议 + 截图 + 指着某次运行说，见「反馈与建议」一节）、**设置**（协作风格/安全模式/引擎参数/记忆与上下文/模型——保存即热生效并持久化到 `~/.gleam/settings.yaml`，含会话压缩状态面板与手动压缩）。视觉体系由 `ui-ux-pro-max` 技能生成：深色玻璃拟态 + 状态绿 CTA + Fira Sans/Code 字体，支持 375-1440px 响应式、键盘导航与 `prefers-reduced-motion`。
+
+**三栏而不是一栏到底**：左侧功能模块、中间对话与产出、右侧**现场栏**（Live Rail）——取的是通用工作台那套「导航 / 工作面 / 设备现场」的读法，版式、令牌、交互全是本项目自研（不引入任何第三方 UI 依赖）。现场栏像一台 IoT 设备的侧面板，三段读数从上到下对应任务的现在与来路：**微光循环**（当前阶段格 + 预算闸 + 「规划中 · 12s / 等你批准 · 4s」的计时读数）、**事件流水**（工具调用次数与失败标红）、**本机**（模型、接入主机、工具数、待批准、定时任务、记忆条目、版本）。点轨道任意一格把中间区滚到那一张卡。窄屏自动收成一条竖签（点一下展开），**用户显式收展过就以用户为准**，中屏不再被 CSS 强行按回去。它不新开数据源，读的都是已经存在的出口。理由与踩过的坑见设计文档 §4.6.29。
 
 | 端点 | 说明 |
 | :-- | :-- |
 | `GET /` · `GET /assets/*` | 内嵌单页前端 |
 | `GET /api/events` | SSE 事件流（progress / approval / completed / suggestion / suggest_skill） |
-| `POST /api/goals` · `GET /api/goals[/{id}]` · `POST /api/goals/{id}/cancel` | 目标提交/查询/取消 |
-| `GET /api/approvals` · `POST /api/approvals/{id}` | 待决审批列表与裁决（超时自动拒绝） |
-| `GET /api/tools` · `POST /api/tools/call` | 工具列表（含权限覆盖标记）与直调 |
-| `POST /api/tools/permission` | 工具权限设置（readonly / user_approved / full_access / default，热生效 + 持久化） |
-| `GET/POST /api/memory` · `/api/skills*` · `/api/schedules*` | 记忆 / 技能 / 调度管理 |
+| `POST /api/goals` · `GET /api/goals` · `GET /api/goals/{id}` · `POST /api/goals/{id}/cancel` | 目标提交 / 列表 / 详情 / 取消（取消会**同时摘掉该任务名下未裁决的审批**并叫醒停在审批上的那一轮；列表与详情都回落到 `tasks/` 归档——重启之后"最近任务"不会变成「全部 0」） |
+| `GET /api/approvals` · `POST /api/approvals/{id}` | 待决审批列表与裁决（超时自动拒绝；任务取消后即从这份名单消失） |
+| `GET /api/tools` · `POST /api/tools/call` · `POST /api/tools/permission` | 工具列表（含权限覆盖标记）/ 直调 / 权限设置（readonly / user_approved / full_access / default，热生效 + 持久化） |
+| `GET /api/conversations` · `POST /api/conversations` · `GET /api/conversations/{id}` · `PATCH /api/conversations/{id}` · `DELETE /api/conversations/{id}` · `POST /api/conversations/{id}/activate` | 多轮会话：列表 / 新建 / 取详情 / 改名 / 删除 / 切为当前 |
+| `POST /api/conversation/reset` | 开新会话（清上下文摘要 + 丢弃已结束任务的内存记录；注意单数命名，与上面那组不同形） |
+| `GET /api/spaces` · `POST /api/spaces` · `PATCH /api/spaces/{id}` · `DELETE /api/spaces/{id}` · `POST /api/spaces/{id}/activate` | 工作空间（本地目录 + 规则 + 记忆的作用域）增删改切 |
+| `GET /api/workspace` · `POST /api/workspace` · `GET /api/fs` | 当前工作目录查询 / 设置 / 目录浏览（选目录用） |
+| `GET /api/memory` · `POST /api/memory` · `DELETE /api/memory/{id}` | 记忆检索（词法 + 相关度）/ 写入 / 单条删除 |
+| `GET /api/skills` · `POST /api/skills` · `POST /api/skills/{name}/run` · `POST /api/skills/{name}/enabled` · `DELETE /api/skills/{name}` | 技能：列表 / 新建保存 / 直接运行 / 停用与恢复（停用状态持久化，重启后仍在）/ 删除 |
+| `GET /api/mcp` · `POST /api/mcp` · `POST /api/mcp/{name}/enabled` · `POST /api/mcp/{name}/reconnect` · `DELETE /api/mcp/{name}` | MCP：已装列表（含校验状态）/ 自定义安装，**同名即更新** / 停用与恢复 / 重连 / 卸载 |
+| `GET /api/market/mcp` · `POST /api/market/mcp/install` · `GET /api/market/skills` · `POST /api/market/skills/install` | 市场搜索与一键安装（覆盖已装要先确认，不静默盖掉本地改动） |
+| `GET /api/schedules` · `POST /api/schedules` · `POST /api/schedules/{name}/enabled` · `POST /api/schedules/{name}/notify` · `DELETE /api/schedules/{name}` | 定时任务：列表 / 新建（Cron 或间隔）/ 暂停与恢复 / 改完成通知 / 删除 |
 | `POST /api/hooks/{name}` | HTTP 回调触发：立即执行指定定时任务 |
-| `POST /api/heartbeat` | 前端存活心跳（桌面端 app 模式生命周期依据） |
-| `GET/POST /api/settings` | 设置读取/保存（校验 + 运行时热生效 + 覆盖层持久化；api_key 掩码不回传） |
-| `GET /api/context` · `POST /api/context/compress` · `POST /api/context/clear` | 会话上下文状态（含节省 token 估算）/ 立即压缩 / 清空摘要 |
+| `GET /api/growth` · `GET /api/growth/recent` · `GET /api/roles` | 成长统计（等级、事件计数）/ 最近事件流 / 可用角色列表 |
+| `GET /api/geo` · `POST /api/geo/analyze` · `DELETE /api/geo/history` | 产出归因：历史与统计 / 分析一段产出 / 清空历史 |
+| `GET /api/settings` · `POST /api/settings` | 设置读取/保存（校验 + 运行时热生效 + 覆盖层持久化；api_key 不回传明文，只回 `api_key_set`/`api_key_host`。密钥存 `credentials.json`（0600，Windows 上加 DPAPI），**按接入主机绑定**——换厂商就要重填，这是刻意的：把 GLM 的 key 发给别的域名等于把它发到别的公司那里去了） |
+| `POST /api/llm/test` · `POST /api/llm/models` | 连通性自测（不落盘、只回成败与原因）/ 在线拉取该接入点可用模型 id 供点选 |
 | `GET /api/providers` | 厂商官方接入预设（含 token/coding/agent 三类套餐入口） |
-| `GET /api/market/mcp` · `POST /api/market/mcp/install` | MCP 市场搜索与一键安装 |
-| `GET /api/market/skills` · `POST /api/market/skills/install` | 技能模板市场搜索与一键安装 |
-| `GET/POST /api/mcp` · `DELETE /api/mcp/{name}` · `POST /api/mcp/{name}/reconnect` | MCP 已装列表 / 自定义安装 / 卸载 / 重连 |
+| `GET /api/context` · `POST /api/context/compress` · `POST /api/context/clear` | 会话上下文状态（含节省 token 估算；**水位百分比由后端 `memory.fillPct` 算好回传**，前端只画不除，免得两处各算一个数）/ 立即压缩 / 清空摘要 |
+| `GET /api/readiness` · `GET /api/info` | 就绪体检（九坑自检，同 `gleam doctor`）/ 版本与当前模型、工具数、**记忆条数**（右侧现场栏那一格读的就是它，条数只由后端数一次） |
+| `GET /api/go-status` · `POST /api/go-status` · `POST /api/go-status/install` | 本机 Go 工具链检测 / 记录检测路径 / 取安装指引（详见「跑真实代码任务」一节） |
+| `GET /api/account` · `POST /api/account/signup` · `POST /api/account/signin` · `POST /api/account/signout` · `POST /api/account/oauth` · `POST /api/account/configure` | 账号会话与注册/登录/登出/OAuth/后端配置（默认不启用远程后端，见 `docs/known-limits.md`） |
+| `GET /api/local-data` | 本地数据目录体量（文件数与字节数），设置页"数据都落在哪"的来源 |
+| `POST /api/feedback` · `GET /api/feedback` · `GET /api/feedback/context` · `GET /api/feedback/attachment` · `POST /api/feedback/{id}/resend` · `DELETE /api/feedback/{id}` | 反馈与建议：提交（截图以 base64 随体上来）/ 本机列表 / **提交前预览会带上哪些运行现场**（与实存那份同源，前端不抄字段名）/ 取回一张截图 / 重投一条失败的 / 删掉一条。一律**先落本地** `<DataDir>/feedback/`（截图 0600，删一条连带删图）；投递状态分 `local_only` / `sent` / `failed` 三态，**没配远端不是失败**。运行现场由后端补且只列白名单字段（版本、模型名、接入**主机名**、所指任务的终态与最后一个失败步骤的工具名）——密钥、带 token 的完整 URL、工作区绝对路径、步骤错误正文都不出去。图片类型只认文件头，不认前端声称的 MIME；建表语句见「反馈与建议」一节 |
+| `GET /api/security/audit` | 权限与执行审计流水（谁放行的高风险操作） |
+| `POST /api/heartbeat` · `POST /api/show-window` | 前端存活心跳（桌面端 app 模式生命周期依据）/ 唤起桌面窗口 |
+
 
 **Gleam → 宿主（通知/请求）**
 
@@ -225,6 +243,44 @@ editor-plugin/        编辑器插件接入清单（gleam.plugin.json + 接入�
 - **模式**：`auto` 仅高风险审批；`plan_first` 执行前审批完整计划（中风险免重复审批）；`interactive` 每个写操作逐步审批
 - **纵深防御**：文件工具自身强制工作区边界（防目录穿越），安全门控在其之上再做审批裁决
 - **超时**：单步工具默认 30s 超时；审批等待默认 300s 超时自动拒绝；规划校验失败自动重规划
+
+## 反馈与建议
+
+界面上「反馈与建议」视图（更多菜单里）可以写问题或建议、贴截图（选文件或 Ctrl+V），对话里的每条回复也能一键「反馈这条」。落点分两层，**顺序固定为先本地、再远端**：
+
+- **本地必选**：每条反馈都落 `<DataDir>/feedback/<id>.json`，截图落同目录的 `<id>-<n>.<ext>`（权限 0600）。没网、没账号、没配远端都不影响"提交成功"这件事。想撤就删——`删除` 连带删掉截图，屏幕上截到的是别人的窗口时，"留在你机器上了"本身就是一个要能交代的答复。
+- **远端可插拔**：在「云端账号」里配了 Supabase（`supabase_url` + `anon_key`，与登录复用同一份凭证）才会再送一份出去。**不配就是 `local_only`，这不是失败**；配了没送出去才是 `failed`，界面会说清是没送到、送哪儿失败、原因是什么，并提供「重新投递」。已送达的不会重复投（否则表里多出重复行，"这条收没收到"又说不清）。
+
+**发出去的那一份和看见的那一份不完全一样**，这是刻意的：投递前先本机落住原文，再对副本脱敏——你粘在描述里的工作区绝对路径、API Key 会被换成 `‹已脱敏›`，备注里写明替换了几处。运行现场由后端补且只列白名单（版本、Go、OS、模型名、接入**主机名**、所指任务的终态与最后一个失败步骤的**工具名**）；带 token 的完整 URL、绝对路径、步骤错误正文都不出门。**截图只到本机为止**，远端那一行只有文件名/类型/字节数。决策理由见设计文档 §4.6.28。
+
+要收远端反馈，得先在 Supabase 建一张表（不建表不会静默失败，会明确回「远端没有表」）：
+
+```sql
+create table public.feedback_reports (
+  id          text primary key,
+  kind        text not null,          -- bug | suggestion
+  text        text not null,          -- 已脱敏后的正文
+  app_version text,
+  go_version  text,
+  os          text,
+  model       text,
+  llm_host    text,                   -- 只有主机名
+  task_id     text,
+  task_status text,
+  failed_tool text,                   -- 只有工具名，不带步骤错误正文
+  attachments jsonb,                  -- [{name, mime, bytes}]，没有字节
+  created_at  timestamptz not null
+);
+
+alter table public.feedback_reports enable row level security;
+
+-- anon key 是公开客户端标识，不是机密：开了 RLS 又只放 insert，
+-- 拿到 key 的人只能往这张表里送一条，读不到别人送的东西。
+create policy feedback_anon_insert on public.feedback_reports
+  for insert to anon with check (true);
+```
+
+表名固定 `feedback_reports`（要换别的名字得改代码里的 `feedback.FeedbackTable`——没有做配置项，因为"往哪张表收"是**收的人**的决定，不该让每个提交反馈的人各填一次）。列是**摊平**的而不是塞一个嵌套 JSON——会去这张表看东西的人用表格视图，摊平的列能直接按版本、按失败工具、按类型筛。
 
 ## 测试与自测
 
@@ -255,7 +311,7 @@ bash scripts/smoke-replay.sh   # 审计四用法冒烟：回放 / 重跑 / 恢�
 仓库自己的入口与纪律在 `AGENTS.md`（入口链 + 规则 → 命令映射表 + 三条铁律）与 `docs/known-limits.md`（已知限制 / 被否决的方案 / 刻意不做，一行一条附理由）；每批新判据还要做一次负例控制（`scripts/mutation/`）。
 
 测试覆盖：YAML 子集解析（含注释边界/往返）、Cron 语义（含 dom/dow 并集）、环缓冲顺序、
-向量检索相关性、容量淘汰、上下文压缩（溢出捕获/LLM 摘要/抽取式兜底/持久化）、技能版本化、
+词法检索相关性、容量淘汰、上下文压缩（溢出捕获/LLM 摘要/抽取式兜底/持久化）、技能版本化、
 技能失败自动优化（Mock 跳过/非法输出忽略）、DAG 并发与依赖跳过、引用替换（`$ref:s1.field` / `{ref:s1}`）、
 超时重试（成功/耗尽/非超时不重试）、HTTP 回调触发、
 定时任务结果送达（通知策略矩阵 / fire 路径接线 / 四宿主落点 / 视图印生效值）、
@@ -279,10 +335,10 @@ MCP initialize/tools.list/tools.call、Web UI REST/SSE/审批回路（进程内 
 | §6.3 编辑器插件集成 | ✅ `editor-plugin/gleam.plugin.json` 接入清单 + 接入指引 |
 | §9 风险应对：上下文自动压缩 | ✅ 短期窗口外旧对话滚动摘要（LLM + 抽取式兜底），注入规划并持久化 |
 | §9 风险应对：工具超时后自动重试或跳过 | ✅ 超时自动重试（`step_retries`，默认 1 次），非超时错误不重试 |
-| §4.2.3 工作记忆："SQLite" | ⚠️ 有意偏差：以任务结果 JSON 落盘（`tasks/`）实现同等职责——项目铁律是零第三方依赖，纯 Go 内嵌 SQLite 需引入外部包 |
-| MCP 断线重连与资源订阅 | ⏳ MVP 后路线（设计文档未强制） |
+| §4.2.3 工作记忆："SQLite" | ⚠️ 有意偏差：以任务结果 JSON 落盘（`tasks/`）实现同等职责，理由见 `docs/known-limits.md`「刻意不做」 |
+| MCP 资源订阅 / 断线自动重连 | ⏳ 未做（当前只有手动重连：界面「重连」→ `POST /api/mcp/{name}/reconnect`） |
 
-**MVP 后路线**：MCP 重连与资源订阅、技能市场与分享、Windows 文件监听原生 API（当前为轮询快照）。
+**MVP 后路线**：MCP 断线自动重连与资源订阅、技能分享（本地技能导出给别人安装；模板市场已上线）、Windows 文件监听原生 API（当前为轮询快照）。
 
 ## 桌面端打包（多平台）
 

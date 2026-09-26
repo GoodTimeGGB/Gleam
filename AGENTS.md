@@ -1,6 +1,6 @@
 # AGENTS.md — Gleam 仓库入口
 
-> 这是**入口**，不是手册：**每多走一步才付那一步的上下文成本**，先读完这页，再按需点开链接。
+> 这是**入口**，不是手册：**每多走一步才付那一步的上下文成本**——先读完这页再点开链接。
 > 字数预算 ≤ 1950 字符，`scripts/verify.sh` 检查并**告警**（理由见 §4.6.23）。
 
 ## 三条铁律
@@ -16,7 +16,7 @@
 | `internal/agent` | 循环：规划 / 执行 / 反思 / 验收 / 上下文 |
 | `internal/harness` | 权限·记忆·技能·安全·调度·对话·成长 |
 | `internal/tools` | 工具注册表与内置工具族 |
-| `internal/llm` | 模型协议适配（4 种） |
+| `internal/llm` | 模型协议适配（3 种线协议） |
 | `internal/server` · `internal/webui` · `cmd/gleam` | 接入层（JSON-RPC · HTTP+SSE · CLI） |
 | `pkg/types` | 跨层类型 |
 | `scripts/` | 仓库工程：验证 · 冒烟 · 变异 |
@@ -25,7 +25,7 @@
 
 | 规则 | 命令 |
 | :--- | :--- |
-| 格式与引用 | `gofmt -l ./internal ./pkg ./cmd`；`scripts/check-doc-refs.py` |
+| 格式·引用·落盘·接口清单 | `gofmt -l ./internal ./pkg ./cmd`；`scripts/check-*.py` |
 | 静态检查 | `go vet ./...` |
 | 编译 | `go build ./...` |
 | 行为 | `go test ./... -count=1` |
@@ -37,7 +37,7 @@
 | 指标分母不许共用 | `go test ./internal/harness/growth ./internal/eval` |
 
 **一次跑完前六层**：`bash scripts/verify.sh`（`--quick` 只到行为层；`bin/gleam.exe` 由它建出，**别用 `go run`**）。
-**证明判据挡得住**：`python scripts/mutation/batch-a-audit.py`（每批一个）。
+**证明判据挡得住**：`python scripts/mutation/batch-a-audit.py`（批次见该目录）。
 
 ## 三问自检（改完问自己）
 

@@ -196,17 +196,24 @@ def select(mutations: list[dict], spec: str) -> list[dict]:
 
 
 def preflight(h: Harness, mutations: list[dict]) -> list[str]:
-    """启动时的完整性预检：每个变异的每个锚点都必须**恰好出现一次**。
+    """启动时的完整性预检：锚点各恰好出现一次，且目标命令不含 `|`。
 
     为什么非做不可：脚本被强杀（沙箱拦截、超时、Ctrl-C）时可能留下一个已经改过、
     但还没还原的文件。此时后续每一处锚点都会失配，而更坏的情况是**锚点仍然匹配**——
     于是变异被"应用"到一个已经被改过的文件上，跑出来的结果毫无意义。
     更危险的是：一次被沙箱拦下的命令看起来就是"测试失败"，于是变异被记成"已捕获"。
 
+    `|` 同理：Windows 上 shell=True 走 cmd.exe，而 cmd 不认单引号，
+    `go test -run 'A|B'` 压根没跑起来——"命令失败"会被记成"断言挡住了"。
+    这条口径只写在 README 里迟早被忘，所以在**跑之前**就拒绝：宁可不起手。
+
     所以先确认"起点是干净的"，再谈结果。发现异常就直接退出，不做任何修改。
     """
     problems = []
     for mut in mutations:
+        for _, cmd in mut["targets"]:
+            if "|" in cmd:
+                problems.append(f"{mut['name']}：目标命令含 `|`（cmd.exe 会当管道，命令不会跑起来）：{cmd}")
         text = h.read(mut["file"]).decode("utf-8")
         for old, _ in mut["edits"]:
             n = text.count(old)

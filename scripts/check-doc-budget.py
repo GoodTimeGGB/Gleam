@@ -28,6 +28,8 @@ import os
 import re
 import sys
 
+import _utf8  # noqa: F401  # Windows 下 stdout 默认按 GBK 写，中文会变乱码
+
 ROOT_AGENTS = 1950
 SUB_AGENTS = 750
 DOCS_PROSE = 1320

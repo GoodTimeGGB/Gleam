@@ -9,6 +9,27 @@
 
 ## 怎么跑
 
+**清单在本文件，不在别处。** 每批一个脚本，`AGENTS.md` 只指到这个目录：
+
+| 批次 | 管什么判据 |
+| :--- | :--- |
+| `batch-a-audit.py` | 批次 A「审计四用法」：沿用语义、运行日志、计数与告警口径、回放与续跑 |
+| `batch-b-wiring.py` | 批次 F4/F7/F8 的接线：密钥主机绑定、终态归档落盘（含「归档不受通知策略支配」）、重启后的任务列表 |
+| `batch-c-inventory.py` | 闸门自己：README 端点表与 `internal/webui` 注册的路由是否双向一致（`scripts/check-api-docs.py`） |
+| `batch-d-feedback.py` | 批次 F10「反馈与建议」的判断：脱敏时机、现场字段范围、投递失败的状态、图片识别、空描述 |
+| `batch-e-rail-lifecycle.py` | 批次 F11 的读数与寿命：现场栏那一格的数字从哪来（`/api/info` 与门面两处源头）、取消能否真的叫醒停在审批上的那一轮、取消的原因写成什么 |
+| `batch-f-composer-meta.py` | 批次 F12 的接线与补丁语义：水位百分比的算法（容量保护、钳 100、多算一轮）与两处出口（`Stats` / `ContextView`）、只发一个 `model` 键的设置补丁不许清掉辅助模型与档位表 |
+
+还有一类判据的负例控制**内建在检查脚本自己身上**，不占批次号：
+
+- `python scripts/check-app-startup.py --self-test`——app.js 的启动段必须是最后一段。
+- `python scripts/check-py-utf8.py --self-test`——会印中文的 `check-*.py` 必须自修 stdout 编码。
+- `python scripts/check-dom-anchors.py --self-test`——JS 指向的 id 必须存在、现场栏 / 输入区 / 预览面板那批锚点（`rail-*` / `ro-*` / `cp-*` / `bp-*`）必须有人接（四份坏文本：正向一条、反向三条，逐条验会被拦住）。
+
+它们不碰 Go 代码，套不进本目录的「改坏 → 编译 → 跑测试」骨架，所以自己带坏文本；
+后一条还顺手拿真文件的 stdout 解一次 UTF-8，防止"判据点头、输出仍是乱码"。
+`verify.sh` 第 1 层每次都以 `--self-test` 形式调用它们。
+
 ```bash
 python scripts/mutation/batch-a-audit.py            # 整批
 python scripts/mutation/batch-a-audit.py 1-5        # 只跑第 1~5 个（分段，见下）
@@ -49,9 +70,22 @@ python scripts/mutation/batch-a-audit.py carried    # 只跑名字含 carried �
 **目标命令必须带 `-timeout`**；改动前先确认锚点**恰好出现一次**，匹配到两处时
 变异会被应用到错误的位置。
 
+## 有一类判据在这里测不了
+
+**"写盘要早于把终态告诉外界"**（webui 任务归档）没有负例控制：把顺序倒回去，
+没有任何断言会响——它挡的是"广播之后进程被杀"，而这在一个进程内复现不出来。
+能测到的只是"有没有归档"，那是另一条变异的事。
+
+处理方式不是硬凑一条永远存活的变异放进批次表（那只会让人怀疑捕获率），而是：
+判定留在 `internal/webui/handlers.go` 的注释里说明理由，本目录记下"这条不测、为什么不测"。
+**负例控制的边界就是可测性的边界，越界的部分要明说。**
+
+同类还有「反馈先落本地归档、再谈远端投递」：整块挪到投递之后，相关测试仍全绿。
+理由写在 `batch-d-feedback.py` 的开头，这里只留指针。
+
 ## 加一批
 
-复制 `batch-a-audit.py`，改 `MUTATIONS` 即可，公共骨架在 `_harness.py`：
+复制 `batch-a-audit.py`，改 `MUTATIONS` 即可，公共骨架在 `_harness.py`。**加完回到上面的清单补一行**——清单漏一批，后来人就只跑第一批，拿到一个假的满分：
 
 ```python
 {

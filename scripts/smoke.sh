@@ -78,11 +78,26 @@ WS2="$TMP/ws2"; mkdir -p "$WS2" || exit 1
 WS2C=$(slash "$WS2")
 
 OUT="$TMP/session.out"
+# wait_out：等会话输出里出现某个标记再继续。
+#
+# 为什么不用固定 `sleep 2`：本机每次进程创建要 1.5~2.7 秒（见 docs/known-limits.md），
+# 一次目标跑完的时间**不是常数**，固定睡眠在慢机器上会把后面的 `shutdown` 送到任务跑完之前，
+# 于是第 5 层偶发地红一条、重跑又绿——那种红查不出原因，最后只会被人忽略掉，
+# 而"会被忽略的闸门"等于没有闸门。等得到就走，等不到（20 秒）也照样往下跑，
+# 让**具体的断言**去报哪一条没过。
+wait_out() {
+  local pat="$1" i
+  for i in $(seq 1 80); do
+    grep -q -- "$pat" "$OUT" 2>/dev/null && return 0
+    sleep 0.25
+  done
+  return 1
+}
 {
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
   sleep 0.5
   printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"goal/submit","params":{"goal":"创建 smoke.txt 并写入 Hello Gleam"}}'
-  sleep 2
+  wait_out '"method":"goal/completed"'
   printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"memory/save","params":{"content":"冒烟测试记忆条目","tags":["test"]}}'
   sleep 0.3
   printf '%s\n' '{"jsonrpc":"2.0","id":4,"method":"memory/search","params":{"query":"冒烟测试","k":3}}'
@@ -90,7 +105,7 @@ OUT="$TMP/session.out"
   printf '%s\n' '{"jsonrpc":"2.0","id":5,"method":"skills/save","params":{"name":"smoke-skill","description":"冒烟技能","steps":[{"id":"s1","tool":"file.write","args":{"path":"sk.txt","content":"技能输出"}}]}}'
   sleep 0.3
   printf '%s\n' '{"jsonrpc":"2.0","id":6,"method":"skills/run","params":{"name":"smoke-skill"}}'
-  sleep 2
+  wait_out '"id":6'
   printf '%s\n' '{"jsonrpc":"2.0","id":7,"method":"schedule/create","params":{"name":"smoke-job","goal":"定时冒烟","interval_sec":3600}}'
   sleep 0.3
   printf '%s\n' '{"jsonrpc":"2.0","id":8,"method":"schedule/list","params":{}}'
@@ -111,7 +126,7 @@ grep -q '"status":"success"' "$OUT" && ok "skills/run 执行成功" || bad "skil
 grep -q 'smoke-job' "$OUT" && ok "schedule/create + list" || bad "schedule/create + list"
 [ -f "$WS/smoke.txt" ] && [ "$(cat "$WS/smoke.txt")" = "Hello Gleam" ] && ok "目标产物 smoke.txt 内容正确" || bad "目标产物 smoke.txt 内容正确"
 [ -f "$WS/sk.txt" ] && [ "$(cat "$WS/sk.txt")" = "技能输出" ] && ok "技能产物 sk.txt 正确" || bad "技能产物 sk.txt 正确"
-[ -d "$DATA/tasks" ] && ok "工作记忆已持久化 tasks/" || bad "工作记忆已持久化 tasks/"
+[ -n "$(ls -A "$DATA/tasks" 2>/dev/null)" ] && ok "工作记忆已持久化 tasks/（有终态快照）" || bad "工作记忆已持久化 tasks/（目录是空的）"
 [ -f "$DATA/schedules.json" ] && ok "调度任务已持久化 schedules.json" || bad "调度任务已持久化 schedules.json"
 [ -f "$DATA/memory/longterm.json" ] && ok "长期记忆已持久化 longterm.json" || bad "长期记忆已持久化 longterm.json"
 
@@ -183,6 +198,15 @@ for i in $(seq 1 40); do
   sleep 0.25
 done
 [ "$ST" = "success" ] && ok "WebUI 目标执行成功" || bad "WebUI 目标执行成功（status=$ST）"
+# 界面跑完的任务也要留档（批次 F7）：`tasks/<id>.json` 是重启后任务详情、
+# `gleam replay` 与评测 badcase 回流的唯一数据源。归档写在同一 goroutine 的稍后，
+# 所以这里等一会儿，而不是"状态一结束就断言文件已在"。
+ARCH=0
+for i in $(seq 1 20); do
+  [ -f "$DATA/tasks/$TASK.json" ] && ARCH=1 && break
+  sleep 0.25
+done
+[ "$ARCH" = "1" ] && ok "WebUI 任务已归档 tasks/" || bad "WebUI 任务已归档 tasks/（缺 $DATA/tasks/$TASK.json）"
 
 kill "${WEBPID:-}" 2>/dev/null || true
 

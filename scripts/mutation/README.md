@@ -19,12 +19,15 @@
 | `batch-d-feedback.py` | 批次 F10「反馈与建议」的判断：脱敏时机、现场字段范围、投递失败的状态、图片识别、空描述 |
 | `batch-e-rail-lifecycle.py` | 批次 F11 的读数与寿命：现场栏那一格的数字从哪来（`/api/info` 与门面两处源头）、取消能否真的叫醒停在审批上的那一轮、取消的原因写成什么 |
 | `batch-f-composer-meta.py` | 批次 F12 的接线与补丁语义：水位百分比的算法（容量保护、钳 100、多算一轮）与两处出口（`Stats` / `ContextView`）、只发一个 `model` 键的设置补丁不许清掉辅助模型与档位表 |
+| `batch-g-changes.py` | 批次 F14 的承诺兜得住吗：清单会不会漏报失败的写入、还原退到哪个时刻、移动成不成对、不可还原时说不说清原因、清单外路径的两道闸、还原后归档与内存是否一致、快照的 `DataDir` 接线 |
+| `batch-h-version-owner.py` | 批次 F15 的版本口径：前端抄了一份版本号、对 `/api/info` 退回字面量兜底、弹窗替「有没有新版」下了完成时态的结论、扫描目录被改走后闸门是报失效还是报通过（第 4 条是闸门的地基）、`/api/info` 不再引用 owner（第 5 条走 Go 断言）。这道闸门**还**带 `--self-test`（3 份坏文本 + 3 份长得像的干扰文本，`verify.sh` 第 1 层就是这么调它的） |
+| `batch-i-egress-owner.py` | 批次 F16「连接与出网」台账的双向对账：清单少登记一项（连了没交代）、摘掉一个真落点（那一行永远说"没有记录"，真原因是"压根没往这一类记"）、新接一条未登记的出网、文案里退回 `**markdown 强调**`（表走 `textContent`，星号原样显示）、`ConnectionView` 运行时少画一行（归 Go，闸门读不出运行态）、审计没配却指路 `pending --audit`（把人引向一个不存在的文件）、前端换掉台账表体的 id（后端算得好好的，那块永远空白）。这道闸门**还**带 `--self-test`（5 份坏文本 + 2 份干扰文本：注释里提函数名、注释里用 `**`） |
 
 还有一类判据的负例控制**内建在检查脚本自己身上**，不占批次号：
 
 - `python scripts/check-app-startup.py --self-test`——app.js 的启动段必须是最后一段。
 - `python scripts/check-py-utf8.py --self-test`——会印中文的 `check-*.py` 必须自修 stdout 编码。
-- `python scripts/check-dom-anchors.py --self-test`——JS 指向的 id 必须存在、现场栏 / 输入区 / 预览面板那批锚点（`rail-*` / `ro-*` / `cp-*` / `bp-*`）必须有人接（四份坏文本：正向一条、反向三条，逐条验会被拦住）。
+- `python scripts/check-dom-anchors.py --self-test`——JS 指向的 id 必须存在、现场栏 / 输入区 / 预览面板 / 台账那批锚点（`rail-*` / `ro-*` / `cp-*` / `bp-*` / `cx-*`）必须有人接、app.js 里定义的函数必须有人调用（六份坏文本：正向一条、锚点反向四条、函数反向一条，逐条验会被拦住）。
 
 它们不碰 Go 代码，套不进本目录的「改坏 → 编译 → 跑测试」骨架，所以自己带坏文本；
 后一条还顺手拿真文件的 stdout 解一次 UTF-8，防止"判据点头、输出仍是乱码"。
@@ -82,6 +85,11 @@ python scripts/mutation/batch-a-audit.py carried    # 只跑名字含 carried �
 
 同类还有「反馈先落本地归档、再谈远端投递」：整块挪到投递之后，相关测试仍全绿。
 理由写在 `batch-d-feedback.py` 的开头，这里只留指针。
+
+同一批里也可能**一条测不出**：批次 G 去掉了还原路径的 workspace 边界（`ResolveInRoots`），
+十条断言一条都不响——因为"必须在本次清单里"那道闸在它后面兜着，而清单只可能记着
+workspace 内的路径。那一道的意义是纵深（清单被手工塞进脏数据时它还在），不是当前可测的判据。
+理由写在 `batch-g-changes.py` 的开头。
 
 ## 加一批
 

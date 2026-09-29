@@ -13,6 +13,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _utf8  # noqa: F401  # 本脚本自己也在印中文判定行：Windows 默认按 cp936 写 stdout，`✓` 会直接抛异常
 from _harness import run_batch  # noqa: E402
 
 # 命令里**不能出现 `|`**。`shell=True` 在 Windows 上走 cmd.exe，而 cmd 不认单引号，

@@ -9,7 +9,8 @@
 
 **为什么不靠 code review 拦住**：新写一个检查器时，"要不要 reconfigure stdout" 看起来
 像调用方的事（`verify.sh` 里加 `-X utf8` 就完事了），而 `AGENTS.md` 命令表写的是
-`scripts/check-*.py`——人和 agent 都会直接敲，记住加参数的那一次恰好是别人在看的最后一次。
+`scripts/check-*.py` 与 `scripts/mutation/*.py`——人和 agent 都会直接敲，记住加参数的那一次恰好是别人在看的最后一次。
+变异骨架为什么也罩：它一跑就是十几分钟、逐条打印判定结果，而且它的输出**就是这一批的结论**；结论行把自己崩掉，等于这批没跑过。
 所以这条约定必须自己站在文件里，而站在文件里就会有人忘：忘一次要等到有人读不懂报错才发现。
 
 **怎么改才通过**：在文件顶部的 import 块里加一行 `import _utf8  # noqa: F401`（同目录模块，
@@ -74,11 +75,21 @@ def check_source(name, source):
 
 
 def candidates(root):
+    """会被直接敲的脚本：`scripts/check-*.py` 与 `scripts/mutation/*.py`。
+
+    变异骨架也算：它是"人和 agent 都会直接敲"的那一类，而且它跑起来输出最多
+    （每批十几分钟、逐条打印"捕获/存活"）。今天它就因为没修 stdout 崩了一次——
+    打印 `✓` 时抛 UnicodeEncodeError，崩在结果行之后，整批看起来像自己没了。
+    """
     d = os.path.join(root, "scripts")
     if not os.path.isdir(d):
         return None
-    return sorted(os.path.join(d, f) for f in os.listdir(d)
-                  if f.startswith(GLOB_PREFIX) and f.endswith(GLOB_SUFFIX))
+    out = [os.path.join(d, f) for f in os.listdir(d)
+           if f.startswith(GLOB_PREFIX) and f.endswith(GLOB_SUFFIX)]
+    mut = os.path.join(d, "mutation")
+    if os.path.isdir(mut):
+        out += [os.path.join(mut, f) for f in os.listdir(mut) if f.endswith(GLOB_SUFFIX)]
+    return sorted(out)
 
 
 def self_test(root):
@@ -118,10 +129,11 @@ def self_test(root):
             print("    " + r)
         ok = False
     else:
-        print("  真实文件全部合规：%d 个 check-*.py" % len(paths))
-    # 子进程里测一条真实命令的字节编码：判据说"已自修"，输出就得真是 UTF-8
-    if paths:
-        probe = paths[0]
+        print("  真实文件全部合规：%d 个（check-*.py 与 scripts/mutation/*.py）" % len(paths))
+    # 子进程里测一条真实命令的字节编码：判据说"已自修"，输出就得真是 UTF-8。
+    # 只拿 check-* 探：mutation 脚本一跑就是十几分钟，还会真的去改仓库代码。
+    probe = next((x for x in paths if os.path.basename(x).startswith(GLOB_PREFIX)), None)
+    if probe:
         proc = subprocess.run([sys.executable, probe, "."], stdout=subprocess.PIPE, cwd=root)
         try:
             proc.stdout.decode("utf-8")

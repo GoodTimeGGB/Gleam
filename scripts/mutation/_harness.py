@@ -23,6 +23,13 @@ import signal
 import subprocess
 import sys
 
+# 骨架自己也要印中文和 ✓，所以先修标准流：Windows 上 Python 按本地代码页（本机 cp936）
+# 写 stdout。中文变乱码还算轻的——`✓` 不在 GBK 里，会直接抛 UnicodeEncodeError，
+# 而它偏偏崩在"变异已被捕获"那一行之后：文件已还原（无害），但整批剩下的没跑，
+# 看起来像"跑到一半自己没了"。`scripts/check-py-utf8.py` 现在连本目录一起罩。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _utf8  # noqa: E402,F401
+
 # 环境自身的报错（不是我们的测试在报错）。本机 Go 工具链偶发地把标准库报成
 # "not in std"，那是环境噪声；不识别它就会把噪声当成"变异被捕获"，
 # 于是变异验证给出一个假的满分。

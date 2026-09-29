@@ -13,12 +13,14 @@ import (
 
 	"gleam/internal/config"
 	"gleam/internal/harness/growth"
+	"gleam/internal/harness/safety"
 	"gleam/internal/harness/scheduler"
 	"gleam/internal/harness/skill"
 	"gleam/internal/llm"
 	"gleam/internal/market"
 	"gleam/internal/nlcron"
 	"gleam/internal/tools/mcp"
+	"gleam/internal/tools/toolutil"
 	"gleam/pkg/types"
 )
 
@@ -1323,4 +1325,237 @@ func (a *Agent) applyWorkspace(path string) error {
 		return fmt.Errorf("已切换但持久化失败: %w", err)
 	}
 	return nil
+}
+
+// ---------- 改动清单：对比与还原 ----------
+
+// 本段是批次 F14 的出口：界面上的「本次改动」只有这两条动作——看某条路径的 diff、
+// 把它退回到任务开始前。**引擎不主动改文件**，这里所有写盘都由用户点一下触发。
+
+// changeRef 一次「哪次任务 + 哪个路径」的定位结果。
+type changeRef struct {
+	Path string     // 规范化后的绝对路径（后面所有 OS 调用都用它，不用客户端原串）
+	Head preImage   // 该路径在本任务里的**第一条**写前快照，还原以它为准
+	Recs []preImage // 该任务的全部快照，成对还原（file.move）要用
+}
+
+// workspaceRoots 当前工作区边界。文件工具那份是热切换的活口径，
+// 配置里的 Workspace 兜底（工具未注册时，例如还没跑到需要文件工具的那一步）。
+func (a *Agent) workspaceRoots() []string {
+	if a.FileTools != nil && len(a.FileTools.Roots) > 0 {
+		return a.FileTools.Roots
+	}
+	if strings.TrimSpace(a.Cfg.Workspace) != "" {
+		return []string{a.Cfg.Workspace}
+	}
+	return nil
+}
+
+// changeTarget 校验这对参数并把路径定下来。**两道校验缺一不可**：
+//
+//   - **在不在本任务的清单里**：不在就不许动。少了这一道，"还原"就成了一个
+//     "填任意路径即可覆盖任意文件"的接口；
+//   - **在不在工作区边界里**：清单记的是任务当时解析出的绝对路径，而用户可能已经把
+//     工作区切到别处，也可能当初那一步的口径与现在不同。边界以**现在**的为准。
+//
+// 客户端传来的路径串一律重新解析，绝不拿清单里的原文去拼 OS 调用——清单是磁盘上的
+// 文件，读它的时候它已经不完全归我们管了。
+func (a *Agent) changeTarget(taskID, rawPath string) (changeRef, error) {
+	if SafeTaskName(taskID) == "" {
+		return changeRef{}, fmt.Errorf("任务标识 %q 不合法", types.Shorten(taskID, 40))
+	}
+	if strings.TrimSpace(a.Cfg.DataDir) == "" {
+		return changeRef{}, fmt.Errorf("未配置数据目录，写前快照无处可存，也就无从还原")
+	}
+	path := strings.TrimSpace(rawPath)
+	if path == "" {
+		return changeRef{}, fmt.Errorf("没有指定路径")
+	}
+	if !filepath.IsAbs(path) {
+		// 刻意不按工作区根去猜相对路径：界面上给的就是清单里的绝对路径，
+		// 会走到这里的只有手改请求的一种人，那种时候"猜"比"拒"更坏。
+		return changeRef{}, fmt.Errorf("请填写清单里的完整路径")
+	}
+	roots := a.workspaceRoots()
+	if len(roots) == 0 {
+		return changeRef{}, fmt.Errorf("尚未设定工作区，无法判断这个路径能不能动")
+	}
+	target, err := toolutil.ResolveInRoots(path, roots)
+	if err != nil {
+		return changeRef{}, err
+	}
+	recs, err := taskPreImages(a.Cfg.DataDir, taskID)
+	if err != nil {
+		return changeRef{}, err
+	}
+	if len(recs) == 0 {
+		return changeRef{}, fmt.Errorf("这次任务没有留下写前快照（没动文件，或当时未配置数据目录）")
+	}
+	head, ok := firstPreImageOf(recs, target)
+	if !ok {
+		return changeRef{}, fmt.Errorf("这个路径不在本次任务的改动清单里，不能动")
+	}
+	return changeRef{Path: target, Head: head, Recs: recs}, nil
+}
+
+// diffReadMax 参与对比的**现在**这份内容的体量上限，与单文件快照上限同值：
+// 一边留不住，另一边算下去也没有可比的前后，两边用同一个数才不会错开。
+const diffReadMax = snapshotMaxBytes
+
+// TaskDiff 一条路径的「写前 → 现在」行级对比。
+func (a *Agent) TaskDiff(taskID, path string) (map[string]any, error) {
+	ref, err := a.changeTarget(taskID, path)
+	if err != nil {
+		return nil, err
+	}
+	head := ref.Head
+	view := map[string]any{
+		"task_id":    taskID,
+		"path":       ref.Path,
+		"reversible": head.reversible(),
+	}
+	switch {
+	case head.IsDir:
+		return nil, fmt.Errorf("这是个目录，没有内容可对比")
+	case head.Exists && head.File == "":
+		return nil, fmt.Errorf("写前内容未留存，无从对比：%s", diffBlame(head))
+	}
+
+	var before string
+	if head.Exists {
+		b, err := preImageContent(a.Cfg.DataDir, taskID, head)
+		if err != nil {
+			return nil, fmt.Errorf("读写前内容失败: %w", err)
+		}
+		before = string(b)
+	}
+	after, afterBytes, note := readForDiff(ref.Path)
+	view["before_bytes"] = head.Bytes
+	view["after_bytes"] = afterBytes
+	if note != "" {
+		view["diff"] = DiffResult{Truncated: true, Note: note}
+		return view, nil
+	}
+	view["diff"] = DiffText(before, after)
+	return view, nil
+}
+
+// readForDiff 读「现在」这一份。第二个返回值是超限或读不到时的说明（对比照给，
+// 但只给体量，不给一份看着完整其实缺了半截的 diff）。
+func readForDiff(path string) (text string, bytes int64, note string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, "" // 现在不存在=全删（读不出内容就是空，不是"读失败"）
+	}
+	if info.IsDir() {
+		return "", info.Size(), "现在这里是个目录，没有内容可对比"
+	}
+	if info.Size() > diffReadMax {
+		return "", info.Size(), fmt.Sprintf("现在有 %s，超过对比上限，只给出体量对比", humanSize(info.Size()))
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", info.Size(), "现在这份读不出来：" + types.Shorten(err.Error(), 80)
+	}
+	return string(b), info.Size(), ""
+}
+
+// diffBlame 内容没留住时的那句原因（快照里已经写好，缺一条兜底）。
+func diffBlame(rec preImage) string {
+	if strings.TrimSpace(rec.Reason) != "" {
+		return rec.Reason
+	}
+	return "写前内容未留存"
+}
+
+// TaskRevert 把一条路径退回到本任务开始前。**只由用户点击触发**，不做任何自动还原。
+//
+// `file.move` 按组成对退（见 preImageGroup）：一次移动在清单里是两行，
+// 只退其中一行等于把文件留在半路上。
+func (a *Agent) TaskRevert(taskID, path string) (map[string]any, error) {
+	ref, err := a.changeTarget(taskID, path)
+	if err != nil {
+		return nil, err
+	}
+	group := preImageGroup(ref.Recs, ref.Path)
+	if len(group) == 0 { // changeTarget 已经确认过路径在清单里，这里只是不让下面空跑
+		return nil, fmt.Errorf("这个路径不在本次任务的改动清单里，不能动")
+	}
+
+	type revertedRow struct {
+		Path string `json:"path"`
+		Note string `json:"note"`
+	}
+	done := make([]revertedRow, 0, len(group))
+	donePaths := make([]string, 0, len(group))
+	failed := make([]string, 0, len(group))
+	for _, rec := range group {
+		if !rec.reversible() {
+			failed = append(failed, fmt.Sprintf("%s：%s", filepath.Base(rec.Path), diffBlame(rec)))
+			continue
+		}
+		note, err := restorePreImage(a.Cfg.DataDir, taskID, rec)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s：%s", filepath.Base(rec.Path), types.Shorten(err.Error(), 120)))
+			continue
+		}
+		done = append(done, revertedRow{Path: rec.Path, Note: note})
+		donePaths = append(donePaths, rec.Path)
+	}
+	if len(done) == 0 {
+		return nil, fmt.Errorf("没有还原成功任何路径：%s", strings.Join(failed, "；"))
+	}
+
+	// 归档里那几行要说实话：动了就是动了（Kind 是历史），但盘上已经不是那样了。
+	a.markChangesReverted(taskID, donePaths)
+	if a.Gate != nil {
+		a.Gate.Record(safety.AuditEntry{
+			Tool:   "file.revert",
+			Risk:   "medium",
+			Action: "manual_revert",
+			Reason: "用户在改动清单里点了还原",
+			// Detail 只记路径与条数，不记内容：审计自己不能变成新的泄露面。
+			Detail: fmt.Sprintf("%d 个路径：%s", len(done), strings.Join(donePaths, ", ")),
+		})
+	}
+	return map[string]any{
+		"task_id":  taskID,
+		"reverted": done,
+		"failed":   failed,
+		"pairs":    len(group) > 1, // 一次移动成对退掉，界面据此说"两个路径都动了"
+	}, nil
+}
+
+// markChangesReverted 把归档里对应路径的改动行标成已还原。
+//
+// 只标不改写 Kind：Kind 回答"这次任务当时做了什么"，那是历史；Reverted 回答
+// "盘上现在还是那样吗"。合成一个值就把两件事都说糊了。
+// 没有归档（任务没跑完、数据目录没配）时静默返回——界面对应的本来就是内存里那条。
+func (a *Agent) markChangesReverted(taskID string, paths []string) {
+	g, err := ReadTaskResult(a.Cfg.DataDir, taskID)
+	if err != nil || g == nil || len(g.Changes) == 0 {
+		return
+	}
+	want := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		want[pathKey(p)] = true
+	}
+	changed := false
+	for i := range g.Changes {
+		if want[pathKey(g.Changes[i].Path)] && !g.Changes[i].Reverted {
+			g.Changes[i].Reverted = true
+			if info, err := os.Stat(g.Changes[i].Path); err == nil && !info.IsDir() {
+				g.Changes[i].Bytes = info.Size()
+			} else {
+				g.Changes[i].Bytes = 0
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if err := SaveTaskResult(a.Cfg.DataDir, g); err != nil {
+		fmt.Fprintf(os.Stderr, "[gleam] 改动清单已还原但归档没更新（下次读档案会看不到这一位）：%v\n", err)
+	}
 }

@@ -26,6 +26,13 @@ type Manager struct {
 	creds *credentials.Store
 	http  *http.Client
 
+	// OnEgress 出网留痕回调：每次向云端发包时记一笔（只给主机与字节）。
+	//
+	// 为什么必须有它：登录/续期/登出都会出网，而此前这条路径在审计里**不存在**——
+	// 「连接与出网」台账要么漏列一行，要么列了却说不出留痕在哪。
+	// 与 llm.EgressFunc 同一条边界：签名里没有正文，调用方也就不可能不小心把它写进去。
+	OnEgress func(host string, nbytes int)
+
 	mu       sync.Mutex
 	pending  *pendingOAuth
 	listener *http.Server
@@ -179,8 +186,24 @@ func (m *Manager) postJSON(path string, payload any) (*sbToken, error) {
 	return m.doToken(req)
 }
 
+// do 云端外发的唯一出口：先发，再把这次出网记进审计。
+//
+// **为什么收成一处**：登录、注册、PKCE 换 token、续期、登出五件事都要发包，
+// 留痕写在调用方就有五处可能漏写一处，而"少记一笔"在审计里长得和"没发生过"一模一样。
+// 字节数取 req.ContentLength——那是请求体的大小，不含响应；响应内容本来也不该留痕。
+func (m *Manager) do(req *http.Request) (*http.Response, error) {
+	if m.OnEgress != nil && req.URL != nil {
+		n := int(req.ContentLength)
+		if n < 0 {
+			n = 0
+		}
+		m.OnEgress(req.URL.Host, n)
+	}
+	return m.http.Do(req)
+}
+
 func (m *Manager) doToken(req *http.Request) (*sbToken, error) {
-	resp, err := m.http.Do(req)
+	resp, err := m.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("连接云端失败：%w", err)
 	}
@@ -266,7 +289,7 @@ func (m *Manager) SignOut() error {
 			req, _ := http.NewRequest(http.MethodPost, c.SupabaseURL+"/auth/v1/logout", nil)
 			req.Header.Set("apikey", c.SupabaseAnonKey)
 			req.Header.Set("Authorization", "Bearer "+s.AccessToken)
-			if resp, err := m.http.Do(req); err == nil {
+			if resp, err := m.do(req); err == nil {
 				resp.Body.Close()
 			}
 		}

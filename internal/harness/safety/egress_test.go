@@ -69,3 +69,54 @@ func TestRecordEgressNilGateSafe(t *testing.T) {
 	var g *Gate
 	g.RecordEgress("llm", "example.com", 1) // 不应 panic
 }
+
+// TestEgressStatsCountsFromStructuredFields 「连接与出网」台账的读数层。
+//
+// 三条断言各自钉一件事：
+//   - 字节数取结构化字段：台账要加总，而加总若靠解析 Reason 那句中文，
+//     改一个标点就断，且断的方向是"少算"——报出"一共发出去 0 字节"比不报更坏。
+//   - 只数 egress 动作：审批/拦截留痕一起算，出网次数就成了假数。
+//   - 统计范围（Scanned/Cap）随读数一起给：内存环只有最近若干条，
+//     界面若不带上这个范围，读者会把它当成"这台机器上一共发了多少"。
+func TestEgressStatsCountsFromStructuredFields(t *testing.T) {
+	g := New("auto", nil, nil, nil, time.Second)
+	g.RecordEgress("llm", "api.deepseek.com", 1200)
+	g.RecordEgress("llm", "api.deepseek.com", 800)
+	g.RecordEgress("llm", "open.bigmodel.cn", 500)
+	g.RecordEgress("web.fetch", "example.com", 60)
+	g.Record(AuditEntry{Tool: "file.write", Action: "approved", Reason: "路径均在信任路径内"})
+
+	rep := g.EgressStats()
+	if rep.Scanned != 5 || rep.Cap != auditCap {
+		t.Errorf("统计范围应随读数一起给出：%+v（应扫 5 条、容量 %d）", rep, auditCap)
+	}
+	byKind := map[string]EgressStat{}
+	for _, s := range rep.Stats {
+		byKind[s.Kind] = s
+	}
+	llmStat, ok := byKind["llm"]
+	if !ok {
+		t.Fatalf("台账里没有 llm 这一类：%+v", rep.Stats)
+	}
+	if llmStat.Count != 3 || llmStat.Bytes != 2500 {
+		t.Errorf("llm 应为 3 次 / 2500 字节，实际 %+v", llmStat)
+	}
+	if len(llmStat.Hosts) != 2 || llmStat.Hosts[0] != "api.deepseek.com" {
+		t.Errorf("主机应去重并排序，实际 %+v", llmStat.Hosts)
+	}
+	if _, bad := byKind["file.write"]; bad {
+		t.Errorf("非出网留痕不能混进出网统计：%+v", rep.Stats)
+	}
+	if webStat, ok := byKind["web.fetch"]; !ok || webStat.Hosts[0] != "example.com" {
+		t.Errorf("web.fetch 一类读数不对：%+v", rep.Stats)
+	}
+}
+
+// TestEgressStatsNilGateSafe 未装配门控时台账仍能出题（空读数 + 容量）。
+func TestEgressStatsNilGateSafe(t *testing.T) {
+	var g *Gate
+	rep := g.EgressStats()
+	if rep.Scanned != 0 || len(rep.Stats) != 0 || rep.Cap != auditCap {
+		t.Errorf("nil 门控应返回空读数，实际 %+v", rep)
+	}
+}

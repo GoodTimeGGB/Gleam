@@ -127,6 +127,7 @@ var stateEntries = []stateEntry{
 	{"任务", "pending_approvals.json", "等待审批的任务（进程退出后重启仍能列出）", false},
 	{"任务", "audit.jsonl", "全量审计：追加式，含自动放行与数据出网留痕", false},
 	{"任务", "tool-output", "超长工具输出的落盘缓存（按任务数裁剪，不是归档）", false},
+	{"任务", "snapshots", "写前快照：改动清单能还原的依据（按任务数裁剪，含原文，权限 0600）", false},
 	{"任务", "geo_history.json", "GEO 生成记录（生成式引擎优化板块的历史）", false},
 
 	// ── 资产 ──

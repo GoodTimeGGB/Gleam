@@ -77,6 +77,9 @@ func cmdApp(args []string) error {
 	if err != nil {
 		return err
 	}
+	// 台账要说**实测**的监听地址：默认端口被占用时这里会退到随机端口（127.0.0.1:0），
+	// 把 --addr 那个字符串报上去就是说谎。
+	srv.BindAddr = ln.Addr().String()
 	url := "http://" + ln.Addr().String() + "/"
 	fmt.Fprintf(os.Stderr, "[gleam] 桌面端已启动: %s（托盘常驻，关闭窗口不退出）\n", url)
 

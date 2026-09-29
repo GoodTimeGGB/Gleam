@@ -302,7 +302,10 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	// 追加式 JSONL——审计的价值在于"发生过什么"，重写会把它变成"当前状态"。
 	gate.SetAuditPath(filepath.Join(cfg.DataDir, auditFile))
 	// 数据出网留痕（P1-3）：本地优先的产品必须能自证"什么数据出了本机"。
-	// 两条出网路径都接上——模型调用（提示词）与 web.fetch（抓取目标）。
+	// 四条出网路径都要接上：模型调用（提示词）、web.fetch（抓取目标）在这里，
+	// 云端登录在下面的 a.Auth，反馈投递在 webui 的 feedbackSink。
+	// **"一条都没漏"这件事由闸门判**（scripts/check-egress-owner.py：每个 RecordEgress
+	// 的落点都必须在「连接与出网」台账上有一行，反之亦然），所以这段注释数错了会红。
 	// 只记主机名与字节量，内容留在本机；见 safety.AuditEntry.Egress 的边界说明。
 	llm.SetEgressHook(func(host string, nbytes int) { gate.RecordEgress("llm", host, nbytes) })
 	webTool.OnEgress = func(host string, nbytes int) { gate.RecordEgress("web.fetch", host, nbytes) }
@@ -328,7 +331,13 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	a.Convos = convoStore
 	a.Spaces = spaceStore
 	a.Creds = credStore
-	a.Auth = auth.New(credStore)
+	// 云端登录（注册/登录/续期/登出）同样把东西发出去，此前在审计里不存在。
+	// 台账要能列出这一行，就得先有这一笔留痕；发包已收敛到 auth.Manager.do 一处。
+	// 在交给接口字段之前设好：AuthProvider 只声明"能做哪些账号动作"，
+	// 留痕是装配的事，不该为了装一个回调去扩那个接口。
+	authMgr := auth.New(credStore)
+	authMgr.OnEgress = func(host string, nbytes int) { gate.RecordEgress("cloud", host, nbytes) }
+	a.Auth = authMgr
 
 	// 依赖 Agent 的适配器工具
 	reg.MustRegister(std.NewMemSave(&memAdapter{m: mem}))

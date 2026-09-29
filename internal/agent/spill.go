@@ -104,11 +104,19 @@ func SpillOutput(dataDir, taskID, stepID, content string) (string, error) {
 }
 
 // PruneSpill 清理落盘缓存：按修改时间保留最新的 keep 个任务目录，其余删除。
-//
-// 失败一律忽略：这是缓存，清理不掉最多多占点磁盘，**不能因此让任务失败**。
-// 一个"为了省磁盘把任务弄挂"的清理逻辑，比不清理更坏。
 func PruneSpill(dataDir string, keep int) {
-	root := SpillRoot(dataDir)
+	pruneTaskDirs(SpillRoot(dataDir), keep)
+}
+
+// pruneTaskDirs 对「<root>/<taskID>/…」这一形状的落盘目录做同一套裁剪。
+//
+// 落盘缓存与写前快照都是这个形状，所以只留一份裁剪逻辑：两处各写一遍，
+// 将来一处改了保留策略、另一处忘了跟上，表现为"某类文件莫名其妙不删"——
+// 那种问题只有磁盘满了才会被发现。
+//
+// 失败一律忽略：这些都是可丢的一层，清理不掉最多多占点磁盘，**不能因此让任务失败**。
+// 一个"为了省磁盘把任务弄挂"的清理逻辑，比不清理更坏。
+func pruneTaskDirs(root string, keep int) {
 	if root == "" || keep <= 0 {
 		return
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -84,7 +85,7 @@ type AuditEntry struct {
 	Time   time.Time `json:"time"`
 	Tool   string    `json:"tool"`
 	Risk   string    `json:"risk"`
-	Action string    `json:"action"` // denied | approved | auto | reviewed_block | egress
+	Action string    `json:"action"` // denied | approved | auto | reviewed_block | egress | manual_revert
 	Reason string    `json:"reason"`
 	Detail string    `json:"detail,omitempty"`
 	// Egress 数据出网的目标，形如 "llm:api.deepseek.com" / "web.fetch:example.com"。
@@ -97,6 +98,13 @@ type AuditEntry struct {
 	// **只记主机名与字节量，绝不记内容**：审计本身不能变成新的泄露面。
 	// 把请求正文写进 audit.jsonl，等于把风险从"网络"搬到"磁盘上的日志"。
 	Egress string `json:"egress,omitempty"`
+	// EgressBytes 这次出网发了多少字节（仅 Action=egress 时有值）。
+	//
+	// 为什么要单独一个字段而不是让读的人去解析 Reason 里那句"（N 字节）"：
+	// 那是一句**文案**，改一个标点就把统计打断，而打断的方向是"少算"——
+	// 台账报出"本机一共发出去 0 字节"比不报更坏。「连接与出网」台账要按类加总，
+	// 加总必须建立在结构化字段上。
+	EgressBytes int `json:"egress_bytes,omitempty"`
 }
 
 // auditCap 审计日志在内存里保留的条数（够复盘即可，不无限增长）。
@@ -340,10 +348,11 @@ func (g *Gate) RecordEgress(kind, host string, nbytes int) {
 		return
 	}
 	g.Record(AuditEntry{
-		Tool:   kind,
-		Action: "egress",
-		Reason: fmt.Sprintf("数据出网：%s（%d 字节）", host, nbytes),
-		Egress: kind + ":" + host,
+		Tool:        kind,
+		Action:      "egress",
+		Reason:      fmt.Sprintf("数据出网：%s（%d 字节）", host, nbytes),
+		Egress:      kind + ":" + host,
+		EgressBytes: nbytes,
 	})
 }
 
@@ -416,6 +425,67 @@ func (g *Gate) RecentAudit(n int) []AuditEntry {
 		out = append(out, g.audit[i])
 	}
 	return out
+}
+
+// EgressStat 一类出网落点的实测读数。
+type EgressStat struct {
+	Kind  string   `json:"kind"`
+	Count int      `json:"count"`
+	Hosts []string `json:"hosts"`
+	Bytes int      `json:"bytes"`
+}
+
+// EgressReport 出网读数的**统计范围**也一起给。
+//
+// 为什么范围要跟着走：内存环只有最近 auditCap 条（重启即清零），全量在落盘的
+// audit.jsonl 里。界面若只印"N 次 / M 字节"，读者会把它当成"这台机器上一共发出去
+// 多少"——那正是把"我不知道"讲成答案。带上 Scanned/Cap，界面就能如实说"只数了最近
+// 这些条"，而且数字被挤掉时（Scanned == Cap）说法必须变，不必前端自己记那个上限。
+type EgressReport struct {
+	Stats   []EgressStat `json:"stats"`
+	Scanned int          `json:"scanned"`
+	Cap     int          `json:"cap"`
+}
+
+// EgressStats 按类聚合内存留痕里的出网记录（只读，不发请求、不读磁盘）。
+//
+// 主机名从结构化字段 Egress（"kind:host"）里取，不去解析 Reason 那句中文文案——
+// 改一个标点就把统计打断，而打断的方向是"少算"。
+func (g *Gate) EgressStats() EgressReport {
+	rep := EgressReport{Cap: auditCap, Stats: []EgressStat{}}
+	if g == nil {
+		return rep
+	}
+	g.auditMu.Lock()
+	defer g.auditMu.Unlock()
+	rep.Scanned = len(g.audit)
+	byKind := map[string]*EgressStat{}
+	seen := map[string]map[string]bool{}
+	for _, e := range g.audit {
+		if e.Action != "egress" {
+			continue
+		}
+		st, ok := byKind[e.Tool]
+		if !ok {
+			st = &EgressStat{Kind: e.Tool, Hosts: []string{}}
+			byKind[e.Tool] = st
+			seen[e.Tool] = map[string]bool{}
+		}
+		st.Count++
+		st.Bytes += e.EgressBytes
+		if host := strings.TrimPrefix(e.Egress, e.Tool+":"); host != "" && host != e.Egress {
+			if !seen[e.Tool][host] {
+				seen[e.Tool][host] = true
+				st.Hosts = append(st.Hosts, host)
+			}
+		}
+	}
+	for _, st := range byKind {
+		sort.Strings(st.Hosts)
+		rep.Stats = append(rep.Stats, *st)
+	}
+	sort.Slice(rep.Stats, func(i, j int) bool { return rep.Stats[i].Kind < rep.Stats[j].Kind })
+	return rep
 }
 
 // EffectivePermission 返回工具的有效权限（导出供门面/界面展示；

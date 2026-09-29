@@ -120,7 +120,7 @@ func TestSupabaseSink_SendPostsRow(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sink := NewSupabase(SupabaseTarget{URL: ts.URL + "/", AnonKey: "anon-key-1"})
+	sink := NewSupabase(SupabaseTarget{URL: ts.URL + "/", AnonKey: "anon-key-1"}, nil)
 	f := sampleFeedback()
 	if err := sink.Send(context.Background(), f); err != nil {
 		t.Fatalf("Send 失败：%v", err)
@@ -161,7 +161,7 @@ func TestSupabaseSink_MissingTableSaysCreateIt(t *testing.T) {
 			w.WriteHeader(c.code)
 			_, _ = io.WriteString(w, c.body)
 		}))
-		sink := NewSupabase(SupabaseTarget{URL: ts.URL, AnonKey: "k"})
+		sink := NewSupabase(SupabaseTarget{URL: ts.URL, AnonKey: "k"}, nil)
 		err := sink.Send(context.Background(), sampleFeedback())
 		ts.Close()
 		if err == nil {
@@ -181,7 +181,7 @@ func TestSupabaseSink_OtherFailureKeepsReason(t *testing.T) {
 		_, _ = io.WriteString(w, strings.Repeat("很长的云端报错正文 ", 100))
 	}))
 	defer ts.Close()
-	err := NewSupabase(SupabaseTarget{URL: ts.URL, AnonKey: "k"}).Send(context.Background(), sampleFeedback())
+	err := NewSupabase(SupabaseTarget{URL: ts.URL, AnonKey: "k"}, nil).Send(context.Background(), sampleFeedback())
 	if err == nil {
 		t.Fatal("500 应报错")
 	}
@@ -209,5 +209,50 @@ func TestSupabaseTargetConfigured(t *testing.T) {
 		if got := c.target.Configured(); got != c.want {
 			t.Errorf("%s：Configured() = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// TestSupabaseSinkRecordsEgress 反馈投递必须能自证"发去了哪个主机、多大"。
+//
+// 用户点的是"提交反馈"，交出去的是他写的那段话加一份上下文快照。台账上那一行
+// 若指不出留痕，就等于宣称了一条本机证明不了的出网——比不列更坏。
+func TestSupabaseSinkRecordsEgress(t *testing.T) {
+	var gotHost string
+	var gotBytes int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(201)
+	}))
+	defer ts.Close()
+
+	sink := NewSupabase(SupabaseTarget{URL: ts.URL, AnonKey: "k"}, func(h string, n int) {
+		gotHost, gotBytes = h, n
+	})
+	if err := sink.Send(context.Background(), sampleFeedback()); err != nil {
+		t.Fatalf("Send 失败：%v", err)
+	}
+	if want := strings.TrimPrefix(ts.URL, "http://"); gotHost != want {
+		t.Errorf("出网留痕的主机 = %q，应为 %q", gotHost, want)
+	}
+	if gotBytes <= 0 {
+		t.Errorf("出网留痕应带上请求体大小，实得 %d", gotBytes)
+	}
+}
+
+// TestSupabaseSinkRecordsEgressOnFailure 连不上也要记：留痕发生在发包之前。
+//
+// 反过来（成功才记）会得到一个最坏的口径——"这台机器没往那个主机发过东西"，
+// 而事实是发了、只是没成。在审计里"少记一笔"与"没发生过"长得一模一样。
+func TestSupabaseSinkRecordsEgressOnFailure(t *testing.T) {
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	dead := ts.URL
+	ts.Close() // 服务已经关了，这一次发包一定失败
+
+	sink := NewSupabase(SupabaseTarget{URL: dead, AnonKey: "k"}, func(string, int) { calls++ })
+	if err := sink.Send(context.Background(), sampleFeedback()); err == nil {
+		t.Fatal("连不上应报错")
+	}
+	if calls != 1 {
+		t.Errorf("投递失败也要留痕一次，实际 %d 次", calls)
 	}
 }

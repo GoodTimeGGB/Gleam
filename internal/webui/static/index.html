@@ -509,6 +509,16 @@
             <p class="field-hint">哪些操作被拦下、哪些被放行、哪些是审核模型加拦的——留痕才能复盘。</p>
             <div id="audit-list" class="geo-list"></div>
           </div>
+
+          <div class="card card--glass" style="margin-top: var(--space-4);">
+            <div class="card-header">
+              <h2 class="section-title" style="margin:0">连接与出网</h2>
+              <button class="btn btn-secondary btn-sm" id="cx-conn-refresh" type="button">刷新</button>
+            </div>
+            <p class="field-hint">这张表回答的不是「我还能连什么」，而是「我允许了什么」：每一条常驻边界通到哪、谁能触发、什么东西会离开本机、留痕在哪、想关掉动哪里。内容全部由本机运行状态现算，读它本身一个包都不发。</p>
+            <p class="cx-scope" id="cx-conn-scope">—</p>
+            <div id="cx-conn-list" class="cx-list"></div>
+          </div>
           <div class="save-bar">
             <span class="field-hint">执行模式、审批超时与审核策略</span>
             <button class="btn btn-primary" id="set-save-safety">保存</button>
@@ -1050,7 +1060,7 @@
             <span class="me-row-ic">🗂</span><span class="me-row-label">本地数据</span><span class="me-row-arrow">›</span>
           </button>
           <button class="me-row" id="me-update">
-            <span class="me-row-ic">⟳</span><span class="me-row-label">检查更新</span><span class="me-row-arrow me-version" id="me-version">v0.1.0</span>
+            <span class="me-row-ic">⟳</span><span class="me-row-label">检查更新</span><span class="me-row-arrow me-version" id="me-version">—</span>
           </button>
           <button class="me-row" id="me-help">
             <span class="me-row-ic">?</span><span class="me-row-label">帮助与反馈</span><span class="me-row-arrow">›</span>

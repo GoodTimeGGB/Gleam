@@ -504,6 +504,16 @@ type GoalResult struct {
 	// FailureBreakdown 失败归因分布：ErrorKind -> 步骤数。
 	// 失败率只回答"坏了多少"，这份分布回答"该先修哪一层"。
 	FailureBreakdown map[ErrorKind]int `json:"failure_breakdown,omitempty"`
+	// Changes 本次任务对文件系统的净改动清单（一条路径一行）。
+	//
+	// 为什么单列而不让界面从 Steps 里自己捞：步骤是"我调了什么工具"，改动是
+	// "盘上现在和以前有什么不一样"。同一份内容写两次、写完又删掉、一次移动动到两个
+	// 路径——这些在步骤里都是三条独立记录，在清单里是一行的三种状态。收敛这件事
+	// 已经有人做了（产物核对按路径收敛），清单复用同一次收敛，不另数一遍。
+	//
+	// 空清单不是"没核对"：只读任务本来就不该有改动。所以它 omitempty，
+	// 而"动了文件但没留住写前内容"记在每行的 reversible/blocked 上。
+	Changes []FileChange `json:"changes,omitempty"`
 	// FirstPass / Reworks 交付侧的一次性口径：产物是不是**一次就合格**。
 	//
 	// 与 StepResult.Retried 的区别在层级：那个是**步骤级**的（这一步重试了两次），
@@ -520,6 +530,28 @@ type GoalResult struct {
 	// 不要把它读成"没通过"（成长统计里另按对话自己的核对结论记，见 runChatPath）。
 	FirstPass bool `json:"first_pass,omitempty"`
 	Reworks   int  `json:"reworks,omitempty"`
+}
+
+// FileChange 一条路径在本任务里的净改动。
+//
+// 每个字段的取向都定在"用户能不能照着做决定"上：能不能还原、还原不成的原因、
+// 现在多大、原来多大。刻意不含 diff 正文——那是按需取的（点"对比"才拉），
+// 任务记录会随每个任务归档，把几百 KB 的前后内容塞进清单等于把归档变成副本堆。
+type FileChange struct {
+	Path       string `json:"path"` // 绝对路径；界面按工作区根折成相对显示
+	Kind       string `json:"kind"` // added|modified|deleted|dir|touched（界面负责译成人话，别裸奔）
+	Tool       string `json:"tool,omitempty"`
+	StepID     string `json:"step_id,omitempty"`
+	OK         bool   `json:"ok"` // 产物核对（代码实测）是否通过
+	Note       string `json:"note,omitempty"`
+	Bytes      int64  `json:"bytes"`                // 现在的字节数（不存在时 0）
+	PrevBytes  int64  `json:"prev_bytes,omitempty"` // 写前的字节数
+	Reversible bool   `json:"reversible"`           // 有没有把握退回写前
+	Blocked    string `json:"blocked,omitempty"`    // 退不回去时，说清为什么
+	// Reverted 这一行已经点过"还原"。Kind 记的是**本任务当时做了什么**，那是历史，
+	// 不因还原而改；这一位说的是**现在盘上不再是那样**了。少了它，归档会一直宣称
+	// 一个早已删掉的文件"新建在这儿"——那是对着真实存在过的事撒第二个谎。
+	Reverted bool `json:"reverted,omitempty"`
 }
 
 // ReplayKind 回放方式。

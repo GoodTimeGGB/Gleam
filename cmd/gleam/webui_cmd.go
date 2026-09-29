@@ -32,6 +32,8 @@ func cmdWebUI(args []string) error {
 	bindSchedulerFire(rt)
 
 	srv := webui.NewServer(rt.agent)
+	// 监听地址交给台账：那一行要说"入网"，就必须知道自己开在哪个口上。
+	srv.BindAddr = *addr
 	httpServer := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),

@@ -171,7 +171,12 @@ func TestStateEntries_CoverWhatRuntimeCreates(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "script.json")
 	body, err := json.Marshal([]map[string]any{
 		{"kind": "plan", "texts": []string{
-			`{"steps":[{"id":"s1","description":"回复","tool":"reply","args":{"text":"好"}}],"estimated_time":"short"}`,
+			// 刻意含一步 file.write：snapshots/ 只会在**真的写文件**时出现。
+			// 光跑一个回复任务的话，这条对账永远看不见那处新落盘——正是它要防的漂移。
+			`{"steps":[
+				{"id":"s1","description":"写对账文件","tool":"file.write","args":{"path":"state-probe.txt","content":"对账用"}},
+				{"id":"s2","description":"回复","tool":"reply","args":{"text":"好"},"depends_on":["s1"]}
+			],"estimated_time":"short"}`,
 		}},
 		{"kind": "reflect", "texts": []string{
 			`{"score":90,"verdict":"done","reason":"完成","suggestion":""}`,
@@ -252,7 +257,7 @@ func TestStateEntries_KnownMembersPresent(t *testing.T) {
 		"conversations", "spaces", "memory/context.json", // 会话
 		"memory/longterm.json", "growth.json", // 记忆
 		"tasks", "runs", "replays", "schedules.json", "pending_approvals.json",
-		"audit.jsonl", "tool-output", "geo_history.json", // 任务
+		"audit.jsonl", "tool-output", "snapshots", "geo_history.json", // 任务
 		"skills", "snippets.json", // 资产
 	} {
 		if !have[want] {

@@ -188,6 +188,10 @@ type Result struct {
 	Total        int
 	Carried      int // 其中沿用上次结果、这次没有执行的步骤数
 	Cancelled    bool
+	// PreImages 本次任务动到的每个路径**写前**的样子（写前快照的内存侧）。
+	// 盘上那份在 `snapshots/<taskID>/manifest.json`，这里带出来只为省一次读盘
+	// ——任务正常跑完时内存里就有，没必要再绕一趟磁盘。
+	PreImages []preImage
 }
 
 // cachedCall 被复用的只读调用结果。
@@ -210,6 +214,9 @@ type execState struct {
 	done     map[string]cachedCall    // 已成功的只读调用：指纹 -> 输出（含结果性质）
 	failed   map[string]string        // 已失败的调用：指纹 -> 错误信息
 	inflight map[string]chan struct{} // 正在执行的相同调用：指纹 -> 完成信号（单飞）
+
+	// 写前快照（本次任务共享一个记录器，内部自带锁）
+	snap *snapshotter
 }
 
 // tryAcquire 认领一次调用：返回 (完成信号, 是否由本步骤执行)。
@@ -301,6 +308,7 @@ func (e *Executor) Execute(ctx context.Context, plan types.Plan, taskID, mode st
 		done:     map[string]cachedCall{},
 		failed:   map[string]string{},
 		inflight: map[string]chan struct{}{},
+		snap:     newSnapshotter(e.DataDir, taskID),
 	}
 	for i := range state.finished {
 		state.finished[i] = make(chan struct{})
@@ -482,6 +490,10 @@ func (e *Executor) Execute(ctx context.Context, plan types.Plan, taskID, mode st
 	// 收尾路径有三条（正常/取消/技能），挂三条里迟早漏一条——而漏掉的那条会一直涨。
 	// 代价是每跑一个任务扫一次目录，与"无界增长"比可以忽略。
 	PruneSpill(e.DataDir, spillMaxTasks)
+	// 写前快照同一条路、同一个理由。它比落盘缓存更该有上限：一份 1MB 的旧内容是
+	// 实打实的用户文件副本，不设限等于"跑几百个任务之后由磁盘来决定什么时候满"。
+	PruneSnapshots(e.DataDir, snapshotMaxTasks)
+	res.PreImages = state.snap.records()
 	return res
 }
 
@@ -739,6 +751,15 @@ func (e *Executor) runStep(ctx context.Context, state *execState, step types.Ste
 			// 由本步骤执行；结果写入缓存后再广播给等待者
 			defer state.release(fp)
 		}
+	}
+
+	// ---------- 写前快照 ----------
+	// 放在审批之后、去重之后、真正调用之前：被拒的步骤没有副作用，被复用的步骤
+	// 这一轮也没动手，都在前面 return 了。判"要不要快照"用**工具自己的静态声明**
+	// 而不是 e.readOnly()——后者问的是"在当前门控下是否只读"，用户把某个写工具
+	// 设成只读时，那不该顺手关掉这道保险。
+	if tool.Permission() != types.PermissionReadOnly {
+		state.snap.capture(step.ID, step.Tool, tool, args)
 	}
 
 	// 带超时执行；仅在真正调用工具期间持有并发槽位（审批等待不阻塞其他步骤）；

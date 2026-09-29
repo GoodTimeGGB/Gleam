@@ -278,7 +278,11 @@ func (s *Server) feedbackSink() feedback.Sink {
 	if !target.Configured() {
 		return nil
 	}
-	return feedback.NewSupabase(target)
+	// 出网留痕接在装配点上：这条路径发出去的是**用户写的那段话**（已脱敏），
+	// 台账必须能说出它去了哪个主机、多大，而审计里永远只有主机与字节。
+	return feedback.NewSupabase(target, func(host string, nbytes int) {
+		s.Agent.Gate.RecordEgress("feedback", host, nbytes)
+	})
 }
 
 // feedbackSecrets 本机已知**不该外发**的片段（发出去之前从副本里挖掉）。

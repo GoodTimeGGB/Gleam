@@ -909,10 +909,12 @@ function renderTaskCard(info, prepend) {
 
   const errSlot = el('div'); errSlot.hidden = true; errSlot.dataset.role = 'error';
   const checkSlot = el('div'); checkSlot.hidden = true; checkSlot.dataset.role = 'checks';
-  const slots = { summary: el('div', 'goal-summary'), approval: el('div'), suggestion: el('div'), skill: el('div'), error: errSlot, checks: checkSlot };
+  const changeSlot = el('div'); changeSlot.hidden = true; changeSlot.dataset.role = 'changes';
+  const slots = { summary: el('div', 'goal-summary'), approval: el('div'), suggestion: el('div'), skill: el('div'), error: errSlot, checks: checkSlot, changes: changeSlot };
   card.appendChild(slots.approval);
   card.appendChild(slots.error);
   card.appendChild(slots.checks);
+  card.appendChild(slots.changes);
   card.appendChild(slots.summary);
   card.appendChild(slots.suggestion);
   card.appendChild(slots.skill);
@@ -958,6 +960,175 @@ function renderChecks(t, result) {
   const head = checks.length ? `验收清单 ${passed}/${checks.length} 项通过` : '验收清单';
   slot.innerHTML = `<div class="checks"><div class="checks-head">${head}</div><ul class="check-list">${rows.join('')}</ul></div>`;
   slot.hidden = false;
+}
+
+// CH_KIND 把后端枚举译成人话（M3 的口径：界面不裸奔枚举）。
+// 兜底用"动过"而不是把英文原样吐出去：后端加一种类型时，界面少一个分支是难免的，
+// 但那一行仍然必须说清"这里动过一个路径"，只是说不出是哪一类。
+const CH_KIND = { added: '新建', modified: '修改', deleted: '删除', dir: '建目录', moved: '移动', touched: '动过' };
+
+function chBytes(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  if (v < 1024) return v + ' B';
+  if (v < 1024 * 1024) return (v / 1024).toFixed(1) + ' KB';
+  return (v / 1048576).toFixed(1) + ' MB';
+}
+
+// renderChanges 渲染"本次改动"：动了哪些路径、现在多大、能不能退回去。
+//
+// 这一区存在的理由是**核对不了的那半边**：验收清单说"承诺的事做到了"，
+// 但用户真正会问的是"我的盘上被写了什么、我能不能不认账"。
+// 所以每一行都必须带一个可点的出口（对比 / 还原），退不回去的则直接把原因摆出来，
+// 而不是留一个按下去什么也不会发生的按钮。
+//
+// 卡片与「执行详情」弹层共用 renderChangesInto：改动清单的形态只有一处定义，
+// 两个入口各自渲染一份就会早晚漂移成两套说法。
+function renderChanges(t, result) {
+  const slot = t.slots && t.slots.changes;
+  if (!slot) return;
+  renderChangesInto(slot, t.info.task_id, result && result.changes);
+}
+
+function renderChangesInto(slot, taskID, raw) {
+  const rows = Array.isArray(raw) ? raw : [];
+  slot.innerHTML = '';
+  if (!rows.length) {
+    slot.hidden = true;
+    return;
+  }
+  const box = el('div', 'changes');
+  const head = el('div', 'changes-head');
+  const canBack = rows.filter((c) => c.reversible).length;
+  head.textContent = `本次改动 ${rows.length} 个路径`;
+  const stat = el('span', 'stat', `可还原 ${canBack}/${rows.length}`);
+  stat.title = '可还原 = 动这个文件之前留过一份内容；没留住的退不回去，也不假装退得回去';
+  head.appendChild(document.createTextNode(' · '));
+  head.appendChild(stat);
+  box.appendChild(head);
+
+  const list = el('ul', 'change-list');
+  rows.forEach((c) => list.appendChild(changeRow(taskID, c)));
+  box.appendChild(list);
+  slot.appendChild(box);
+  slot.hidden = false;
+}
+
+function changeRow(taskID, c) {
+  const li = el('li', `change-item change-item--${CH_KIND[c.kind] ? c.kind : 'touched'}`);
+  const kind = el('span', 'change-kind', CH_KIND[c.kind] || CH_KIND.touched);
+  const path = el('span', 'change-path', relPath(c.path, spaceState.workspace));
+  path.title = c.path + (c.tool ? ` · 由 ${c.tool} 改的` : '');
+  const meta = el('span', 'change-meta');
+  // 改动前多大 → 现在多大：只报一个数会漏掉"其实是覆盖写"这件事
+  meta.textContent = c.prev_bytes ? `${chBytes(c.prev_bytes)} → ${chBytes(c.bytes)}` : chBytes(c.bytes);
+  meta.title = c.ok === false && c.note ? `产物核对没过：${c.note}` : (c.note || '');
+  li.append(kind, path, meta);
+
+  const acts = el('div', 'change-acts');
+  if (c.reverted) {
+    acts.appendChild(el('span', 'change-done', '已还原'));
+  }
+  if (c.reversible) {
+    const diff = el('button', 'btn btn-ghost btn-sm', '对比');
+    diff.type = 'button';
+    diff.addEventListener('click', () => openChangeDiff(taskID, c.path));
+    const back = el('button', 'btn btn-ghost btn-sm', '还原');
+    back.type = 'button';
+    back.addEventListener('click', () => revertChange(taskID, c));
+    acts.append(diff, back);
+  } else if (!c.reverted) {
+    const why = el('span', 'change-blocked', '不可还原');
+    why.title = c.blocked || '写前内容未留存，无法还原';
+    acts.appendChild(why);
+  }
+  li.appendChild(acts);
+  return li;
+}
+
+// openChangeDiff 拉「写前 → 现在」的行级对比并就地展示。
+//
+// 弹层骨架**同步**建好（含关闭按钮和一行"加载中"），内容到了再填：
+// Modal 的初始焦点在 buildContent 返回的那一刻就定了，异步建骨架会让这个弹层
+// 一打开没有任何焦点，键盘用户按 Esc 之前那段路等于没有入口。
+function openChangeDiff(taskID, path) {
+  Modal.open('写前对比', (box) => {
+    const wrap = el('div');
+    const legend = el('div', 'diff-legend', '加载中…');
+    const body = el('div');
+    const actions = el('div', 'modal-actions');
+    const close = el('button', 'btn btn-secondary', '关闭');
+    close.type = 'button';
+    close.addEventListener('click', Modal.close);
+    actions.appendChild(close);
+    wrap.append(legend, body, actions);
+    box.appendChild(wrap);
+
+    api('GET', `/api/goals/${encodeURIComponent(taskID)}/diff?path=${encodeURIComponent(path)}`)
+      .then((d) => fillDiff(legend, body, d, path))
+      .catch((err) => {
+        legend.textContent = '';
+        body.appendChild(el('div', 'modal-text', `拿不到对比：${err.message}`));
+      });
+  });
+}
+
+function fillDiff(legend, body, d, requestPath) {
+  const diff = d.diff || {};
+  const lines = Array.isArray(diff.lines) ? diff.lines : [];
+  legend.textContent = `${relPath(d.path || requestPath, spaceState.workspace)}`
+    + ` · ${chBytes(d.before_bytes)} → ${chBytes(d.after_bytes)}`
+    + ` · +${diff.added || 0} −${diff.deleted || 0}`;
+  if (!lines.length) {
+    body.appendChild(el('div', 'modal-text', diff.note || '前后没有行级差异（内容一样，或只有体量变化）'));
+    return;
+  }
+  const pre = el('div', 'diff');
+  pre.setAttribute('role', 'region');
+  pre.setAttribute('aria-label', '写前与现在的逐行对比');
+  lines.forEach((l) => {
+    const row = el('div', `diff-line diff-line--${l.kind}`);
+    row.appendChild(el('span', 'diff-no', l.no ? String(l.no) : ''));
+    row.appendChild(el('span', 'diff-sign', l.kind === 'add' ? '+' : (l.kind === 'del' ? '−' : '')));
+    row.appendChild(el('span', 'diff-text', l.text));
+    pre.appendChild(row);
+  });
+  body.appendChild(pre);
+  if (diff.note) body.appendChild(el('div', 'diff-note', diff.note));
+}
+
+// revertChange 把一条路径退回到本次任务开始之前。
+//
+// 二次确认必须点名路径：这一按下去覆盖的是**用户自己的文件**，
+// 而"取消"在界面上从来不该是危险动作。
+async function revertChange(taskID, c) {
+  const name = relPath(c.path, spaceState.workspace);
+  const pair = c.kind === 'moved' ? '（一次移动涉及的两个路径会一起退回）' : '';
+  const ok = await confirmModal(
+    `把「${name}」退回到这次任务开始前的样子？${pair}当前内容不会保留。`,
+    '还原改动', { okText: '还原', danger: true });
+  if (!ok) return;
+  try {
+    const res = await api('POST', `/api/goals/${encodeURIComponent(taskID)}/revert`, { path: c.path });
+    const notes = (res.reverted || []).map((r) => r.note).join('；');
+    if (notes) toast(notes, 'success');
+    (res.failed || []).forEach((f) => toast(`没能还原：${f}`, 'error', 9000));
+    // 清单从服务端回来，不在前端拼"还原后应该长什么样"：
+    // 同一件事有两处算法，就早晚会出现刷新前后两个说法。
+    await refreshTaskResult(taskID);
+  } catch (err) {
+    toast(`还原失败：${err.message}`, 'error', 9000);
+  }
+}
+
+// refreshTaskResult 重新拉一次任务详情并定格到卡片上（还原之后清单变了样）。
+async function refreshTaskResult(taskID) {
+  try {
+    const info = await api('GET', '/api/goals/' + encodeURIComponent(taskID));
+    if (info && info.result) applyResult(taskID, info.result);
+  } catch (err) {
+    toast(`改动已提交，但清单没刷新到最新：${err.message}`, 'error', 9000);
+  }
 }
 
 /* Qoder 式过程呈现（借鉴其公开交互形态，不是照抄）：
@@ -1255,6 +1426,9 @@ function applyResult(taskID, result) {
   // 任务结束：工具执行折叠块定格汇总句并收起
   settleRunSection(t);
   renderChecks(t, result);
+  // 改动清单与验收清单同时定格：前者答"我的盘上被写了什么、能不能不认账"，
+  // 只在「执行详情」弹层渲染会让 README 那句"任务卡上列"落空。
+  renderChanges(t, result);
   // 回复渲染：对话模式已流式实时输出的内容，收尾时定格为最终结果（失败则保留已流出部分），不再重播打字机
   const summaryEl = t.slots.summary;
   const text = result.summary || '';
@@ -2101,6 +2275,7 @@ async function loadSettings() {
     syncRuntimeState(s);
     loadContext();
     loadAudit().catch(() => {});
+    loadConnections().catch(() => {});
   } catch (err) {
     toast(`加载设置失败：${err.message}`, 'error');
   }
@@ -2109,6 +2284,7 @@ async function loadSettings() {
 /* ---------- 安全门控留痕 ---------- */
 const AUDIT_LABEL = {
   denied: '已拦截', approved: '已放行', auto: '自动放行', reviewed_block: '审核模型加拦',
+  manual_revert: '用户手动还原',
 };
 
 async function loadAudit() {
@@ -2139,6 +2315,58 @@ async function loadAudit() {
   } catch (err) {
     box.innerHTML = `<p class="empty-hint">加载留痕失败：${esc(err.message)}</p>`;
   }
+}
+
+/* ---------- 连接与出网台账 ---------- */
+// 五个问句就是这张表的口径，顺序固定：先问通到哪，再问谁能触发，最后问想关掉动哪里。
+// 每个字段都由后端算好（连 kindText 这种显示口径也在后端），这里只做呈现——
+// 前端一旦开始自己拼（自己判是不是回环、自己把 out 翻成"出网"），同一件事就有两个 owner，
+// 而漂移的方向永远是"界面看起来一切正常"。
+const CX_FIELD_LABEL = [
+  ['target', '通到哪'], ['trigger', '谁能触发'], ['leaves', '会离开本机'],
+  ['trace', '留痕在哪'], ['off', '想关掉动哪里'],
+];
+
+async function loadConnections() {
+  const box = $('#cx-conn-list');
+  if (!box) return;
+  const scope = $('#cx-conn-scope');
+  try {
+    const data = await api('GET', '/api/connections');
+    if (scope) scope.textContent = data.egressScope || '';
+    const rows = data.rows || [];
+    if (!rows.length) {
+      box.innerHTML = '<p class="empty-hint">没有查到任何常驻边界。</p>';
+      return;
+    }
+    box.innerHTML = rows.map(connectionRow).join('');
+  } catch (err) {
+    if (scope) scope.textContent = '';
+    box.innerHTML = `<p class="empty-hint">加载台账失败：${esc(err.message)}</p>`;
+  }
+}
+
+function connectionRow(r) {
+  const fields = CX_FIELD_LABEL
+    .filter(([key]) => r[key])
+    .map(([key, label]) => `<div class="cx-field"><dt>${label}</dt><dd>${esc(r[key])}</dd></div>`)
+    .join('');
+  const badges = [`<span class="cx-badge cx-badge--${esc(r.kind)}">${esc(r.kindText)}</span>`];
+  // 未留痕必须自己戴牌子：这一格沉默，用户读到的就是"这张表说一切有据可查"。
+  if (r.untraced) badges.push('<span class="cx-badge cx-badge--untraced">查不到痕迹</span>');
+  const stats = r.stats ? `<p class="cx-stats">${esc(r.stats)}</p>` : '';
+  const alert = r.alert ? `<p class="cx-alert">${esc(r.alert)}</p>` : '';
+  const cls = ['cx-item', 'cx-item--' + esc(r.kind)];
+  if (r.alert) cls.push('cx-item--warn');
+  return `<div class="${cls.join(' ')}">
+    <div class="cx-head">
+      <span class="cx-title">${esc(r.title)}</span>
+      ${badges.join('')}
+      <span class="cx-status">${esc(r.status)}</span>
+    </div>
+    <dl class="cx-fields">${fields}</dl>
+    ${stats}${alert}
+  </div>`;
 }
 
 function fillSettingsFields(s) {
@@ -2517,6 +2745,7 @@ async function saveLLM() {
 }
 
 if ($('#audit-refresh')) $('#audit-refresh').addEventListener('click', () => loadAudit());
+if ($('#cx-conn-refresh')) $('#cx-conn-refresh').addEventListener('click', () => loadConnections());
 
 $('#set-save-persona').addEventListener('click', savePersona);
 $('#set-save-safety').addEventListener('click', saveSafety);
@@ -3661,6 +3890,9 @@ async function openTaskDetail(taskID) {
         const e = el('div', 'callout callout--error', info.result.error);
         box.appendChild(e);
       }
+      const chSlot = el('div');
+      renderChangesInto(chSlot, taskID, info.result && info.result.changes);
+      box.appendChild(chSlot);
       const steps = (info.result && info.result.steps) || [];
       if (steps.length) {
         const list = el('div', 'timeline');
@@ -4399,11 +4631,19 @@ $('#me-data').addEventListener('click', async () => {
 });
 
 $('#me-update').addEventListener('click', async () => {
+  let info;
   try {
-    const info = await api('GET', '/api/info');
-    $('#me-version').textContent = 'v' + (info.version || '0.1.0');
-    await alertModal('当前版本 v' + (info.version || '0.1.0') + '，已是本地运行的版本。', '检查更新');
-  } catch { toast('检查更新失败', 'error'); }
+    info = await api('GET', '/api/info');
+  } catch {
+    toast('读取本机版本失败', 'error');
+    return;
+  }
+  const ver = info.version ? 'v' + info.version : '未知';
+  $('#me-version').textContent = ver;
+  // 没有联网更新源，所以"有没有新版"这件事在本机**问不出来**。以前这里给出的是一个完成时态的结论，
+  // 等于把"我不知道"讲成了答案。版本号只从 /api/info 取，owner 是 internal/buildinfo。
+  await alertModal('本机版本 ' + ver + '。Gleam 没有联网更新源：安装包只落在本机，所以这一行只能说出版本号，' +
+    '说不出有没有新版。要升级就替换程序本身——对话、技能、密钥都存在「本地数据」那个目录里，换程序不影响它们。', '检查更新');
 });
 
 $('#me-help').addEventListener('click', () => {

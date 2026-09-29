@@ -65,12 +65,22 @@ const FeedbackTable = "feedback_reports"
 type supabaseSink struct {
 	target SupabaseTarget
 	client *http.Client
+	egress EgressFunc
 }
+
+// EgressFunc 出网留痕回调：每次向远端发包时调用一次，参数只有**主机与字节量**。
+//
+// 与 llm.EgressFunc、auth 的 OnEgress 同一条边界：审计不能变成新的泄露面，
+// 所以签名里就没有能装正文的位置。
+type EgressFunc func(host string, nbytes int)
 
 // NewSupabase 造一个 Supabase 投递器。超时是**请求级**的：一次提交里本地归档
 // 已经落住了，远端慢不能让界面一直停在"提交中"。
-func NewSupabase(target SupabaseTarget) Sink {
-	return &supabaseSink{target: target, client: &http.Client{Timeout: 12 * time.Second}}
+//
+// egress 传 nil 就是不记（测试与本地-only 场景）；生产路径由宿主接上安全门控——
+// 「这条反馈发去了哪个主机、多大」必须能在台账上指得出留痕。
+func NewSupabase(target SupabaseTarget, egress EgressFunc) Sink {
+	return &supabaseSink{target: target, client: &http.Client{Timeout: 12 * time.Second}, egress: egress}
 }
 
 func (s *supabaseSink) Name() string { return "supabase" }
@@ -92,6 +102,12 @@ func (s *supabaseSink) Send(ctx context.Context, f *types.Feedback) error {
 	req.Header.Set("Content-Type", "application/json")
 	// return=minimal：只要"插进去了"，不要把整行回读一遍（回读等于把正文再传一次）。
 	req.Header.Set("Prefer", "return=minimal")
+	// 留痕在发包**之前**：请求已经发出去了却没能记上（超时、连接被断），
+	// 台账就会说"这一类从没出过网"——而在审计里"少记一笔"与"没发生过"长得一样。
+	// 记早了的代价只是"发了一次没成功"，那本来就是发生过一次发包。
+	if s.egress != nil && req.URL != nil {
+		s.egress(req.URL.Host, len(body))
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("连不上 %s：%v", s.target.table(), err)

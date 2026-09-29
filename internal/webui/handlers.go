@@ -50,6 +50,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/goals", s.handleGoalList)
 	mux.HandleFunc("GET /api/goals/{id}", s.handleGoalGet)
 	mux.HandleFunc("POST /api/goals/{id}/cancel", s.handleGoalCancel)
+	mux.HandleFunc("GET /api/goals/{id}/diff", s.handleGoalDiff)
+	mux.HandleFunc("POST /api/goals/{id}/revert", s.handleGoalRevert)
 
 	// 审批
 	mux.HandleFunc("GET /api/approvals", s.handleApprovalList)
@@ -92,6 +94,9 @@ func (s *Server) Handler() http.Handler {
 
 	// 安全门控留痕（被拦截 / 被批准 / 审核模型加拦）
 	mux.HandleFunc("GET /api/security/audit", s.handleSecurityAudit)
+
+	// 「连接与出网」台账：本机每条常驻边界的爆炸半径（只读派生，不发任何探测请求）
+	mux.HandleFunc("GET /api/connections", s.handleConnections)
 
 	// 设置与上下文
 	mux.HandleFunc("GET /api/settings", s.handleSettingsGet)
@@ -451,6 +456,53 @@ func (s *Server) handleGoalCancel(w http.ResponseWriter, r *http.Request) {
 	// 审批通道，不是 ctx。"取消返回 200、任务还在 running"就是这么来的。
 	s.dropTaskApprovals(id, "任务已取消")
 	writeJSON(w, 200, map[string]any{"task_id": id, "cancelled": ok})
+}
+
+// ---------- 本次改动：对比与还原 ----------
+
+// handleGoalDiff 一条路径的「写前 → 现在」行级对比。
+//
+// 路径走查询参数，不放进 `/diff/<path>` 路由段：那是个带分隔符的绝对路径，
+// 塞进路由就多出一套转义与匹配口径，而 `{id}` 已经足够定位"哪次任务的哪一条"。
+func (s *Server) handleGoalDiff(w http.ResponseWriter, r *http.Request) {
+	view, err := s.Agent.TaskDiff(r.PathValue("id"), r.URL.Query().Get("path"))
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
+type goalRevertBody struct {
+	Path string `json:"path"`
+}
+
+// handleGoalRevert 把一条路径退回到本次任务开始之前。只由用户点击触发。
+//
+// 成功后**拿归档替换内存里的那条结果**：改动清单"现在是什么样"的 owner 是归档，
+// 内存副本跟着它走，才不会同一个任务在刷新前后报出两份不同的清单
+// （前端因此只需要重新拉一次详情，不需要自己拼"还原后应该长什么样"）。
+func (s *Server) handleGoalRevert(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body goalRevertBody
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, "请求体无效")
+		return
+	}
+	res, err := s.Agent.TaskRevert(id, body.Path)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	if archived, has := s.archivedTask(id); has {
+		s.mu.Lock()
+		if t, ok := s.tasks[id]; ok {
+			t.Result = archived.Result
+		}
+		s.mu.Unlock()
+		res["refreshed"] = true
+	}
+	writeJSON(w, 200, res)
 }
 
 // ---------- 审批 ----------

@@ -51,6 +51,8 @@ type artifactFact struct {
 	path   string
 	ok     bool
 	detail string // 通过时写实测值；不通过时写差在哪
+	want   string // 期望形态（wantFile/wantDir/...），改动清单据此判"新建还是覆盖"
+	size   int64  // 实测字节数（不存在时为 0）
 }
 
 // verifyArtifacts 核对"声称产出了文件"的步骤。
@@ -135,9 +137,12 @@ func verifyArtifacts(steps []types.StepResult) []artifactFact {
 
 // checkArtifact 对一条事后条件做实测。
 func checkArtifact(e artifactExpectation) artifactFact {
-	f := artifactFact{stepID: e.stepID, tool: e.tool, path: e.path}
+	f := artifactFact{stepID: e.stepID, tool: e.tool, path: e.path, want: e.want}
 	fi, err := os.Stat(e.path)
 	exists := err == nil
+	if exists {
+		f.size = fi.Size()
+	}
 
 	switch e.want {
 	case wantAbsent:

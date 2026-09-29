@@ -1342,6 +1342,7 @@ func (a *Agent) buildResult(goal string, exec *Result, refl types.Reflection, ac
 		ExecutedPlan:     &exec.ExecutedPlan,
 		PromptBreakdown:  &bd,
 		FailureBreakdown: failureBreakdown(exec.Steps),
+		Changes:          buildChanges(exec.Steps, exec.PreImages),
 	}
 	res.Summary = exec.ReplyText
 	if res.Summary == "" {

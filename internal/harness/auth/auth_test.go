@@ -3,6 +3,7 @@ package auth
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -109,4 +110,59 @@ func get(t *testing.T, full string) string {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	return string(b)
+}
+
+// TestSignInRecordsEgress 云端登录必须留下出网痕迹。
+//
+// 这一条此前是缺的：注册/登录/续期/登出都会出网，而审计里查不到——
+// 「连接与出网」台账要么少一行，要么列了那一行却指不出留痕在哪。
+// 断言只收两件事：**主机对得上、字节数不为 0**。"密码没被记进审计"这件事由回调签名
+// 保证（它压根没有能装正文的参数位），不需要也不该靠在这里查字符串来证明。
+func TestSignInRecordsEgress(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"b","expires_in":3600,`+
+			`"token_type":"bearer","user":{"id":"u1","email":"me@example.com"}}`)
+	}))
+	defer ts.Close()
+
+	creds, err := credentials.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := creds.SetCloudConfig(credentials.CloudConfig{SupabaseURL: ts.URL, SupabaseAnonKey: "anon"}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(creds)
+	var gotHost string
+	var gotBytes int
+	m.OnEgress = func(h string, n int) { gotHost, gotBytes = h, n }
+
+	if err := m.SignIn("me@example.com", "hunter2"); err != nil {
+		t.Fatalf("登录失败：%v", err)
+	}
+	if want := strings.TrimPrefix(ts.URL, "http://"); gotHost != want {
+		t.Errorf("出网留痕的主机 = %q，应为 %q", gotHost, want)
+	}
+	if gotBytes <= 0 {
+		t.Errorf("出网留痕应带上请求体大小，实得 %d", gotBytes)
+	}
+}
+
+// TestSignInWithoutHookStillWorks 没装配留痕回调时照常能登录：审计是旁路，
+// 不能因为它缺席就把账号功能判死。
+func TestSignInWithoutHookStillWorks(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"access_token":"a","expires_in":3600,"user":{"id":"u1"}}`)
+	}))
+	defer ts.Close()
+	creds, err := credentials.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := creds.SetCloudConfig(credentials.CloudConfig{SupabaseURL: ts.URL, SupabaseAnonKey: "anon"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(creds).SignIn("me@example.com", "hunter2"); err != nil {
+		t.Fatalf("回调为空不应影响登录：%v", err)
+	}
 }

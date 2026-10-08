@@ -550,7 +550,104 @@ func panicBrief(p any) string {
 	return fmt.Sprintf("工具 panic: %v\n%s", p, strings.TrimRight(strings.Join(lines, "\n"), "\n"))
 }
 
-// runStep 执行单步：安全门控审批 → 参数引用替换 → 调用工具（带超时）。
+// adjudicate 对一步做裁决：安全门控 →（可选）审核模型快筛。
+//
+// review=false 只用于"参数里还带着步骤引用"的第一次裁决：那时门控和审核模型看到的
+// 都是占位符，花钱让审核模型筛一个假值没有意义，等替换成真值再筛。
+//
+// ---------- 审核模型快筛 ----------
+// 只审"本来会被自动放行"的中高风险动作：低风险是只读，高风险本来就有人看。
+// 审核不通过不直接拒绝，而是升级为人工确认——最终决定权仍在人手里。
+func (e *Executor) adjudicate(tool types.Tool, args map[string]any, preApproved, review bool) safety.Decision {
+	dec := e.Gate.EvaluateStep(tool, args, preApproved)
+	if !review || dec.NeedApproval || dec.Risk == "low" || e.Reviewer == nil {
+		return dec
+	}
+	if ok, why := e.Reviewer.Review(e.Goal, tool.Name(), args); !ok {
+		if e.Gate != nil {
+			e.Gate.Record(safety.AuditEntry{
+				Tool: tool.Name(), Risk: dec.Risk, Action: "reviewed_block",
+				Reason: "审核模型标记，已升级为人工确认", Detail: why,
+			})
+		}
+		dec.NeedApproval = true
+		dec.Reason = "审核模型认为这个动作超出了目标范围：" + why
+	}
+	return dec
+}
+
+// awaitApproval 走一遍人工确认：待批状态落盘 → 通知审批通道 → 等结果 → 审计留痕。
+// 结果就地写进 r（被拒 = 失败，被取消 = 跳过），调用方拿到 cancelled 或 !approved
+// 都直接收尾，不再往下执行。
+func (e *Executor) awaitApproval(ctx context.Context, r *types.StepResult, taskID string, step types.Step, dec safety.Decision) (approved, cancelled bool) {
+	req := types.ApprovalRequest{
+		TaskID: taskID,
+		Plan:   []string{step.Describe()},
+		Risk:   dec.Risk,
+		Reason: dec.Reason,
+		StepID: step.ID,
+	}
+	// 等待审批状态落盘（P4-2）：进程若在此期间退出，重启后能列出"有任务卡在审批"，
+	// 而不是静默消失——用户至少知道刚才那条任务停在哪一步、要批什么。
+	if e.Gate != nil {
+		e.Gate.MarkPending(safety.PendingApproval{
+			TaskID: taskID, StepID: step.ID, Tool: step.Tool,
+			Risk: dec.Risk, Reason: dec.Reason,
+		})
+	}
+	// 审批有结果即摘除（批准/拒绝/超时/取消都是"有结果"）
+	clearPending := func() {
+		if e.Gate != nil {
+			e.Gate.ClearPending(taskID, step.ID)
+		}
+	}
+	respCh := make(chan types.ApprovalResponse, 1)
+	if e.Notifier != nil {
+		go func() { respCh <- e.Notifier.OnApproval(req) }()
+	} else {
+		respCh <- types.ApprovalResponse{Approved: false, Note: "无审批通道"}
+	}
+	actx, acancel := context.WithTimeout(ctx, e.Gate.ApprovalTimeoutDuration())
+	var note string
+	select {
+	case resp := <-respCh:
+		approved, note = resp.Approved, resp.Note
+	case <-actx.Done():
+		if ctx.Err() != nil {
+			r.Status = types.StepSkipped
+			r.Error = "任务已取消"
+			acancel()
+			clearPending()
+			return false, true
+		}
+		note = "审批超时，自动拒绝"
+	}
+	acancel()
+	clearPending()
+	// 审批结果留痕：被拒的操作必须能事后查到，否则复盘时一片空白
+	if e.Gate != nil {
+		action := "approved"
+		if !approved {
+			action = "denied"
+		}
+		e.Gate.Record(safety.AuditEntry{
+			Tool: step.Tool, Risk: dec.Risk, Action: action,
+			Reason: dec.Reason, Detail: note,
+		})
+	}
+	if !approved {
+		r.Status = types.StepFailed
+		r.Error = types.ErrStepRejected.Error()
+		if note != "" {
+			r.Error += "（" + note + "）"
+		}
+		// 权限不足类错误重试无用：结构上已知，直接定类，不走文本启发式
+		r.ErrorKind = types.ErrPermission
+	}
+	return approved, false
+}
+
+// runStep 执行单步：安全门控审批 → 参数引用替换 → 用真值重算裁决 → 调用工具（带超时）。
 // 并发槽位仅在真正调用工具期间持有：审批等待、参数替换不阻塞其他步骤（丝滑关键）。
 func (e *Executor) runStep(ctx context.Context, state *execState, step types.Step, taskID, mode string, preApproved bool, timeout time.Duration, sem chan struct{}) types.StepResult {
 	start := time.Now()
@@ -569,96 +666,13 @@ func (e *Executor) runStep(ctx context.Context, state *execState, step types.Ste
 		return finalize()
 	}
 
-	// 安全门控：决策是否需要用户批准
-	dec := e.Gate.EvaluateStep(tool, step.Args, preApproved)
-	// ---------- 审核模型快筛 ----------
-	// 只审"本来会被自动放行"的中高风险动作：低风险是只读，高风险本来就有人看。
-	// 审核不通过不直接拒绝，而是升级为人工确认——最终决定权仍在人手里。
-	if !dec.NeedApproval && dec.Risk != "low" && e.Reviewer != nil {
-		if ok, why := e.Reviewer.Review(e.Goal, step.Tool, step.Args); !ok {
-			if e.Gate != nil {
-				e.Gate.Record(safety.AuditEntry{
-					Tool: step.Tool, Risk: dec.Risk, Action: "reviewed_block",
-					Reason: "审核模型标记，已升级为人工确认", Detail: why,
-				})
-			}
-			dec.NeedApproval = true
-			dec.Reason = "审核模型认为这个动作超出了目标范围：" + why
-		}
-	}
+	// 安全门控：先按**计划里的字面参数**裁一次。带引用时这次看到的还是占位符，
+	// 所以替换完还要再裁一次（见「派发前重算裁决」）。
+	dec := e.adjudicate(tool, step.Args, preApproved, !hasRefs(step.Args))
 	if dec.NeedApproval {
-		req := types.ApprovalRequest{
-			TaskID: taskID,
-			Plan:   []string{step.Describe()},
-			Risk:   dec.Risk,
-			Reason: dec.Reason,
-			StepID: step.ID,
-		}
-		// 等待审批状态落盘（P4-2）：进程若在此期间退出，重启后能列出"有任务卡在审批"，
-		// 而不是静默消失——用户至少知道刚才那条任务停在哪一步、要批什么。
-		if e.Gate != nil {
-			e.Gate.MarkPending(safety.PendingApproval{
-				TaskID: taskID, StepID: step.ID, Tool: step.Tool,
-				Risk: dec.Risk, Reason: dec.Reason,
-			})
-		}
-		// 审批有结果即摘除（批准/拒绝/超时/取消都是"有结果"）
-		clearPending := func() {
-			if e.Gate != nil {
-				e.Gate.ClearPending(taskID, step.ID)
-			}
-		}
-		respCh := make(chan types.ApprovalResponse, 1)
-		if e.Notifier != nil {
-			go func() { respCh <- e.Notifier.OnApproval(req) }()
-		} else {
-			respCh <- types.ApprovalResponse{Approved: false, Note: "无审批通道"}
-		}
-		actx, acancel := context.WithTimeout(ctx, e.Gate.ApprovalTimeoutDuration())
-		var approved bool
-		var note string
-		select {
-		case resp := <-respCh:
-			approved, note = resp.Approved, resp.Note
-		case <-actx.Done():
-			if ctx.Err() != nil {
-				r.Status = types.StepSkipped
-				r.Error = "任务已取消"
-				acancel()
-				clearPending()
-				return finalize()
-			}
-			note = "审批超时，自动拒绝"
-		}
-		acancel()
-		clearPending()
-		// 审批结果留痕：被拒的操作必须能事后查到，否则复盘时一片空白
-		if e.Gate != nil {
-			action := "approved"
-			if !approved {
-				action = "denied"
-			}
-			e.Gate.Record(safety.AuditEntry{
-				Tool: step.Tool, Risk: dec.Risk, Action: action,
-				Reason: dec.Reason, Detail: note,
-			})
-		}
-		if !approved {
-			r.Status = types.StepFailed
-			r.Error = types.ErrStepRejected.Error()
-			if note != "" {
-				r.Error += "（" + note + "）"
-			}
-			// 权限不足类错误重试无用：结构上已知，直接定类，不走文本启发式
-			r.ErrorKind = types.ErrPermission
+		if approved, cancelled := e.awaitApproval(ctx, &r, taskID, step, dec); cancelled || !approved {
 			return finalize()
 		}
-	} else if dec.Risk != "low" && e.Gate != nil {
-		// 全量审计（P5-2 / 站点 F3）：自动放行的**副作用动作**也要留痕。
-		// 只读不记——它们没有副作用，记下来只是噪音；审计的对象是"谁动了什么"。
-		e.Gate.Record(safety.AuditEntry{
-			Tool: step.Tool, Risk: dec.Risk, Action: "auto", Reason: dec.Reason,
-		})
 	}
 
 	// 引用前序步骤结果（此时依赖均已完成，读取安全）
@@ -688,6 +702,32 @@ func (e *Executor) runStep(ctx context.Context, state *execState, step types.Ste
 		return finalize()
 	}
 	r.FinalArgs = args
+
+	// ---------- 派发前重算裁决 ----------
+	// 上面那次裁决看的是计划里的字面值：`$ref:s1.output.path` 不是绝对路径，门控会按
+	// "相对路径在工作区内"放过它，而真值可能指向信任范围外。所以在真正派发之前，
+	// 用**要执行的那份参数**再裁一次。只收紧不放宽：先前已经问过人的不重复问
+	// （人已经看过这一步），先前自动放行而新裁决要求批准的，重新问一次——
+	// 这次的 Reason 里是真值，用户在卡片上看到的是实际会动的路径。
+	final := dec
+	if hasRefs(step.Args) {
+		final = e.adjudicate(tool, args, preApproved, true)
+		if final.NeedApproval && !dec.NeedApproval {
+			if approved, cancelled := e.awaitApproval(ctx, &r, taskID, step, final); cancelled || !approved {
+				return finalize()
+			}
+		}
+	}
+	if !dec.NeedApproval && !final.NeedApproval && final.Risk != "low" && e.Gate != nil {
+		// 全量审计（P5-2 / 站点 F3）：自动放行的**副作用动作**也要留痕。
+		// 只读不记——它们没有副作用，记下来只是噪音；审计的对象是"谁动了什么"。
+		//
+		// 记的是**重算之后**的风险与理由：写"路径 X 在信任范围内"而 X 是个占位符，
+		// 台账就在替一次没做过的检查作证——比不记更坏，因为它读起来像查过了。
+		e.Gate.Record(safety.AuditEntry{
+			Tool: step.Tool, Risk: final.Risk, Action: "auto", Reason: final.Reason,
+		})
+	}
 
 	// ---------- 低价值调用治理 ----------
 	// 同一任务里重复的只读调用直接复用结果；已失败过的相同调用不再重试第二遍。
@@ -901,6 +941,33 @@ func exactRef(s string) (string, bool) {
 		return s[len("$ref:"):], true
 	}
 	return "", false
+}
+
+// hasRefs 判断参数里是否还带着步骤引用（`$ref:` 整值 / `{ref:}` 插值）。
+//
+// 只用来决定"替换之后要不要重算裁决"：不带引用时两次裁决的输入完全相同，
+// 重算只是白跑一次门控（以及一次审核模型调用，那个是要花钱的）。
+func hasRefs(v any) bool {
+	switch t := v.(type) {
+	case string:
+		if _, ok := exactRef(t); ok {
+			return true
+		}
+		return strings.Contains(t, "{ref:")
+	case map[string]any:
+		for _, item := range t {
+			if hasRefs(item) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range t {
+			if hasRefs(item) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // splitRef 拆出步骤 ID 与字段路径。

@@ -6,4 +6,4 @@
 package buildinfo
 
 // Version 应用版本号。发布时只改这一行（各接入层引用它，不再写字面量）。
-const Version = "0.1.0"
+const Version = "1.0.0"

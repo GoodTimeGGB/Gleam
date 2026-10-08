@@ -465,6 +465,72 @@ body::before {
   .quick-launch { grid-template-columns: 1fr; }
 }
 
+/* ============ 工作台：候补目标 ============
+   这一屏由 renderCues 决定露不露：没话说就整块收起，所以这里不准备「空面板」的样子。
+   语气上要压住快捷启动那张横排卡片之下——它提的是"你可能想动一下"，不是"现在就点我"。 */
+.cue-deck {
+  margin: 0 0 var(--space-5); padding: 16px 18px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
+  background: var(--color-card);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035), var(--shadow-1);
+}
+.cue-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.cue-heading { display: grid; gap: 5px; }
+.cue-title { margin: 0; font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.015em; }
+.cue-scope { margin: 7px 0 0; max-width: 82ch; color: var(--color-fg-faint); font-size: var(--fs-xs); line-height: 1.55; }
+.cue-list { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); }
+.cue-card {
+  padding: 12px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle); border-left: 2px solid rgba(var(--accent-rgb) / 0.5);
+  background: var(--glass-highlight);
+  transition: border-color var(--dur-base) ease, background var(--dur-base) ease;
+}
+.cue-card:hover { border-color: var(--color-border-subtle); border-left-color: rgba(var(--accent-rgb) / 0.75); }
+.cue-card-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.cue-badge {
+  padding: 2px 7px; border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb) / 0.10); color: var(--color-accent);
+  font: 500 10.5px/1.6 var(--font-mono); letter-spacing: 0.02em;
+}
+.cue-card-title { margin: 0; font-size: var(--fs-sm); font-weight: 600; text-wrap: pretty; }
+.cue-why { margin: 7px 0 0; font-size: var(--fs-xs); color: var(--color-fg-muted); line-height: 1.6; text-wrap: pretty; }
+.cue-evidence {
+  margin: 8px 0 0; padding-left: 15px; display: grid; gap: 3px;
+  font-size: 11px; color: var(--color-fg-faint); line-height: 1.5; font-variant-numeric: tabular-nums;
+}
+/* 采纳就是填这一句，所以它必须看得见全貌：虚线框说"这是要进输入区的话"，不是说明文字。 */
+.cue-goal {
+  margin: 10px 0 0; padding: 9px 11px; border-radius: var(--radius-sm);
+  border: 1px dashed rgba(var(--accent-rgb) / 0.28); background: rgba(var(--accent-rgb) / 0.045);
+  font-size: var(--fs-xs); line-height: 1.65; color: var(--color-fg-muted); text-wrap: pretty;
+}
+.cue-actions { display: flex; align-items: center; gap: var(--space-2); margin-top: 11px; }
+.cue-seen { margin-left: auto; font-size: 11px; color: var(--color-fg-faint); font-variant-numeric: tabular-nums; }
+.cue-empty { margin: var(--space-3) 0 0; font-size: var(--fs-sm); color: var(--color-fg-muted); }
+.cue-tail { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--color-fg-faint); }
+.cue-note { margin: 8px 0 0; font-size: var(--fs-xs); color: var(--color-warning); line-height: 1.55; }
+.cue-scope:empty, .cue-tail:empty, .cue-note:empty { display: none; }
+.cue-restore { margin-top: var(--space-3); padding-top: 10px; border-top: 1px solid var(--color-border-subtle); }
+.cue-restore-toggle {
+  padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--color-fg-faint); font: inherit; font-size: var(--fs-xs);
+  transition: color var(--dur-fast) ease;
+}
+.cue-restore-toggle:hover { color: var(--color-fg-muted); }
+.cue-restore-list { display: grid; gap: 6px; margin-top: 9px; }
+.cue-restored { display: flex; align-items: center; gap: var(--space-2); font-size: var(--fs-xs); color: var(--color-fg-muted); }
+.cue-restored-reason {
+  flex: 0 0 auto; padding: 1px 6px; border-radius: var(--radius-sm);
+  background: var(--glass-highlight); color: var(--color-fg-faint);
+}
+.cue-restored-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cue-restored .btn-sm { margin-left: auto; }
+@media (max-width: 760px) {
+  .cue-deck { padding: 14px; }
+  .cue-actions { flex-wrap: wrap; }
+  .cue-seen { margin-left: 0; flex-basis: 100%; }
+}
+
 /* ============ 组件：卡片 ============ */
 .card {
   background: var(--color-card);

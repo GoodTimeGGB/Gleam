@@ -1755,6 +1755,9 @@ function connectSSE() {
     const r = sseData(e);
     if (!r) return;
     LiveRail.result(r);
+    // 候补目标跟着终态重算：后端刻意把「落盘」排在「广播」前面，此刻归档一定已经在盘上。
+    // 不接这一条，用户刚修好的那个反复失败还会挂在卡上，直到他刷新页面。
+    loadCues().catch(() => {});
     // 目标视图里已有这张卡（如定时任务触发）时必须先定格它——
     // 否则会话态下 completed 被对话分支接走，卡片会永远停在"运行中"
     if (tasks.has(r.task_id)) applyResult(r.task_id, r);
@@ -1781,6 +1784,7 @@ function connectSSE() {
     const body = state && d.line && d.line.startsWith(state + '：') ? d.line.slice(state.length + 1) : d.line;
     toast(`${d.title || '后台任务'}${body ? '：' + body : ''}`, ok ? 'success' : 'error', 8000);
     loadSchedules().catch(() => {});
+    loadCues().catch(() => {});
     if (!viewingConvo) loadGoals().catch(() => {}); // 会话视图里别把用户踢回工作台
   });
   es.addEventListener('suggestion', async (e) => {
@@ -2368,6 +2372,147 @@ function connectionRow(r) {
     ${stats}${alert}
   </div>`;
 }
+
+/* ---------- 候补目标 ---------- */
+// 这一屏是「主动性」在界面上的唯一落点。口径全在后端（线索、阈值、文案、配额），
+// 这里只做呈现和两个动作。为什么动作只有两个：
+// **采纳不等于执行**——填进输入区之后，这句话要不要说、怎么说，仍然是用户在回车键上
+// 做的决定。前端要是顺手把 goal 直接提交，「只提议不执行」就只剩 Go 注释里成立了。
+//
+// 同理，这里不判"该提什么"、不算严重度、不译枚举：signal_text / reason_text 由后端带过来，
+// 界面自己 map 一次就是第二个 owner，漂移方向跟连接台账那条一样。
+let cueGoals = new Map(); // id -> 填进输入区的那句话（长文本不放 data-*，那是给人看的属性）
+
+async function loadCues() {
+  const deck = $('#cu-deck');
+  if (!deck) return;
+  try {
+    renderCues(await api('GET', '/api/cues'));
+  } catch (err) {
+    // 读不动就明说，并清掉上一轮的卡片：那些卡可能早已被处置，留着就是拿旧账当现状。
+    cueGoals = new Map();
+    deck.hidden = false;
+    $('#cu-scope').textContent = `候补目标读不出来：${err.message}`;
+    $('#cu-list').innerHTML = '';
+    $('#cu-tail').textContent = '';
+    $('#cu-note').textContent = '';
+    $('#cu-restore').hidden = true;
+  }
+}
+
+function renderCues(led) {
+  const deck = $('#cu-deck');
+  const rows = led.rows || [];
+  const sup = led.suppressed || [];
+  // 什么时候露出这一块：有卡要提、有已按下的要能撤销、有历史可交代（空态也是交代），
+  // 或后端有话要说（归档读不动、处置记录没写下去）。三者都没有就整块收起——
+  // 一个永远空着的「建议」面板比没有更吵，而且它会在用户每次升级后被当成坏了的东西。
+  const silent = !rows.length && !sup.length && !led.scanned && !led.note;
+  deck.hidden = silent;
+  if (silent) return;
+
+  $('#cu-scope').textContent = led.coverage || '';
+  $('#cu-note').textContent = led.note || '';
+  $('#cu-tail').textContent = led.truncated || '';
+  cueGoals = new Map(rows.map((r) => [r.id, r.goal || '']));
+  $('#cu-list').innerHTML = rows.length
+    ? rows.map(cueCard).join('')
+    : '<p class="cue-empty">最近的任务里没有反复出问题的地方，这一轮没什么可提的。</p>';
+
+  const box = $('#cu-restore');
+  box.hidden = !sup.length;
+  $('#cu-restore-count').textContent = String(sup.length);
+  $('#cu-restore-list').innerHTML = sup.map(cueRestoredRow).join('');
+  if (!sup.length) {
+    $('#cu-restore-list').hidden = true;
+    $('#cu-restore-toggle').setAttribute('aria-expanded', 'false');
+  }
+}
+
+function cueCard(r) {
+  const ev = (r.evidence || []).map((s) => `<li>${esc(s)}</li>`).join('');
+  const seen = r.last_seen ? `<span class="cue-seen">最近一次 ${esc(r.last_seen)}</span>` : '';
+  return `<article class="cue-card" data-id="${esc(r.id)}">
+    <div class="cue-card-head">
+      <span class="cue-badge">${esc(r.signal_text || r.signal)}</span>
+      <h3 class="cue-card-title">${esc(r.title)}</h3>
+    </div>
+    <p class="cue-why">${esc(r.why)}</p>
+    ${ev ? `<ul class="cue-evidence">${ev}</ul>` : ''}
+    <p class="cue-goal" title="采纳时填进输入区的就是这句话">${esc(r.goal)}</p>
+    <div class="cue-actions">
+      <button class="btn btn-primary btn-sm" type="button" data-act="adopt"
+        title="把这句话填进下方输入区——按回车才会开始跑">填进输入区</button>
+      <button class="btn btn-secondary btn-sm" type="button" data-act="dismiss"
+        title="按下去之后不再提这一条，可以在下面的「已按下」里撤销">别再提</button>
+      ${seen}
+    </div>
+  </article>`;
+}
+
+function cueRestoredRow(s) {
+  return `<div class="cue-restored" data-fp="${esc(s.fingerprint)}">
+    <span class="cue-restored-reason">${esc(s.reason_text || s.reason)}</span>
+    <span class="cue-restored-label">${esc(s.title || s.goal || s.fingerprint)}</span>
+    <button class="btn btn-ghost btn-sm" type="button" data-act="unsuppress">撤销</button>
+  </div>`;
+}
+
+// 采纳：填输入区，不提交。这里复用快捷卡的同一条路（同一个输入区、同一个 autoResize 与 focus），
+// 于是"采纳"和"我自己打了一句"在后续流程里没有任何区别——都还要那一次回车。
+function adoptCue(id) {
+  const goal = cueGoals.get(id) || '';
+  if (!goal) {
+    toast('这张卡已经不成立了（历史变了），重新拉一次', 'warning');
+    loadCues().catch(() => {});
+    return;
+  }
+  goalInput.value = goal;
+  autoResize();
+  goalInput.focus();
+  toast('已填进输入区。还没有开始跑——按回车才会提交', 'info', 6000);
+  api('POST', `/api/cues/${encodeURIComponent(id)}/adopt`, {}).catch((err) => {
+    // 记不上状态不等于这次采纳失败：话已经在输入区了。要说的是"它还会再来"。
+    toast(`这句话已填好，但没能记下「已采纳」：${err.message}`, 'warning', 6000);
+  }).finally(() => loadCues().catch(() => {}));
+}
+
+function dismissCue(id) {
+  api('POST', `/api/cues/${encodeURIComponent(id)}/dismiss`, {}).catch((err) => {
+    if (err.status === 404) toast('这张卡已经不成立了，重新拉一次', 'warning');
+    else toast(`记下「别再提」失败：${err.message}`, 'error');
+  }).finally(() => loadCues().catch(() => {}));
+}
+
+function unsuppressCue(fp) {
+  api('POST', '/api/cues/unsuppress', { fingerprint: fp })
+    .catch((err) => toast(`撤销失败：${err.message}`, 'error'))
+    .finally(() => loadCues().catch(() => {}));
+}
+
+$('#cu-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-act]');
+  const card = e.target.closest('.cue-card');
+  if (!btn || !card) return;
+  const id = card.dataset.id;
+  if (btn.dataset.act === 'adopt') adoptCue(id);
+  else if (btn.dataset.act === 'dismiss') dismissCue(id);
+});
+
+$('#cu-restore-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-act="unsuppress"]');
+  const row = e.target.closest('.cue-restored');
+  if (!btn || !row) return;
+  unsuppressCue(row.dataset.fp);
+});
+
+$('#cu-restore-toggle').addEventListener('click', () => {
+  const list = $('#cu-restore-list');
+  list.hidden = !list.hidden;
+  $('#cu-restore-toggle').setAttribute('aria-expanded', String(!list.hidden));
+});
+
+$('#cu-refresh').addEventListener('click', () => loadCues().catch(() => {}));
 
 function fillSettingsFields(s) {
   $('#set-name').value = s.persona?.name || 'Gleam';
@@ -3753,6 +3898,9 @@ function setThreadMode(on) {
   $('#goal-filters').parentElement.style.display = on ? 'none' : '';
   document.querySelector('.command-deck').style.display = on ? 'none' : '';
   document.querySelector('.quick-launch').style.display = on ? 'none' : '';
+  // 候补目标属于「开一个新的」那一屏：读会话时把这一坨收起，否则它和整页概览抢位置。
+  // 用 display 而不是 hidden——`hidden` 归 renderCues 管（"有没有话要说"），两个开关各管一件事。
+  document.querySelector('.cue-deck').style.display = on ? 'none' : '';
 }
 
 function resetFeedToEmpty(title, desc) {
@@ -5478,6 +5626,7 @@ api('GET', '/api/info').then((info) => { const v = $('#me-version'); if (v && in
   loadGoStatus();
   loadRoles();
   loadContext(); // 输入区的水位条：首屏就得有数，否则那一格永远停在「—」
+  loadCues();    // 候补目标同理：它只在有话说时露出来，首屏不拉就没人知道它存在
   try { const s = await api('GET', '/api/settings'); if (s.safety && s.safety.mode) _doSetPerm(s.safety.mode, false); syncRuntimeState(s); } catch {}
   // 现场栏的「定时任务」不等用户打开定时任务视图才有数：这一列的价值就是常驻
   api('GET', '/api/schedules').then((r) => LiveRail.schedules((r.jobs || []).length)).catch(() => {});

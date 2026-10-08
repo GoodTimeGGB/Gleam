@@ -98,6 +98,12 @@ func (s *Server) Handler() http.Handler {
 	// 「连接与出网」台账：本机每条常驻边界的爆炸半径（只读派生，不发任何探测请求）
 	mux.HandleFunc("GET /api/connections", s.handleConnections)
 
+	// 候补目标：从本机任务归档浮出来的「你可能想动一下」。只提议，不执行。
+	mux.HandleFunc("GET /api/cues", s.handleCues)
+	mux.HandleFunc("POST /api/cues/unsuppress", s.handleCueUnsuppress)
+	mux.HandleFunc("POST /api/cues/{id}/dismiss", s.handleCueDismiss)
+	mux.HandleFunc("POST /api/cues/{id}/adopt", s.handleCueAdopt)
+
 	// 设置与上下文
 	mux.HandleFunc("GET /api/settings", s.handleSettingsGet)
 	mux.HandleFunc("POST /api/settings", s.handleSettingsSave)

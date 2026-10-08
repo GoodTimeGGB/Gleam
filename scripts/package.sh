@@ -81,6 +81,7 @@ go run scripts/make-zip.go "$DIST/Gleam-release-$DATE.zip" \
   "$DIST/Gleam-macOS-AppleSilicon-arm64-$DATE" \
   "$DIST/Gleam-Linux-x86_64-$DATE" \
   README.md \
+  LICENSE \
   "pack/CHANGELOG.md=CHANGELOG.md" \
   "configs/config.yaml=config.example.yaml" \
   scripts/install.ps1 \

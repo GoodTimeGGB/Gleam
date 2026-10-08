@@ -190,7 +190,10 @@ MUTATIONS = [
         "file": "cmd/gleam/replay.go",
         # 回放落进 tasks/：质量统计（完成率、用户重试率、首次通过率）的分母
         # 就被复盘动作本身污染了。
-        "edits": [('\tdir := filepath.Join(dataDir, "replays")\n', '\tdir := filepath.Join(dataDir, "tasks")\n')],
+        # 锚点跟着源码走：落盘目录早先写在 saveReplay 里，后来收进 replayFile（名字规则与
+        # 任务归档共用 SafeTaskName），所以这里指的是那一行 return。
+        "edits": [('\treturn filepath.Join(dataDir, "replays", id+".json")\n',
+                   '\treturn filepath.Join(dataDir, "tasks", id+".json")\n')],
         "targets": [CMD, SMOKE],
     },
     {

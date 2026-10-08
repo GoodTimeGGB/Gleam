@@ -24,6 +24,7 @@ harness 的 target 命令不要求是 go test，判据只要是 exit non-zero �
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 
@@ -32,20 +33,43 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _utf8  # noqa: F401  # 本脚本自己也在印中文判定行
 from _harness import run_batch  # noqa: E402
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def owner_version() -> str:
+    """版本号从 owner（`internal/buildinfo`）读，**不在这里再抄一份**。
+
+    这一批打的就是"抄字面量"这件事，自己抄一份的话后果很具体：升版本那天，
+    注进去的旧号不再等于 owner，闸门照着新号扫前端，什么都扫不到——
+    前两条变异会**静默存活**，而批次看起来还是跑过了。（1.0.0 那次真的踩到：
+    批次里写死的 `v0.1.0` 一夜之间变成了一条打不中任何东西的变异。）
+    """
+    path = os.path.join(ROOT, "scripts", "check-version-owner.py")
+    spec = importlib.util.spec_from_file_location("check_version_owner", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    version = mod.app_version(ROOT)
+    if not version:
+        raise SystemExit("读不到 internal/buildinfo 的 Version：批次 H 的判据已失效，先修它")
+    return version
+
+
+VERSION = owner_version()
+
 CHECK = ("version-owner", "python scripts/check-version-owner.py .")
 
 MUTATIONS = [
     {
         "name": "HTML 占位退回写死的版本号（升版本时这一处就会永远停在旧号）",
         "file": "internal/webui/static/index.html",
-        "edits": [('id="me-version">—', 'id="me-version">v0.1.0')],
+        "edits": [('id="me-version">—', 'id="me-version">v' + VERSION)],
         "targets": [CHECK],
     },
     {
         "name": "JS 对 /api/info 的取值退回字面量兜底",
         "file": "internal/webui/static/app.js",
         "edits": [("const ver = info.version ? 'v' + info.version : '未知';",
-                   "const ver = 'v' + (info.version || '0.1.0');")],
+                   "const ver = 'v' + (info.version || '" + VERSION + "');")],
         "targets": [CHECK],
     },
     {

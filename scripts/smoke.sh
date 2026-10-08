@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # Gleam 冒烟自测：驱动发布二进制走一遍完整 JSON-RPC 目标模式会话。
 #
-# **这个脚本必须真的会失败。** 下面两条注释都有来历，别再改回去：
+# **这个脚本必须真的会失败。** 下面三条注释都有来历，别再改回去：
 #
 #   ① `set -e` 对 `A && B` 形式的失败**不生效**——bash 只对 `&&`/`||` 列表里
 #      「最后一个 && 之后的那条」生效。所以 `curl … && echo "✓"` 在检查失败时
 #      既不报错也不退出，脚本照样打印「全部通过」。**闸门永远不会响**，比没有闸门更坏：
 #      它给出的是"已验证"的错觉。
 #   ② `grep -o … | head -1` 恒为 0（head 总是成功），这种写法等于没写检查。
+#   ③ `curl … | grep -q` 在**大响应**上会偶发红：`grep -q` 一命中就退出，管道读端随之关闭，
+#      而 curl 还没写完剩下的正文 → 写失败、非零退出；`set -o pipefail` 把它算成整条管道失败，
+#      于是"标记明明在"却报 ✗。78KB 的首页实测 20 次里错 3 次（15%），
+#      而"先取正文、再用 `[[ … == *子串* ]]` 比"是 20/20。小响应一次就写进管道缓冲，中不了；
+#      但"多大算小"取决于管道缓冲，所以这里的口径是**取正文再比**，不是"响应够小就没事"。
 #
 # 因此：所有检查走 ok/bad 计数，结尾按失败数决定退出码；不用 `set -e`，
 # 让"哪一条失败了"由计数说清，而不是让 shell 悄悄退出。
@@ -78,7 +83,7 @@ WS2="$TMP/ws2"; mkdir -p "$WS2" || exit 1
 WS2C=$(slash "$WS2")
 
 OUT="$TMP/session.out"
-# wait_out：等会话输出里出现某个标记再继续。
+# wait_out：等某个输出文件里出现标记再继续（默认是会话输出 $OUT，也可指定 webui.out）。
 #
 # 为什么不用固定 `sleep 2`：本机每次进程创建要 1.5~2.7 秒（见 docs/known-limits.md），
 # 一次目标跑完的时间**不是常数**，固定睡眠在慢机器上会把后面的 `shutdown` 送到任务跑完之前，
@@ -86,9 +91,9 @@ OUT="$TMP/session.out"
 # 而"会被忽略的闸门"等于没有闸门。等得到就走，等不到（20 秒）也照样往下跑，
 # 让**具体的断言**去报哪一条没过。
 wait_out() {
-  local pat="$1" i
+  local pat="$1" file="${2:-$OUT}" i
   for i in $(seq 1 80); do
-    grep -q -- "$pat" "$OUT" 2>/dev/null && return 0
+    grep -q -- "$pat" "$file" 2>/dev/null && return 0
     sleep 0.25
   done
   return 1
@@ -132,6 +137,12 @@ grep -q 'smoke-job' "$OUT" && ok "schedule/create + list" || bad "schedule/creat
 
 # ---------- Web UI 冒烟 ----------
 PORT=8791
+# page_has：首页正文里有没有这个子串。**别改回 `curl … | grep -q`**，理由见文件头 ③。
+page_has() {
+  local body
+  body=$(curl -sf "http://127.0.0.1:$PORT/") || return 1
+  [[ "$body" == *"$1"* ]]
+}
 # GLEAM_NO_SYS_NOTIFY=1：冒烟会真的触发定时任务，不禁用就会在开发机上弹系统通知。
 # 禁用**不是**静默丢弃——待发内容会打到 stderr（webui.out），所以"通知到底发了没有"
 # 仍然可断言。这条断言正是本批 P0 的端到端出口：判据对但线没接，本仓库栽过四次。
@@ -141,7 +152,7 @@ trap 'kill "${WEBPID:-}" 2>/dev/null || true' EXIT
 sleep 1.5
 
 curl -sf "http://127.0.0.1:$PORT/api/info" | grep -q '"name":"gleam"' && ok "WebUI /api/info" || bad "WebUI /api/info"
-curl -sf "http://127.0.0.1:$PORT/" | grep -q "Gleam" && ok "WebUI 首页渲染" || bad "WebUI 首页渲染"
+page_has "Gleam" && ok "WebUI 首页渲染" || bad "WebUI 首页渲染"
 curl -sf -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/assets/app.js" | grep -q 200 && ok "WebUI 静态资源" || bad "WebUI 静态资源"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/heartbeat" -o /dev/null -w "%{http_code}" | grep -q 200 && ok "WebUI 心跳 /api/heartbeat" || bad "WebUI 心跳 /api/heartbeat"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/hooks/smoke-job" | grep -q '"triggered":true' && ok "WebUI HTTP 回调触发 /api/hooks/smoke-job" || bad "WebUI HTTP 回调触发 /api/hooks/smoke-job"
@@ -170,14 +181,16 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$PORT/ap
 curl -sf -X POST "http://127.0.0.1:$PORT/api/schedules/notify-job/notify" -H "Content-Type: application/json" \
   -d '{"notify":"always"}' >/dev/null
 curl -sf -X POST "http://127.0.0.1:$PORT/api/hooks/notify-job" >/dev/null
-sleep 3
+# 轮询到通知真的落进日志，而不是写死 `sleep 3`（理由见 wait_out 那段注释）。
+# 这条是本批的核心断言，它偶发变红的代价是"端到端送达"这句话失去分量。
+wait_out "系统通知（已禁用，仅打印）" "$TMP/webui.out"
 grep -q "系统通知（已禁用，仅打印）" "$TMP/webui.out" && ok "定时任务结果送达（通知路径真的跑了）" || bad "定时任务结果送达（通知路径真的跑了）"
 grep -q "定时任务「notify-job」" "$TMP/webui.out" && ok "通知里点明了是哪个任务" || bad "通知里点明了是哪个任务"
 curl -sf "http://127.0.0.1:$PORT/api/settings" | grep -q '"persona"' && ok "设置读取 /api/settings" || bad "设置读取 /api/settings"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/settings" -H "Content-Type: application/json" -d '{"persona":{"style":"gentle"},"agent":{"step_retries":2}}' | grep -q '"style":"gentle"' && ok "设置保存并热生效" || bad "设置保存并热生效"
 grep -q "style: gentle" "$DATA/settings.yaml" && ok "设置覆盖层已持久化 settings.yaml" || bad "设置覆盖层已持久化 settings.yaml"
 curl -sf "http://127.0.0.1:$PORT/api/context" | grep -q '"short_turns"' && ok "上下文状态 /api/context" || bad "上下文状态 /api/context"
-curl -sf "http://127.0.0.1:$PORT/" | grep -q "view-settings" && ok "设置视图已内嵌首页" || bad "设置视图已内嵌首页"
+page_has "view-settings" && ok "设置视图已内嵌首页" || bad "设置视图已内嵌首页"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/workspace" -H "Content-Type: application/json" -d "{\"path\":\"$WS2C\"}" | grep -q '"workspace"' && ok "工作区切换 /api/workspace" || bad "工作区切换 /api/workspace"
 grep -q "ws2" "$DATA/settings.yaml" && ok "工作区切换已持久化（切到新目录 ws2）" || bad "工作区切换已持久化（切到新目录 ws2）"
 curl -sf "http://127.0.0.1:$PORT/api/fs?path=$WSC" | grep -q '"dirs"' && ok "文件夹浏览 /api/fs" || bad "文件夹浏览 /api/fs"
@@ -188,7 +201,7 @@ grep -q "name: smoke-mcp" "$DATA/settings.yaml" && ok "MCP 配置已持久化到
 curl -sf -X DELETE "http://127.0.0.1:$PORT/api/mcp/smoke-mcp" | grep -q '"name":"smoke-mcp"' && ok "MCP 卸载" || bad "MCP 卸载"
 curl -sf "http://127.0.0.1:$PORT/api/market/skills" | grep -q 'quick-note' && ok "技能市场目录" || bad "技能市场目录"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/market/skills/install" -H "Content-Type: application/json" -d '{"name":"quick-note"}' | grep -q '"installed":true' && ok "技能市场一键安装" || bad "技能市场一键安装"
-curl -sf "http://127.0.0.1:$PORT/" | grep -q "view-market" && ok "市场视图已内嵌首页" || bad "市场视图已内嵌首页"
+page_has "view-market" && ok "市场视图已内嵌首页" || bad "市场视图已内嵌首页"
 TASK=$(curl -sf -X POST "http://127.0.0.1:$PORT/api/goals" -H "Content-Type: application/json" -d '{"goal":"创建 smoke.txt 并写入 Hello Gleam","mode":"auto"}' | grep -o '"task_id":"[a-f0-9]*"' | cut -d'"' -f4)
 [ -n "$TASK" ] && ok "WebUI 目标提交 task_id=$TASK" || bad "WebUI 目标提交"
 ST=""

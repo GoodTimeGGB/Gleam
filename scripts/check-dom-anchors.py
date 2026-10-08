@@ -10,21 +10,24 @@
 **三条判据**（前两条方向相反，第三条管的是 JS 自己内部的接线）：
 1. 正向（全仓）：app.js 里 `$('#x')` / `getElementById('x')` / `querySelector('#x')`
    引用的 id，必须在 index.html 或 app.js 自己的模板字符串里被定义。
-2. 反向（管现场栏 `rail-*` / `ro-*`、输入区就地控件 `cp-*`、预览面板 `bp-*`
-   与连接台账 `cx-*`）：
+2. 反向（管现场栏 `rail-*` / `ro-*`、输入区就地控件 `cp-*`、预览面板 `bp-*`、
+   连接台账 `cx-*` 与候补目标 `cu-*`）：
    这些锚点必须被 app.js
    引用，或被 HTML 的
    `aria-controls` / `aria-labelledby` / `aria-describedby` / `for` 指到（那些是给
    辅助技术的，本来就不该有 JS 生产者）。
    **为什么不全仓反向**：index.html 里有 38 个 id 是合法的无人引用（视图容器、CSS 钩子、
    aria 目标），全查就得维护一份白名单——白名单会漂，漂了之后这条判据只是在点头。
-   这几片是新加的、一共就这三小片，反向在这里查得住，也比那里更值得查。
+   这几片是新加的、每片就几个格子，反向在这里查得住，也比那里更值得查。
    `cp-` 是批次 F12 起加的：水位条与模型芯片都把占位写在 HTML 里（「—」「模型」），
    少接一条线就是那一格停着不动、测试全绿。
    `bp-` 是批次 F13 起加的：面板里「上一页 / 下一页」的可用态全由 JS 算，HTML 先画出来
    而 JS 没接，就是一个按下去什么都不发生的按钮。
    `cx-` 是批次 F16 起加的：连接与出网台账的表体与范围文案全由 JS 填，HTML 里只有那个
    「—」。这一屏是用户判断「我到底允许了什么」的唯一入口，空着比缺这一屏更糟。
+   `cu-` 是批次 F17 起加的：候补目标整块的显隐、卡片、配额尾句与「已按下」列表全由 JS 算。
+   它比前几片更需要反向——这一屏的两个按钮（填进输入区 / 别再提）是**唯一**把"主动性"
+   交回给人的地方，HTML 画了壳而 JS 没接，用户看到的就是三张不能点的卡片。
 3. JS 内部（批次 F14 起加）：app.js 里 `function x() {}` 定义出来的函数，必须被按名字
    引用至少一次（调用、当回调传出去、放进对象字面量都算）。
    **为什么单加这一条**：`renderChanges` 就是这么漏过去的——函数写好了、注释也写了、
@@ -39,11 +42,12 @@
 **自我失效的防线**：读不到两个文件之一就失败；现场栏一个锚点都找不到也失败——
 宁可红着，也不给"已通过"的错觉。
 
-**负例控制自带**：`--self-test` 用真文本现造五份坏文本（JS 引用了不存在的锚点 /
-面板格子、输入区格子、预览面板按钮没人接、函数没有任何调用方），断言本脚本会把它们判红。
+**负例控制自带**：`--self-test` 用真文本现造七份坏文本（JS 引用了不存在的锚点 /
+面板格子、输入区格子、预览面板按钮没人接、台账格子没人接、候补目标格子没人接、
+函数没有任何调用方），断言本脚本会把它们判红。
 
 用法：python scripts/check-dom-anchors.py [--self-test] [仓库根目录]
-退出码：0 = 三处都接上（`--self-test` 时：五份负例都被拦住）；1 = 否则。
+退出码：0 = 三处都接上（`--self-test` 时：每份负例都被拦住）；1 = 否则。
 """
 import io
 import os
@@ -56,8 +60,8 @@ APP_JS = os.path.join("internal", "webui", "static", "app.js")
 INDEX_HTML = os.path.join("internal", "webui", "static", "index.html")
 
 # 反向判据罩住的锚点前缀：rail-* 现场栏结构、ro-* 读数格子、cp-* 输入区就地控件、
-# bp-* 浏览器预览面板（批次 F13）、cx-* 连接与出网台账（批次 F16）
-SIDE_PREFIX = ("rail-", "ro-", "cp-", "bp-", "cx-")
+# bp-* 浏览器预览面板（批次 F13）、cx-* 连接与出网台账（批次 F16）、cu-* 候补目标（批次 F17）
+SIDE_PREFIX = ("rail-", "ro-", "cp-", "bp-", "cx-", "cu-")
 # HTML 里指向 id 的无障碍属性（这些算"有人接"，只是接的人不是 JS）
 ARIA_TO = ("aria-controls", "aria-labelledby", "aria-describedby", "for")
 
@@ -147,15 +151,15 @@ def judge(js_text, html_text, label_js, label_html, say):
         rc = 1
 
     if rc == 0:
-        say("  %d 处 JS 锚点引用全部有定义；现场栏、输入区与预览面板 %d 个锚点全部有人接；%d 个函数全部有人调用"
+        say("  %d 处 JS 锚点引用全部有定义；现场栏、输入区、预览面板、台账与候补目标 %d 个锚点全部有人接；%d 个函数全部有人调用"
             % (len(refs), len(side_ids), len(FUNC_RE.findall(strip_comments(js_text)))))
     return rc
 
 
 def self_test(js_text, html_text) -> int:
-    """拿真文本现造五份坏文本，断言判据会把它们拦住。"""
+    """拿真文本现造七份坏文本，断言判据会把它们拦住。"""
     if not any(i.startswith(SIDE_PREFIX) for i in ID_ATTR_RE.findall(html_text)):
-        print("self-test：真文本里没有现场栏/输入区/预览面板锚点，负例无从构造")
+        print("self-test：真文本里没有罩住的锚点前缀，负例无从构造")
         return 1
     cases = [
         ("JS 引用了不存在的锚点", js_text + "\nconst probe = $('#rail-anchor-that-is-gone');\n", html_text),
@@ -165,6 +169,9 @@ def self_test(js_text, html_text) -> int:
         # 台账的表体与范围文案都是 JS 填的：HTML 先画出空壳、app.js 没接，
         # 这一屏就永远是那个「—」——而它恰恰是用户判断"我有没有被交代清楚"的那一屏。
         ("台账格子没人接", js_text, html_text.replace('<div id="cx-conn-list"', '<p id="cx-orphan">—</p>\n<div id="cx-conn-list"', 1)),
+        # 候补目标整块的显隐、卡片、尾句都是 JS 算的：HTML 先画壳而 app.js 没接，
+        # 用户看到的就是几张按不动的卡片——那两个按钮是把主动性交回给人的唯一出口。
+        ("候补目标格子没人接", js_text, html_text.replace('<div class="cue-list" id="cu-list">', '<p id="cu-orphan">—</p>\n<div class="cue-list" id="cu-list">', 1)),
         # 只加一个函数定义、外面一句调用都不给。真出过这一类：`renderChanges` 写好了、
         # 注释也写了，卡片上那个槽位却永远是空的——因为没人调它。
         ("函数没有任何调用方", js_text + "\nfunction renderAnchorThatNobodyCalls(t) { return t; }\n", html_text),

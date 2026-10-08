@@ -144,6 +144,10 @@ text_layer() {
   # 文案里带 markdown 强调（那张表走 textContent，星号原样上界面）——四种都会让这张表说的
   # "全部"变成假话，而界面看着还是完整的。判据自带负例与干扰文本。
   "$PY" scripts/check-egress-owner.py --self-test . || return 1
+  # 候补目标三处清单必须互相对上：cueSignals 登记了、deriveCues 派生了、cueSignalText 给了
+  # 人话牌子——少一处就是界面永远不会出现那一类，或那一类裸奔成枚举值。另两条管"提议层不许
+  # 伸手"（这一层没有执行入口）与文案不带 markdown（卡片走 textContent）。判据自带负例。
+  "$PY" scripts/check-cue-owner.py --self-test . || return 1
 }
 
 # ── 第 5 层 · 端到端 ──

@@ -25,8 +25,8 @@
 
 **为什么读源码前先剥注释**：台账的文档注释里会提 `RecordEgress` 这个函数名（它就该提，
 那是在交代留痕在哪）。不剥注释的话，一句注释凭空多出一个"落点"，判据第一天就开始说谎。
-剥注释用一个字符状态机，不是正则——`"https://…"` 里的 `//` 也是斜杠，
-用正则一刀切会把真实调用点连锅端掉，而**漏判的方向是"通过"**。
+剥注释的实现不在本文件——它和 `check-cue-owner.py` 用的是同一件事，住在 `scripts/_gocomment.py`，
+那里说明了为什么必须是字符状态机而不是正则。
 
 **为什么排除 `_test.go`**：测试里的 kind 是造数据用的（`egress_test.go` 拿 `file.write`
 当反例），不是这台机器真会发出去的落点。把它们算进来，反向判据立刻红在一行假账上。
@@ -50,6 +50,7 @@ import os
 import re
 import sys
 
+import _gocomment
 import _utf8  # noqa: F401  # Windows 下 stdout 默认按 GBK 写，中文会变乱码
 
 OWNER_FILE = os.path.join("internal", "agent", "connections.go")
@@ -60,69 +61,8 @@ KINDS_RE = re.compile(r"var\s+egressKinds\s*=\s*\[\]string\{(.*?)\}", re.S)
 STR_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 
-def strip_go_comments(text):
-    """按字符走一遍 Go 源，把注释换成空格（保持行号与列位不变）。
-
-    状态机认三件事：行注释、块注释、字符串（含原始串 ` 与转义 "）。
-    不认字符串的话 `"https://x"` 里的 `//` 会被当成注释，把那行剩下的部分——
-    通常正是真实的那次调用——一起吃掉。
-    """
-    out = []
-    i, n = 0, len(text)
-    state = ""  # "" | line | block | string | raw | rune
-    while i < n:
-        c = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
-        if state == "":
-            if c == "/" and nxt == "/":
-                state = "line"
-                out.append("  ")
-                i += 2
-                continue
-            if c == "/" and nxt == "*":
-                state = "block"
-                out.append("  ")
-                i += 2
-                continue
-            if c == '"':
-                state = "string"
-            elif c == "`":
-                state = "raw"
-            elif c == "'":
-                state = "rune"
-            out.append(c)
-            i += 1
-            continue
-        if state == "line":
-            if c == "\n":
-                state = ""
-                out.append("\n")
-            else:
-                out.append(" ")
-            i += 1
-            continue
-        if state == "block":
-            if c == "*" and nxt == "/":
-                state = ""
-                out.append("  ")
-                i += 2
-                continue
-            out.append("\n" if c == "\n" else " ")
-            i += 1
-            continue
-        # 字符串系：原样保留，只找结束位
-        if c == "\\" and state in ("string", "rune") and nxt:
-            out.append(c)
-            out.append(nxt)
-            i += 2
-            continue
-        closed = (state == "raw" and c == "`") or (state == "string" and c == '"') \
-            or (state == "rune" and c == "'")
-        out.append(c)
-        if closed:
-            state = ""
-        i += 1
-    return "".join(out)
+# 剥注释这件事的 owner 在 scripts/_gocomment.py（两道闸门共用），这里只留一个名字。
+strip_go_comments = _gocomment.strip
 
 
 def first_arg(src, open_paren):

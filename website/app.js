@@ -201,35 +201,30 @@ setChip('organize');
     windows: document.getElementById("dl-tip-windows"),
     "macos-arm": document.getElementById("dl-tip-macos-arm"),
     "macos-intel": document.getElementById("dl-tip-macos-intel"),
+    linux: document.getElementById("dl-tip-linux"),
+  };
+  const show = (key, text) => {
+    const el = tips[key];
+    if (!el) return;
+    el.textContent = text;
+    el.classList.add("dl-tip--show");
   };
 
-  let platform = null;
   let recommended = null;
 
   if (/Windows/.test(ua)) {
-    platform = "windows";
     recommended = document.querySelector('[data-platform="windows"]');
-    if (tips.windows) {
-      tips.windows.textContent = "\u2705 检测到你在使用 Windows，直接下载即可";
-      tips.windows.classList.add("dl-tip--show");
-    }
+    show("windows", "✅ 检测到你在使用 Windows，直接下载即可");
   } else if (/Macintosh|MacIntel/.test(ua)) {
-    // Check Apple Silicon vs Intel: navigator.userAgentData or platform
-    const platform = navigator.platform || "";
-    // M1+ Macs may report "MacIntel" too, but we can try gl.getParameter for GPU
-    // Simplest: if "arm" in ua or platform string includes "ARM"
-    // More reliable: check if platform starts with "Mac" and use a heuristic
-    // For macOS 11+ on Apple Silicon, navigator.platform still reports "MacIntel"
-    // So we highlight both macOS cards but mark arm64 as recommended via a separate approach
+    // Apple Silicon 上 navigator.platform 照样报 "MacIntel"，浏览器侧分不出芯片，
+    // 所以两张卡都给提示，让用户按「关于本机」的芯片字段自己挑。
     recommended = document.querySelector('[data-platform="macos-arm"]');
-    if (tips["macos-arm"]) {
-      tips["macos-arm"].textContent = "\u2705 检测到你在使用 macOS — Apple Silicon (M 系列) 用户请下载此版本";
-      tips["macos-arm"].classList.add("dl-tip--show");
-    }
-    if (tips["macos-intel"]) {
-      tips["macos-intel"].textContent = "Intel 芯片的 Mac 请下载此版本（点左上角 Apple 菜单 → 关于本机 确认）";
-      tips["macos-intel"].classList.add("dl-tip--show");
-    }
+    show("macos-arm", "✅ 检测到你在使用 macOS — Apple Silicon (M 系列) 用户请下载此版本");
+    show("macos-intel", "Intel 芯片的 Mac 请下载此版本（点左上角 Apple 菜单 → 关于本机 确认）");
+  } else if (!/Android/.test(ua) && /Linux|X11/.test(ua)) {
+    // 安卓的 UA 里也带 "Linux"，而这里没有安卓产物：不提示好过指一个跑不起来的文件。
+    recommended = document.querySelector('[data-platform="linux"]');
+    show("linux", "✅ 检测到你在使用 Linux，下载后 chmod +x 即可运行");
   }
 
   // Highlight recommended card

@@ -3,7 +3,7 @@
 **本地优先的桌面 AI 智能体——眼里有活，心里有你。**
 你负责做决定，具体执行交给我。
 
-Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆、有判断、能主动推进工作**的桌面智能体。基于 Go 1.22+ 从零自研，Harness 全部自研、零第三方依赖（`go.mod` 无任何外部包），单文件二进制约 7.5MB。
+Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆、有判断、能主动推进工作**的桌面智能体。基于 Go 1.22+ 从零自研，Harness 全部自研、零第三方依赖（`go.mod` 无任何外部包），单文件二进制约 10MB。
 
 ## 核心能力
 
@@ -82,12 +82,15 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 # 已有 Go，但不在 PATH 中：
 scripts/install.ps1 -GoPath "D:\MyTools\Go"
 
-# 使用预编译二进制，不从源码构建：
+# 使用预编译二进制，不从源码构建（注意：Go 的检测与下载仍会执行，
+# 脚本是「先把工具链备好，再决定要不要构建」；已装 Go 就不会下载）：
 scripts/install.ps1 -SkipBuild
 
 # 独立检测 Go（不安装 Gleam）：
 scripts/go-check.ps1
 ```
+
+> **这一步会联网，跑起来不会**：`install.ps1` 只在**本机找不到 Go** 时从阿里云镜像下载一次工具链（约 80MB）并写入用户级 PATH 与 GOPROXY；Gleam 自身运行不连任何自有服务（要联网的只有你自己配的模型 API，出网落点见 Web UI 安全页的「连接台账」）。「本地优先」说的是**运行期**，不是「安装脚本一个字节都不许下」——想完全不下载，就先自己装好 Go，或用官网的预编译二进制。
 
 ### Web UI 中的 Go 检测
 
@@ -96,6 +99,29 @@ scripts/go-check.ps1
 - 点击「安装 Go」查看安装指引和下载链接
 
 API 端点：`GET /api/go-status`（系统检测）、`GET /api/go-status?path=...`（仅检测指定路径）、`POST /api/go-status/install`（安装指引）。
+
+## 安装与运行（macOS / Linux）
+
+这两个平台**没有一键脚本，也不需要装 Go**：下载单个二进制就能跑（官网下载区，或仓库 `dist/`、发布包 `Gleam-release-<日期>.zip`）。
+
+```bash
+# macOS：Apple Silicon 用 arm64，Intel 用 x86_64（Apple 菜单 → 关于本机，看「芯片」字段）
+chmod +x Gleam-macOS-AppleSilicon-arm64
+./Gleam-macOS-AppleSilicon-arm64 app        # 应用窗口；webui / goal / serve 等子命令与 Windows 完全一致
+
+# Linux x86_64
+chmod +x Gleam-Linux-x86_64
+./Gleam-Linux-x86_64 app                    # 应用窗口经 xdg-open 打开；无桌面环境时改用 webui 子命令
+```
+
+**首次运行会被系统的签名检查拦下**，因为二进制没有做代码签名（macOS 还需要 Apple 公证），这是刻意省掉的：
+
+- **macOS（Gatekeeper）**：终端执行 `xattr -d com.apple.quarantine ./Gleam-macOS-AppleSilicon-arm64` 去掉隔离属性；或到「系统设置 → 隐私与安全性」页面底部点「仍要打开」。
+- **Windows（SmartScreen）**：点「更多信息」→「仍要运行」。
+
+数据目录与配置三个平台一致：`~/.gleam`（`GLEAM_DATA_DIR` 可改）、`configs/config.yaml`、`GLEAM_API_KEY` 等环境变量。
+
+从源码构建（需要 Go 1.22+）：`bash scripts/build-desktop.sh` 一次产出五个平台的二进制；`bash scripts/package.sh` 另出发布包与校验和。
 
 ## 快速开始
 
@@ -347,7 +373,7 @@ MCP initialize/tools.list/tools.call、Web UI REST/SSE/审批回路（进程内 
 
 **MVP 后路线**：MCP 断线自动重连与资源订阅、技能分享（本地技能导出给别人安装；模板市场已上线）、Windows 文件监听原生 API（当前为轮询快照）。
 
-**下一批候选（与外部桌面端逐项对照过，尚未圈定，见各批 CHANGELOG）**：命令面板 `Ctrl+K` 与全局快捷键、会话搜索与「导出 Markdown」、审批键盘流（`A` 批准 / `D` 拒绝）、版本更新检测的**真做版**（更新源可配 + 语义化版本比较 + 默认关闭；前提是先有一个被承诺长期维护的发布渠道，见设计文档 §4.6.33）、把"闸门是否真被 `verify.sh` 调用"变成一条机械判据（新闸门只写不接线的事发生过一次）、出网**归因到任务**（哪一次发包属于哪一轮目标，台账上能按任务筛——现在只到 kind 与主机，答不出"这一条是谁让它发的"）。
+**下一批候选（与外部桌面端逐项对照过，尚未圈定，见各批 CHANGELOG）**：命令面板 `Ctrl+K` 与全局快捷键、会话搜索与「导出 Markdown」、审批键盘流（`A` 批准 / `D` 拒绝）、版本更新检测的**真做版**（更新源可配 + 语义化版本比较 + 默认关闭；前提是先有一个被承诺长期维护的发布渠道，见设计文档 §4.6.33）、把"闸门是否真被 `verify.sh` 调用"变成一条机械判据（新闸门只写不接线的事发生过一次）、出网**归因到任务**（哪一次发包属于哪一轮目标，台账上能按任务筛——现在只到 kind 与主机，答不出"这一条是谁让它发的"）、官网下载体积由 `package.sh` 写回卡片（现在写的是手写约数，而这件事的 owner 是构建产物，每次打包都会漂；§4.6.37）、`install.ps1 -SkipBuild` 不再顺带下载 Go（脚本先备工具链再决定要不要构建；改行为要能真机跑一遍安装脚本才敢动）、"网页素材必须是 UTF-8"的判据（`website/style.css` 曾混进 19 行 GBK 注释；与 `check-py-utf8.py` 管的不是同一件事——那个管脚本 stdout 的编码）。
 
 ## 桌面端打包（多平台）
 
@@ -361,9 +387,14 @@ bash scripts/build-desktop.sh
 #   bin/gleam-linux-amd64       Linux x86_64
 ```
 
-所有二进制约 8-9MB（设计目标 <15MB），零外部依赖、单文件分发。macOS/Linux 在终端运行
+所有二进制约 9-10MB（设计目标 <15MB），零外部依赖、单文件分发。macOS/Linux 在终端运行
 （`chmod +x gleam-darwin-arm64 && ./gleam-darwin-arm64 app`），应用窗口由 Chrome/Edge 应用模式承载
-（Windows 用 Edge/Chrome，macOS 用 `open -na`，Linux 用 xdg-open 回退）。macOS 未签名二进制首次打开
-需在「系统设置 → 隐私与安全性」中允许。
+（Windows 用 Edge/Chrome，macOS 用 `open -na`，Linux 用 xdg-open 回退）。未签名二进制首次运行被拦下时
+怎么放行，见上文「安装与运行（macOS / Linux）」。
+
+## 许可
+
+MIT，见 `LICENSE`（发布包 `Gleam-release-<日期>.zip` 里也带一份）。零第三方依赖，所以没有需要一并转述的
+上游许可条款——`go.mod` 里只有标准库。
 
 > Gleam 不做"更像人的 AI"，而是做"更可靠的同事"。

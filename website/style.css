@@ -382,6 +382,7 @@ body {
 }
 .dl-card--windows .dl-platform-icon { color: #38BDF8; background: rgba(56, 189, 248, 0.1); }
 .dl-card--macos .dl-platform-icon { color: #A78BFA; background: rgba(167, 139, 250, 0.1); }
+.dl-card--linux .dl-platform-icon { color: #FBBF24; background: rgba(251, 191, 36, 0.1); }
 .dl-card h3 { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
 .dl-arch { font-size: var(--fs-xs); color: var(--color-fg-muted); display: block; margin-top: 2px; }
 
@@ -448,11 +449,11 @@ body {
 }
 
 /* ============================================================
- * 2026-09-07 ÓÅ»¯£ºImpeccable & MattPocock Skills Ö¸µ¼
- * Ä¿±ê£º¼õÉÙ AI Ä£°å¸Ğ£¬Ôö¼ÓÎÂ¶ÈÓë²ÄÖÊ¸Ğ
+ * 2026-09-07 ä¼˜åŒ–ï¼šImpeccable & MattPocock Skills æŒ‡å¯¼
+ * ç›®æ ‡ï¼šå‡å°‘ AI æ¨¡æ¿æ„Ÿï¼Œå¢åŠ æ¸©åº¦ä¸æè´¨æ„Ÿ
  * ============================================================ */
 
-/* ---- ±³¾°£ºÌí¼ÓÎ¢ÃîµÄÔëµãÎÆÀí£¬Ôö¼ÓÎïÀíÖÊ¸Ğ ---- */
+/* ---- èƒŒæ™¯ï¼šæ·»åŠ å¾®å¦™çš„å™ªç‚¹çº¹ç†ï¼Œå¢åŠ ç‰©ç†è´¨æ„Ÿ ---- */
 body::before {
   content: '';
   position: fixed;
@@ -463,7 +464,7 @@ body::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* ---- Hero ÇøÓò£º¸ü·á¸»µÄ²ã´ÎºÍºôÎü¸Ğ ---- */
+/* ---- Hero åŒºåŸŸï¼šæ›´ä¸°å¯Œçš„å±‚æ¬¡å’Œå‘¼å¸æ„Ÿ ---- */
 .hero {
   position: relative;
   overflow: hidden;
@@ -482,7 +483,7 @@ body::before {
 }
 .hero-inner { position: relative; z-index: 1; }
 
-/* ---- Hero ±êÌâ£º¸ü¿ËÖÆµÄÈë³¡¶¯»­ ---- */
+/* ---- Hero æ ‡é¢˜ï¼šæ›´å…‹åˆ¶çš„å…¥åœºåŠ¨ç”» ---- */
 .hero h1 {
   background: linear-gradient(135deg, #F8FAFC 0%, rgba(248, 250, 252, 0.85) 100%);
   -webkit-background-clip: text;
@@ -496,7 +497,7 @@ body::before {
   -webkit-text-fill-color: transparent;
 }
 
-/* ---- °´Å¥£º¸üÓĞÖÊ¸ĞµÄ½»»¥ ---- */
+/* ---- æŒ‰é’®ï¼šæ›´æœ‰è´¨æ„Ÿçš„äº¤äº’ ---- */
 .btn-primary {
   position: relative;
   overflow: hidden;
@@ -523,7 +524,7 @@ body::before {
   border-color: rgba(255,255,255,0.25);
 }
 
-/* ---- ¿¨Æ¬£ºÔö¼ÓÎ¢ÃîµÄĞü¸¡¹âĞ§ ---- */
+/* ---- å¡ç‰‡ï¼šå¢åŠ å¾®å¦™çš„æ‚¬æµ®å…‰æ•ˆ ---- */
 .card {
   position: relative;
   transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
@@ -551,7 +552,7 @@ body::before {
   border-color: rgba(255,255,255,0.12);
 }
 
-/* ---- Ö§Öù¿¨Æ¬£º¸üÓĞ²ã´Î¸ĞµÄĞòºÅ ---- */
+/* ---- æ”¯æŸ±å¡ç‰‡ï¼šæ›´æœ‰å±‚æ¬¡æ„Ÿçš„åºå· ---- */
 .pillar-no {
   display: inline-block;
   padding: 2px 10px;
@@ -562,7 +563,7 @@ body::before {
   font-weight: 600;
 }
 
-/* ---- ÑİÊ¾ÇøÓò£º¸ü³Á½şµÄ°µÉ«·ÕÎ§ ---- */
+/* ---- æ¼”ç¤ºåŒºåŸŸï¼šæ›´æ²‰æµ¸çš„æš—è‰²æ°›å›´ ---- */
 .demo {
   background: linear-gradient(180deg, rgba(27, 35, 54, 0.8), rgba(15, 23, 42, 0.95));
   border: 1px solid rgba(255,255,255,0.06);
@@ -582,7 +583,7 @@ body::before {
   box-shadow: 0 0 20px rgba(34, 197, 94, 0.1);
 }
 
-/* ---- ÏÂÔØ¿¨Æ¬£ºÆ½Ì¨±êÊ¶É«¸ü¿ËÖÆ ---- */
+/* ---- ä¸‹è½½å¡ç‰‡ï¼šå¹³å°æ ‡è¯†è‰²æ›´å…‹åˆ¶ ---- */
 .dl-card {
   position: relative;
   overflow: hidden;
@@ -607,8 +608,11 @@ body::before {
 .dl-card--macos::after {
   background: linear-gradient(90deg, #A78BFA, #C4B5FD);
 }
+.dl-card--linux::after {
+  background: linear-gradient(90deg, #FBBF24, #FCD34D);
+}
 
-/* ---- ÏÂÔØ°´Å¥£º¸üÇåÎúµÄÊÓ¾õ·´À¡ ---- */
+/* ---- ä¸‹è½½æŒ‰é’®ï¼šæ›´æ¸…æ™°çš„è§†è§‰åé¦ˆ ---- */
 .dl-btn {
   transition: all var(--dur-fast) var(--ease-out);
 }
@@ -623,7 +627,7 @@ body::before {
   transform: translateY(-1px);
 }
 
-/* ---- ¿ìËÙ¿ªÊ¼£º²½ÖèÁ¬½ÓÏß¸üÓĞÉè¼Æ¸Ğ ---- */
+/* ---- å¿«é€Ÿå¼€å§‹ï¼šæ­¥éª¤è¿æ¥çº¿æ›´æœ‰è®¾è®¡æ„Ÿ ---- */
 .qs-step {
   position: relative;
   padding-left: 24px;
@@ -649,7 +653,7 @@ body::before {
   transform: scale(1.05);
 }
 
-/* ---- ¹ö¶¯ÏÔÏÖ£º¸üÈáºÍµÄÈë³¡ ---- */
+/* ---- æ»šåŠ¨æ˜¾ç°ï¼šæ›´æŸ”å’Œçš„å…¥åœº ---- */
 .reveal {
   opacity: 0;
   transform: translateY(20px);
@@ -660,13 +664,13 @@ body::before {
   transform: translateY(0);
 }
 
-/* ---- µ×²¿ÇøÓò¸üÓĞÎÂ¶È ---- */
+/* ---- åº•éƒ¨åŒºåŸŸæ›´æœ‰æ¸©åº¦ ---- */
 .footer {
   border-top: 1px solid rgba(255,255,255,0.05);
   background: linear-gradient(180deg, transparent, rgba(0,0,0,0.2));
 }
 
-/* ---- µ¼º½À¸£º¸ü¾«ÖÂµÄÃ«²£Á§Ğ§¹û ---- */
+/* ---- å¯¼èˆªæ ï¼šæ›´ç²¾è‡´çš„æ¯›ç»ç’ƒæ•ˆæœ ---- */
 .topbar {
   background: rgba(15, 23, 42, 0.75);
   backdrop-filter: blur(20px) saturate(1.2);
@@ -693,7 +697,7 @@ body::before {
   transform: translateX(-50%) scaleX(1);
 }
 
-/* ---- Ö¸±ê¿¨Æ¬£º¸ü¿ËÖÆµÄºôÎüµÆ ---- */
+/* ---- æŒ‡æ ‡å¡ç‰‡ï¼šæ›´å…‹åˆ¶çš„å‘¼å¸ç¯ ---- */
 .hero-stats dt {
   background: linear-gradient(135deg, var(--color-accent), #4ADE80);
   -webkit-background-clip: text;
@@ -701,7 +705,7 @@ body::before {
   -webkit-text-fill-color: transparent;
 }
 
-/* ---- ¼Ü¹¹Í¼£º¸üÇåÎúµÄ²ã´Î ---- */
+/* ---- æ¶æ„å›¾ï¼šæ›´æ¸…æ™°çš„å±‚æ¬¡ ---- */
 .arch-layer--core {
   border-color: rgba(34, 197, 94, 0.25);
   background: linear-gradient(180deg, rgba(34, 197, 94, 0.04), rgba(34, 197, 94, 0.02));
@@ -714,7 +718,7 @@ body::before {
   transform: translateY(-2px);
 }
 
-/* ---- ÏìÓ¦Ê½ÓÅ»¯ ---- */
+/* ---- å“åº”å¼ä¼˜åŒ– ---- */
 @media (max-width: 768px) {
   .hero h1 {
     font-size: var(--fs-2xl);
@@ -727,7 +731,7 @@ body::before {
   }
 }
 
-/* ---- Æ«ºÃ¼õÉÙ¶¯»­ ---- */
+/* ---- åå¥½å‡å°‘åŠ¨ç”» ---- */
 @media (prefers-reduced-motion: reduce) {
   .reveal {
     opacity: 1 !important;

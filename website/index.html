@@ -491,12 +491,12 @@
             <a class="dl-btn dl-btn--primary" href="dist/Gleam-Desktop-Windows-x86_64.exe" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>桌面版</span>
-              <span class="dl-size">7.2 MB · .exe</span>
+              <span class="dl-size">约 10 MB · .exe</span>
             </a>
             <a class="dl-btn" href="dist/Gleam-Windows-x86_64.exe" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>命令行版</span>
-              <span class="dl-size">7.2 MB · .exe</span>
+              <span class="dl-size">约 10 MB · .exe</span>
             </a>
           </div>
           <div class="dl-note">
@@ -506,6 +506,7 @@
               <ol>
                 <li>下载桌面版 <code>Gleam-Desktop-Windows-x86_64.exe</code></li>
                 <li>双击运行即可</li>
+                <li>首次运行被 SmartScreen 拦下（二进制未做代码签名）：点「更多信息」→「仍要运行」</li>
                 <li>命令行版：放入 PATH 目录</li>
               </ol>
             </details>
@@ -526,7 +527,7 @@
             <a class="dl-btn dl-btn--primary" href="dist/Gleam-macOS-AppleSilicon-arm64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
-              <span class="dl-size">6.9 MB</span>
+              <span class="dl-size">约 9 MB</span>
             </a>
           </div>
           <div class="dl-note">
@@ -535,7 +536,8 @@
               <summary>安装步骤</summary>
               <ol>
                 <li>下载 <code>Gleam-macOS-AppleSilicon-arm64</code></li>
-                <li>执行 <code>chmod +x</code> 加运行权限</li>
+                <li>执行 <code>chmod +x Gleam-macOS-AppleSilicon-arm64</code> 加运行权限</li>
+                <li>首次运行被 Gatekeeper 拦下（二进制未签名、未公证）：终端执行 <code>xattr -d com.apple.quarantine ./Gleam-macOS-AppleSilicon-arm64</code>，或到「系统设置 → 隐私与安全性」点「仍要打开」</li>
                 <li>运行：<code>./Gleam-macOS-AppleSilicon-arm64 app</code></li>
               </ol>
             </details>
@@ -556,7 +558,7 @@
             <a class="dl-btn dl-btn--primary" href="dist/Gleam-macOS-Intel-x86_64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
-              <span class="dl-size">7.2 MB</span>
+              <span class="dl-size">约 10 MB</span>
             </a>
           </div>
           <div class="dl-note">
@@ -565,8 +567,39 @@
               <summary>安装步骤</summary>
               <ol>
                 <li>下载 <code>Gleam-macOS-Intel-x86_64</code></li>
-                <li>执行 <code>chmod +x</code> 加运行权限</li>
+                <li>执行 <code>chmod +x Gleam-macOS-Intel-x86_64</code> 加运行权限</li>
+                <li>首次运行被 Gatekeeper 拦下（二进制未签名、未公证）：终端执行 <code>xattr -d com.apple.quarantine ./Gleam-macOS-Intel-x86_64</code>，或到「系统设置 → 隐私与安全性」点「仍要打开」</li>
                 <li>运行：<code>./Gleam-macOS-Intel-x86_64 app</code></li>
+              </ol>
+            </details>
+          </div>
+        </div>
+
+        <div class="dl-card dl-card--linux" data-platform="linux">
+          <div class="dl-card-head">
+            <div class="dl-platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h5"/></svg>
+            </div>
+            <div>
+              <h3>Linux</h3>
+              <span class="dl-arch">x86_64 · 零依赖</span>
+            </div>
+          </div>
+          <div class="dl-downloads">
+            <a class="dl-btn dl-btn--primary" href="dist/Gleam-Linux-x86_64" download>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span>下载</span>
+              <span class="dl-size">约 10 MB</span>
+            </a>
+          </div>
+          <div class="dl-note">
+            <p class="dl-tip" id="dl-tip-linux"></p>
+            <details class="dl-guide">
+              <summary>安装步骤</summary>
+              <ol>
+                <li>下载 <code>Gleam-Linux-x86_64</code></li>
+                <li>执行 <code>chmod +x Gleam-Linux-x86_64</code> 加运行权限</li>
+                <li>运行：<code>./Gleam-Linux-x86_64 app</code>（应用窗口经 <code>xdg-open</code> 打开；无桌面环境时改用 <code>webui</code> 子命令）</li>
               </ol>
             </details>
           </div>
@@ -623,7 +656,7 @@
     <div class="footer-inner">
       <div>
         <strong>Gleam 微光</strong> · 本地桌面 AI 工具
-        <p>写给自己用的，顺便开源了。</p>
+        <p>写给自己用的，顺便开源了 · MIT 许可。</p>
       </div>
       <div class="footer-links">
         <a href="#what">是什么</a>

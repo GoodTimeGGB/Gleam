@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/chrome.css">
   <script>
   // 首帧主题引导：在渲染前应用本地保存的皮肤，避免闪烁。
   (function () {
@@ -45,13 +46,42 @@
 </head>
 <body>
   <div class="app">
-    <!-- 顶栏：与桌面窗口栏同高，只放侧栏开关；其余留空作拖拽区 -->
+    <!-- 顶栏：侧栏开关 / 前进后退 / 应用内菜单；中间是拖拽区与品牌；右侧是面板开关与（桌面壳里的）窗口按钮 -->
     <header class="topbar">
       <button class="topbar-btn" id="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" title="收起侧栏" aria-label="收起侧栏">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>
       </button>
-      <span class="topbar-brand" title="Gleam · 微光"><svg class="brand-mark" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/><circle cx="12" cy="12" r="3"/></svg><span>Gleam</span></span>
+      <button class="topbar-btn" id="nav-back" type="button" title="返回" aria-label="返回" disabled>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+      </button>
+      <button class="topbar-btn" id="nav-fwd" type="button" title="前进" aria-label="前进" disabled>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+      <nav class="menubar" id="menubar" role="menubar" aria-label="应用菜单">
+        <button class="menubar-item" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu="file">文件</button>
+        <button class="menubar-item" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu="edit">编辑</button>
+        <button class="menubar-item" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu="view">视图</button>
+        <button class="menubar-item" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu="help">帮助</button>
+      </nav>
+      <div class="topbar-drag">
+        <span class="topbar-brand" title="Gleam · 微光"><svg class="brand-mark" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/><circle cx="12" cy="12" r="3"/></svg><span>Gleam</span></span>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-btn" id="term-toggle" type="button" aria-controls="term" aria-expanded="false" aria-label="打开终端面板" data-tip="打开终端面板" data-tip-key="terminal.toggle">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 14.5h18"/></svg>
+        </button>
+        <button class="topbar-btn" id="aux-toggle" type="button" aria-controls="aux" aria-expanded="false" aria-label="显示侧边栏" data-tip="显示侧边栏" data-tip-key="task.toggleRight">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/></svg>
+        </button>
+        <div class="win-controls" id="win-controls" hidden>
+          <button class="win-btn" type="button" data-win="minimize" aria-label="最小化" title="最小化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6h8" stroke="currentColor" stroke-width="1.1"/></svg></button>
+          <button class="win-btn" type="button" data-win="maximize" aria-label="最大化" title="最大化"><svg class="win-max" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"/></svg><svg class="win-restore" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="3.5" width="6.5" height="6.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M4 3.5V2.6c0-.3.3-.6.6-.6h4.8c.3 0 .6.3.6.6v4.8c0 .3-.3.6-.6.6h-.9" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button>
+          <button class="win-btn win-close" type="button" data-win="close" aria-label="关闭" title="关闭"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.1"/></svg></button>
+        </div>
+      </div>
     </header>
+    <!-- 应用菜单的下拉面板：内容由 chrome.js 按当前环境（桌面壳 / 浏览器）渲染 -->
+    <div class="menubar-pop" id="menubar-pop" role="menu" hidden></div>
 
     <!-- 单列侧栏：品牌胶囊 / 新任务 / 搜索 / 工作区列表 / 底部导航 / 用户行 -->
     <aside class="sidebar" id="sidebar" aria-label="侧栏">
@@ -187,7 +217,7 @@
                 <span id="ws-chip-text">选择工作区</span>
               </button>
               <button class="topbar-btn" id="rail-open" type="button" aria-controls="rail" aria-expanded="false" title="展开现场栏" aria-label="展开现场栏">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/></svg>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></svg>
               </button>
             </div>
           </div>
@@ -638,6 +668,7 @@
           <div class="settings-group-label">个人</div>
           <button class="settings-tab active" data-stab="persona" role="tab" aria-selected="true">协作</button>
           <button class="settings-tab" data-stab="appearance" role="tab" aria-selected="false">外观</button>
+          <button class="settings-tab" data-stab="shortcuts" role="tab" aria-selected="false">快捷键</button>
           <div class="settings-group-label">智能体</div>
           <button class="settings-tab" data-stab="llm" role="tab" aria-selected="false">模型</button>
           <button class="settings-tab" data-stab="engine" role="tab" aria-selected="false">引擎</button>
@@ -689,6 +720,11 @@
             <span class="field-hint">助手名称与协作风格</span>
             <button class="btn btn-primary" id="set-save-persona">保存</button>
           </div>
+        </div>
+
+        <!-- 快捷键：内容由 chrome.js 的 Keymap 渲染，绑定存 localStorage（gleam-keys），即改即生效 -->
+        <div class="settings-panel" data-stab="shortcuts" hidden>
+          <div class="kb-page" id="kb-page"></div>
         </div>
 
         <!-- 安全 -->
@@ -1115,6 +1151,48 @@
 
     </main>
 
+    <!-- 右侧栏：三张入口卡（工作区文件 / 内置浏览器 / 终端），点开的都是已有的面板 -->
+    <aside class="aux" id="aux" aria-label="右侧栏" hidden>
+      <div class="aux-cards">
+        <button class="aux-card" type="button" id="aux-files" data-key="aux.files">
+          <span class="aux-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></span>
+          <span class="aux-text"><strong>打开工作区文件</strong><small data-kbd-for="aux.files"></small></span>
+        </button>
+        <button class="aux-card" type="button" id="aux-browser" data-key="aux.browser">
+          <span class="aux-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg></span>
+          <span class="aux-text"><strong>打开内置浏览器</strong><small data-kbd-for="aux.browser"></small></span>
+        </button>
+        <button class="aux-card" type="button" id="aux-term" data-key="aux.terminal">
+          <span class="aux-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7.5 10 2.5 2-2.5 2M12.5 15h4"/></svg></span>
+          <span class="aux-text"><strong>打开终端</strong><small data-kbd-for="aux.terminal"></small></span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- 底部终端面板：一条命令一次 shell.exec，走 Gleam 的安全门控；没有工作区时只给空态 -->
+    <section class="term" id="term" aria-label="终端" hidden>
+      <div class="term-resize" id="term-resize" role="separator" aria-orientation="horizontal" aria-label="拖动调整终端高度" tabindex="0"></div>
+      <header class="term-head">
+        <span class="term-title"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 8 4 4-4 4M12 17h7"/></svg><span>终端</span><span class="term-cwd" id="term-cwd"></span></span>
+        <span class="term-note" id="term-note"></span>
+        <button class="icon-btn term-btn" id="term-clear" type="button" title="清空输出" aria-label="清空输出" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+        <button class="icon-btn term-btn" id="term-close" type="button" title="关闭终端面板" aria-label="关闭终端面板"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="term-empty" id="term-empty">
+        <span class="term-empty-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 8 4 4-4 4M12.5 16h5.5"/></svg></span>
+        <p class="term-empty-title"><button type="button" class="link-btn" id="term-pick-ws">选择工作区</button>以打开终端</p>
+        <p class="term-empty-sub">选择工作区后，终端会在主文件夹中运行。</p>
+      </div>
+      <div class="term-body" id="term-body" hidden>
+        <div class="term-log" id="term-log" role="log" aria-live="polite"></div>
+        <form class="term-line" id="term-form" autocomplete="off">
+          <span class="term-prompt" aria-hidden="true">$</span>
+          <label class="sr-only" for="term-input">命令</label>
+          <input id="term-input" type="text" spellcheck="false" placeholder="输入命令，Enter 运行（每条命令都经过 Gleam 的安全门控）">
+        </form>
+      </div>
+    </section>
+
     <!-- ===== 现场栏：引擎正在干什么，摊开在一列仪表里 =====
          三块面板的读数都只来自一个生产者（app.js 的 LiveRail），
          阶段轨只画引擎真会发的那几个 phase——发明一个永不亮起的格子，
@@ -1469,6 +1547,67 @@
     </div>
   </div>
 
+  <!-- 右下角帮助按钮：问题反馈 -->
+  <button class="help-fab" id="help-fab" type="button" aria-label="问题反馈" data-tip="问题反馈" data-tip-key="system.feedback" data-tip-side="left">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.4-2.7 4"/><path d="M12 17.6v.1"/></svg>
+  </button>
+  <div class="chrome-tip" id="chrome-tip" role="tooltip" hidden></div>
+
+  <!-- 问题反馈对话框：提交走 POST /api/feedback（先存本机，配了远端才投递） -->
+  <div class="fbd-overlay" id="fbd-overlay" hidden>
+    <form class="fbd" id="fbd" role="dialog" aria-modal="true" aria-labelledby="fbd-title" novalidate>
+      <header class="fbd-head">
+        <div>
+          <h2 class="fbd-title" id="fbd-title">有什么想反馈的</h2>
+          <p class="fbd-sub">告诉我们你遇到的问题或建议，这些信息将用于改进 Gleam。</p>
+        </div>
+        <button class="icon-btn fbd-x" type="button" id="fbd-close" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="fbd-body">
+        <div class="fbd-field">
+          <div class="fbd-label-row">
+            <label class="fbd-label" for="fbd-text">问题或建议（必填）</label>
+            <div class="fbd-kind" role="radiogroup" aria-label="反馈类型">
+              <button type="button" role="radio" data-kind="bug" aria-checked="true">问题</button>
+              <button type="button" role="radio" data-kind="suggestion" aria-checked="false">建议</button>
+            </div>
+          </div>
+          <textarea class="fbd-input fbd-text" id="fbd-text" rows="3" placeholder="描述你看到了什么、期望发生什么，以及可以稳定复现的操作步骤"></textarea>
+        </div>
+        <div class="fbd-field">
+          <span class="fbd-label">屏幕截图</span>
+          <div class="fbd-shots" id="fbd-shots">
+            <label class="fbd-add" id="fbd-add" tabindex="0">
+              <input type="file" accept="image/*" id="fbd-file" hidden multiple>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>添加或粘贴截图</span>
+            </label>
+          </div>
+        </div>
+        <div class="fbd-field">
+          <label class="fbd-label" for="fbd-email">联系邮箱（可选）</label>
+          <input class="fbd-input" id="fbd-email" type="email" autocomplete="email" placeholder="便于我们联系你进一步了解问题">
+        </div>
+        <p class="fbd-note" id="fbd-note"></p>
+      </div>
+      <footer class="fbd-foot">
+        <button class="btn btn-ghost btn-sm" type="button" id="fbd-cancel">取消</button>
+        <button class="btn btn-primary btn-sm" type="submit" id="fbd-send"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>发送反馈</button>
+      </footer>
+    </form>
+  </div>
+
+  <!-- 页内查找（搜索当前任务） -->
+  <div class="findbar" id="findbar" role="search" hidden>
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+    <label class="sr-only" for="findbar-input">在当前页面查找</label>
+    <input id="findbar-input" type="text" placeholder="在当前任务中查找" autocomplete="off" spellcheck="false">
+    <span class="findbar-count" id="findbar-count"></span>
+    <button class="icon-btn" type="button" id="findbar-prev" aria-label="上一个" title="上一个（Shift+Enter）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m18 15-6-6-6 6"/></svg></button>
+    <button class="icon-btn" type="button" id="findbar-next" aria-label="下一个" title="下一个（Enter）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="icon-btn" type="button" id="findbar-close" aria-label="关闭查找" title="关闭（Esc）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+
   <!-- Toast 与模态根 -->
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
   <div class="modal-overlay" id="modal-overlay" hidden>
@@ -1476,5 +1615,6 @@
   </div>
 
   <script src="/assets/app.js"></script>
+  <script src="/assets/chrome.js"></script>
 </body>
 </html>

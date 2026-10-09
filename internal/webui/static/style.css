@@ -4448,3 +4448,14 @@ html[data-theme="dark"] .site-tpl-tabs button[aria-selected="true"] { background
 #view-sites .sites-head { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: space-between; padding-top: 28px; }
 #view-sites .sites-head .page-head-text { flex: 1; min-width: 0; }
 #view-sites .sites-art { flex: none; width: auto; margin-top: 0; }
+
+/* 首页在矮窗口里放得下：站点模板轮播加进来之后首页高了约 220px，1440×900 时
+ * 居中的内容会从上方溢出、插图压到工作区胶囊下面。safe center 保证溢出时改为从顶部开始滚动，
+ * 矮窗口再把插图与间距收一档。 */
+#view-goals.is-home .chat-scroll { justify-content: safe center; }
+@media (max-height: 980px) {
+  #view-goals.is-home .chat-scroll { padding-top: 8px; padding-bottom: 24px; }
+  .home-hero .hero-art, .home-hero .hero-art svg { width: 64px; height: 64px; }
+  .home-hero .empty-title { margin-top: 12px; }
+  .home-hero .activity-card { margin-top: 20px; }
+}

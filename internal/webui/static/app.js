@@ -325,7 +325,12 @@ goalInput.addEventListener('keydown', (e) => {
     onMentionKey(e);
     return;
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitGoal(); }
+  // 发送键由「设置 → 快捷键 → 发送消息」决定：Enter（默认）或 Ctrl+Enter。
+  // Ctrl+Enter 模式下，单按 Enter 交还给 textarea 换行。
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const ctrlMode = typeof Keymap !== 'undefined' && Keymap.sendMode() === 'ctrlEnter';
+  if (ctrlMode && !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault(); submitGoal();
 });
 // 输入框自适应高度
 function autoResize() {
@@ -1384,6 +1389,8 @@ async function resolveApproval(id, approved, box, task) {
 // 挂在目标流顶部，批准/拒绝与任务内审批走同一裁决接口。
 function renderStandaloneApproval(ap) {
   if (!ap || !ap.id) return;
+  // 底部终端发起的 shell.exec：审批就地画在终端里，不跳去目标视图
+  if (typeof Terminal !== 'undefined' && Terminal.claimApproval(ap)) return;
   const feed = $('#goal-feed');
   if (feed.querySelector(`[data-approval-id="${ap.id}"]`)) return;
 
@@ -5921,6 +5928,15 @@ const BrowserPane = (() => {
     // 这里不能图省事写 'noopener'：按规范那样传第三参，window.open 成功时也返回
     // null，于是"被拦了"这句永远报得出来——是假警报。改为拿到新窗口后亲手摘掉
     // opener（等价于 noopener，挡住反向 tabnabbing），返回值才真的能用来判成败。
+    // 桌面壳里 window.open 一律被主进程拦下（返回 null），按返回值判会报一句假的「弹窗被拦」：
+    // 走 preload 的 openExternal，由主进程 shell.openExternal 交给系统浏览器。
+    const desk = window.gleamDesktop;
+    if (desk && typeof desk.openExternal === 'function') {
+      desk.openExternal(url)
+        .then(() => setStatus('已在系统浏览器打开。'))
+        .catch((err) => setStatus('没能交给系统浏览器：' + ((err && err.message) || err), true));
+      return;
+    }
     const w = window.open(url, '_blank');
     if (w) { try { w.opener = null; } catch { /* 跨源时摘不动，也不影响 */ } }
     setStatus(w ? '已在系统浏览器打开。' : '没弹出来：浏览器拦了弹窗，请在地址栏那里放行。', !w);
@@ -6151,10 +6167,7 @@ const MeMenu = (() => {
   return { open, close };
 })();
 $('#sp-account').addEventListener('click', () => MeDrawer.open());
-document.addEventListener('keydown', (e) => {
-  // Ctrl/⌘ + , 打开设置（输入法组字时不抢）
-  if ((e.ctrlKey || e.metaKey) && e.key === ',' && !e.isComposing) { e.preventDefault(); showView('settings'); }
-});
+// Ctrl/⌘ + , 打开设置：已并入 chrome.js 的全局键位表（可在「设置 → 快捷键」里改）。
 $('#memory-empty-write').addEventListener('click', () => $('#memory-content').focus());
 
 /* ---------- 全局任务搜索（Ctrl+K）：本机会话 + 当前已载入的目标 ---------- */

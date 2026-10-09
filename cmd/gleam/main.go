@@ -241,7 +241,7 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	}
 
 	// 技能
-	// 成长日志（参考阿布自进化能力）
+	// 成长日志
 	growthLog, err := growth.Open(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("打开成长日志失败: %w", err)
@@ -275,7 +275,7 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	// 本地优先的场景（读本机 dev server、内网 wiki）用配置显式放宽。
 	webTool.AllowPrivate = cfg.Safety.AllowPrivateWeb
 	reg.MustRegister(webTool)
-	// 桌面集成工具（剪贴板/截屏/通知/片段——参考 Alice 与 WorkBuddy）
+	// 桌面集成工具（剪贴板/截屏/通知/片段）
 	// 剪贴板按副作用拆成读、写两个工具：Permission() 不接受参数，
 	// 混装两种等级时声明哪一种都是错的（写会绕过审批闸门）。
 	reg.MustRegister(desktop.NewClipboardRead())

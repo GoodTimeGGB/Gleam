@@ -10,7 +10,7 @@ import (
 	"gleam/pkg/types"
 )
 
-// NotifyTool 发送桌面通知（参考 WorkBuddy 任务完成通知与 Alice 的有温度交互）。
+// NotifyTool 发送桌面通知。
 type NotifyTool struct{}
 
 func NewNotify() *NotifyTool { return &NotifyTool{} }

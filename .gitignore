@@ -16,3 +16,10 @@ __pycache__/
 dist/
 website/dist/
 pack/*.zip
+
+# AI Agent 工具目录（本机专用，不入库）
+.workbuddy-ai/
+.qoder-cn/
+.cursor/
+.claude/
+.agents/

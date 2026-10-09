@@ -15,7 +15,7 @@ import (
 	"gleam/pkg/types"
 )
 
-// SnippetsTool 管理可复用文本片段（参考 Alice 的 Snippets + 快捷键工作流）。
+// SnippetsTool 管理可复用文本片段。
 // 片段存储为 JSON 文件（~/.gleam/snippets.json），支持增删查与展开。
 type SnippetsTool struct {
 	dataDir string

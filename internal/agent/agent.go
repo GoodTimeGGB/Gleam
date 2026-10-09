@@ -41,7 +41,7 @@ type Agent struct {
 	Notifier  Notifier
 	MCP       *MCPManager
 	FileTools *file.Tools         // 文件工具集（工作区热切换时更新 Roots）
-	Growth    *growth.Log         // 成长日志（参考阿布自进化）
+	Growth    *growth.Log         // 成长日志
 	Convos    *conversation.Store // 多会话持久化（左侧会话列表）
 	Spaces    *space.Store        // 微光空间（按工作文件夹隔离对话）
 	Creds     *credentials.Store  // 本地敏感凭证（LLM Key / 云端会话，0600）
@@ -179,7 +179,7 @@ func (a *Agent) RunGoal(ctx context.Context, req types.GoalRequest) *types.GoalR
 	handle.result = result
 	a.pruneTasksLocked()
 	a.mu.Unlock()
-	// 记录成长日志（参考阿布自进化能力）。
+	// 记录成长日志。
 	// 取消单独记中断（task_aborted）：中断率与通过率混在一个分母里，
 	// "用户放弃"和"做砸了"就分不开了——两者要修的东西完全不同。
 	if a.Growth != nil {

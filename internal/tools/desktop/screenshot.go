@@ -13,7 +13,7 @@ import (
 	"gleam/pkg/types"
 )
 
-// ScreenshotTool 截取屏幕画面并保存为文件（参考 WorkBuddy 桌面自动化）。
+// ScreenshotTool 截取屏幕画面并保存为文件。
 type ScreenshotTool struct{}
 
 func NewScreenshot() *ScreenshotTool { return &ScreenshotTool{} }

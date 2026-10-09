@@ -29,7 +29,7 @@ import _utf8  # noqa: F401  # Windows 下 stdout 默认按 GBK 写，中文会�
 DESIGN = "Gleam 技术设计文档.md"
 # §4.6.x 这种**泛指**写法不算引用（它说的是"这一片"，不是某一节）。
 REF = re.compile(r"§(4\.6\.\d+)")
-SKIP_DIRS = {".git", "node_modules", "dist", ".workbuddy-ai", "pack"}
+SKIP_DIRS = {".git", "node_modules", "dist", ".workbuddy-ai", ".qoder-cn", ".cursor", ".claude", ".agents", "pack"}
 
 
 def main() -> int:

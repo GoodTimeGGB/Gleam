@@ -37,7 +37,7 @@ DOCS_INDEX = 2640
 DOCS_ROW = 60
 README_PREAMBLE = 994
 
-SKIP_DIRS = {".git", ".workbuddy-ai", "bin", "node_modules", "__pycache__"}
+SKIP_DIRS = {".git", ".workbuddy-ai", ".qoder-cn", ".cursor", ".claude", ".agents", "bin", "node_modules", "__pycache__"}
 SKIP_FILE_SUFFIX = (".mutbak",)
 
 ROW_RE = re.compile(r"^\|")

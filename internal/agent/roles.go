@@ -1,4 +1,4 @@
-// Package agent 实现专家角色系统（参考 WorkBuddy 多专家 Agent 并行协作）。
+// Package agent 实现专家角色系统。
 //
 // 角色系统让用户可以为不同任务类型选择专家角色，
 // 规划器在构建系统提示词时注入角色特定的知识与约束，
@@ -48,7 +48,7 @@ const (
 	TierReasoning = "reasoning" // 推理强：分析、调研
 )
 
-// BuiltinRoles 预置专家角色（对应 WorkBuddy 100+ 领域专家角色，精选高频场景）。
+// BuiltinRoles 预置专家角色（精选高频场景）。
 var BuiltinRoles = []ExpertRole{
 	{
 		ID:              "general",

@@ -4347,7 +4347,7 @@ function _doSetPerm(mode, persist = true) {
   });
 }
 
-/* ---------- 专家角色（WorkBuddy 多专家能力） ---------- */
+/* ---------- 专家角色 ---------- */
 const roleSelect = document.getElementById('role-select');
 // 变更监听只绑一次：绑在拉取成功的分支里，等于每次刷新都多挂一个，
 // 而 /api/roles 失败那一次之后它干脆就不绑了——选角色静默失效。
@@ -4371,7 +4371,7 @@ async function loadRoles() {
   } catch { /* 静默失败，角色选择不影响核心功能 */ }
 }
 
-/* ---------- 成长日志（阿布自进化能力） ---------- */
+/* ---------- 成长日志 ---------- */
 async function loadGrowth() {
   await Promise.all([loadGrowthStats(), loadGrowthTimeline()]);
 }

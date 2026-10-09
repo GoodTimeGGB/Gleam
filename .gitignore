@@ -23,3 +23,9 @@ pack/*.zip
 .cursor/
 .claude/
 .agents/
+
+# 内部文档（仅 README.md 对外展示）
+AGENTS.md
+*对照与升级清单.md
+CODE_REVIEW_REPORT.md
+Gleam 技术设计文档.md

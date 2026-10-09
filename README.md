@@ -3,18 +3,18 @@
 **本地优先的桌面 AI 智能体——眼里有活，心里有你。**
 
 <p align="center">
-  <a href="https://github.com/GoodTimeGGB/Gleam/releases"><img src="https://img.shields.io/github/v/release/GoodTimeGGB/Gleam?label=version&color=blue" alt="Release"></a>
-  <a href="https://github.com/GoodTimeGGB/Gleam/stargazers"><img src="https://img.shields.io/github/stars/GoodTimeGGB/Gleam?style=social" alt="Stars"></a>
-  <a href="https://github.com/GoodTimeGGB/Gleam/blob/master/LICENSE"><img src="https://img.shields.io/github/license/GoodTimeGGB/Gleam" alt="License"></a>
+  <a href="https://github.com/gleam-ai/Gleam/releases"><img src="https://img.shields.io/github/v/release/gleam-ai/Gleam?label=version&color=blue" alt="Release"></a>
+  <a href="https://github.com/gleam-ai/Gleam/stargazers"><img src="https://img.shields.io/github/stars/gleam-ai/Gleam?style=social" alt="Stars"></a>
+  <a href="https://github.com/gleam-ai/Gleam/blob/master/LICENSE"><img src="https://img.shields.io/github/license/gleam-ai/Gleam" alt="License"></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white" alt="Go"></a>
-  <a href="https://github.com/GoodTimeGGB/Gleam/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build"></a>
+  <a href="https://github.com/gleam-ai/Gleam/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build"></a>
 </p>
 
 <p align="center">
   你负责做决定，具体执行交给我。
 </p>
 
-Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆、有判断、能主动推进工作**的桌面智能体。基于 Go 从零自研，零第三方依赖，单文件二进制约 10MB。
+Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆、有判断、能主动推进工作**的桌面智能体。基于 Go 从零自研，零第三方依赖，单文件二进制约 10MB。本地优先指数据与执行在本机；真实 LLM 仍需你配置的 API（见下方说明）。
 
 ---
 
@@ -34,8 +34,8 @@ Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆
 ## Star 趋势
 
 <p align="center">
-  <a href="https://star-history.com/#GoodTimeGGB/Gleam&Date">
-    <img src="https://api.star-history.com/svg?repos=GoodTimeGGB/Gleam&type=Date" alt="Star History" width="600">
+  <a href="https://star-history.com/#gleam-ai/Gleam&Date">
+    <img src="https://api.star-history.com/svg?repos=gleam-ai/Gleam&type=Date" alt="Star History" width="600">
   </a>
 </p>
 
@@ -110,7 +110,7 @@ Plan → Execute → Reflect 三阶段循环，DAG 依赖并发执行，0-100 �
 
 ### 下载
 
-前往 [Releases](https://github.com/GoodTimeGGB/Gleam/releases) 下载对应平台的二进制文件。
+前往 [Releases](https://github.com/gleam-ai/Gleam/releases) 下载对应平台的二进制文件。
 
 ### 运行
 
@@ -160,13 +160,24 @@ pkg/types/              跨层类型
 
 ---
 
+## 平台说明
+
+| 平台 | 当前形态 |
+| :--- | :--- |
+| **Windows** | 桌面端为主：托盘常驻、单实例、内嵌窗口（`gleam app` / Desktop 包） |
+| **macOS / Linux** | 暂以浏览器 / 服务模式为主：`gleam app` 在无托盘实现时回退为打开系统默认浏览器；也可用 `gleam webui` 只起服务 |
+
+## 关于「本地优先」
+
+**本地优先 ≠ 离线大模型。** 对话、记忆、任务状态与审计默认落在本机；接入真实 LLM 时仍会向你配置的厂商 API 出网（Mock 模式可不联网体验）。出网只记主机名与字节量，不记内容。详见 [已知限制](docs/known-limits.md)。
+
 ## 文档
 
 | 文档 | 说明 |
 | :--- | :--- |
-| [技术设计文档](Gleam%20技术设计文档.md) | 系统现状与决策理由（§4.6.x） |
-| [已知限制](docs/known-limits.md) | 已知限制 / 被否决的方案 / 刻意不做 |
-| [AGENTS.md](AGENTS.md) | 仓库入口与开发纪律 |
+| [已知限制与刻意不做](docs/known-limits.md) | **唯一公开口径**：已知限制 / 被否决方案 / 刻意不做 |
+| [贡献指南](CONTRIBUTING.md) | 本地开发、提交约定、组织级规范入口 |
+| [安全策略](SECURITY.md) | 漏洞报告与本地优先安全边界 |
 | [CHANGELOG](pack/CHANGELOG.md) | 历次变更记录 |
 
 ---

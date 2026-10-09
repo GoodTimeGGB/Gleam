@@ -53,7 +53,13 @@ jobs:
         run: go build ./...
 
       - name: Cross-compile sanity (windows/amd64)
-        run: GOOS=windows GOARCH=amd64 go build -o /tmp/gleam.exe ./cmd/gleam
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^[[:space:]]*var Version = "\([^"]*\)".*/\1/p' internal/buildinfo/buildinfo.go | head -n1)
+          test -n "$VERSION"
+          echo "embedding version ${VERSION} via -X"
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X gleam/internal/buildinfo.Version=${VERSION}" -o /tmp/gleam.exe ./cmd/gleam
 
       - name: Script gates (subset that is OS-portable)
         shell: bash

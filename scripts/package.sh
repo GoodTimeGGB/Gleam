@@ -20,7 +20,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DATE="${1:-$(date +%Y%m%d)}"
-LDFLAGS="-s -w"
+# Version owner is internal/buildinfo.Version; also pass -X (see build-desktop.sh).
+VERSION="${VERSION:-$(sed -n 's/^[[:space:]]*var Version = "\([^"]*\)".*/\1/p' internal/buildinfo/buildinfo.go | head -n1)}"
+if [[ -z "${VERSION}" ]]; then
+  echo "failed to resolve Version from internal/buildinfo/buildinfo.go" >&2
+  exit 1
+fi
+LDFLAGS="-s -w -X gleam/internal/buildinfo.Version=${VERSION}"
+echo "embedding version ${VERSION} via -X"
 DIST="dist"
 
 echo "[0/5] 编译检查"

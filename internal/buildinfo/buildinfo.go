@@ -5,5 +5,12 @@
 // 于是它成了第六处复制。**先问归属，再谈实现**：加一个字段不该顺手复制一个已有的事实。
 package buildinfo
 
-// Version 应用版本号。发布时只改这一行（各接入层引用它，不再写字面量）。
-const Version = "1.0.0"
+// Version is the application version string.
+// Release process: bump the default below, and keep website id="dl-version" in sync
+// (scripts/check-version-owner.py enforces that). Build scripts also pass
+//
+//	-X gleam/internal/buildinfo.Version=<same>
+//
+// so packaged Desktop binaries cannot silently stick on an old default.
+// Version must be a package-level var (not const) for -X to take effect.
+var Version = "1.0.2"

@@ -126,11 +126,13 @@ func cmdApp(args []string) error {
 	}()
 
 	// 托盘主循环（阻塞直到用户点「退出」）
+	openInBrowser := func() { _ = desktop.OpenURL(url) }
 	err = systray.Run(systray.Config{
 		Tooltip:    "Gleam · 微光（本地智能体）",
 		OnActivate: openWindow,
 		MenuItems: []systray.MenuItem{
 			{Title: "打开 Gleam", OnClick: openWindow},
+			{Title: "在浏览器中打开", OnClick: openInBrowser},
 			{Title: "", Disabled: true, SepAfter: true},
 			{Title: "退出", OnClick: func() {
 				desktop.CloseWindow()

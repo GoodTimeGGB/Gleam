@@ -3,19 +3,18 @@ package desktop
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"gleam/internal/buildinfo"
 )
 
 func TestChromeAppArgsIncludesProfileAndAppURL(t *testing.T) {
-	args := chromeAppArgs("http://127.0.0.1:8787/", `C:\Users\x\.gleam\browser-profile`, "Gleam · 微光")
-	joined := ""
-	for _, a := range args {
-		joined += a + "\n"
-	}
+	args := chromeAppArgs("http://127.0.0.1:8787/", `C:\Users\x\.gleam\browser-profile\1.0.2`, "Gleam · 微光")
 	for _, want := range []string{
 		"--app=http://127.0.0.1:8787/",
-		"--user-data-dir=C:\\Users\\x\\.gleam\\browser-profile",
+		`--user-data-dir=C:\Users\x\.gleam\browser-profile\1.0.2`,
 		"--app-name=Gleam · 微光",
 		"--window-name=Gleam · 微光",
 		"--no-first-run",
@@ -24,7 +23,19 @@ func TestChromeAppArgsIncludesProfileAndAppURL(t *testing.T) {
 			t.Errorf("chromeAppArgs missing %q; got %v", want, args)
 		}
 	}
-	_ = joined
+}
+
+func TestChromeAppArgsWithGPUFallback(t *testing.T) {
+	args := chromeAppArgsWithGPUFallback("http://x/", `C:\p`, "Gleam · 微光")
+	for _, want := range []string{"--disable-gpu", "--disable-gpu-compositing", "--app=http://x/"} {
+		if !containsLine(args, want) {
+			t.Errorf("GPU fallback args missing %q; got %v", want, args)
+		}
+	}
+	base := chromeAppArgs("http://x/", `C:\p`, "Gleam · 微光")
+	if len(args) != len(base)+len(gpuSoftFallbackFlags()) {
+		t.Errorf("len=%d want %d", len(args), len(base)+len(gpuSoftFallbackFlags()))
+	}
 }
 
 func containsLine(args []string, want string) bool {
@@ -36,21 +47,29 @@ func containsLine(args []string, want string) bool {
 	return false
 }
 
-func TestShouldFallbackAfterAppLaunch(t *testing.T) {
+func TestAppShellReadyAndRetry(t *testing.T) {
 	cases := []struct {
-		n    int
-		ok   bool
-		want bool
+		n      int
+		ok     bool
+		ready  bool
+		retry0 bool
+		retry1 bool
 	}{
-		{0, false, true},
-		{0, true, true},
-		{1, false, true},
-		{1, true, false},
-		{2, true, false},
+		{0, false, false, true, false},
+		{0, true, false, true, false},
+		{1, false, false, true, false},
+		{1, true, true, false, false},
+		{2, true, true, false, false},
 	}
 	for _, c := range cases {
-		if got := shouldFallbackAfterAppLaunch(c.n, c.ok); got != c.want {
-			t.Errorf("shouldFallbackAfterAppLaunch(%d,%v)=%v want %v", c.n, c.ok, got, c.want)
+		if got := appShellReady(c.n, c.ok); got != c.ready {
+			t.Errorf("appShellReady(%d,%v)=%v want %v", c.n, c.ok, got, c.ready)
+		}
+		if got := shouldRetryAppLaunch(0, c.n, c.ok); got != c.retry0 {
+			t.Errorf("shouldRetryAppLaunch(0,%d,%v)=%v want %v", c.n, c.ok, got, c.retry0)
+		}
+		if got := shouldRetryAppLaunch(1, c.n, c.ok); got != c.retry1 {
+			t.Errorf("shouldRetryAppLaunch(1,%d,%v)=%v want %v", c.n, c.ok, got, c.retry1)
 		}
 	}
 }
@@ -110,9 +129,32 @@ func TestWaitUntil(t *testing.T) {
 	}
 }
 
-func TestProfileDirPath(t *testing.T) {
+func TestProfileDirPathVersioned(t *testing.T) {
 	p := profileDirPath()
-	if p == "" || filepath.Base(p) != "browser-profile" {
-		t.Errorf("unexpected profile dir %q", p)
+	if filepath.Base(p) != buildinfo.Version {
+		t.Errorf("profile dir base = %q, want version %q (full %q)", filepath.Base(p), buildinfo.Version, p)
+	}
+	if !strings.Contains(p, filepath.Join(".gleam", "browser-profile")) {
+		t.Errorf("expected ~/.gleam/browser-profile/<ver>, got %q", p)
+	}
+	fixed := profileDirPathFor("1.2.3")
+	if filepath.Base(fixed) != "1.2.3" {
+		t.Errorf("profileDirPathFor = %q", fixed)
+	}
+	empty := profileDirPathFor("")
+	if filepath.Base(empty) != "dev" {
+		t.Errorf("empty ver should be dev, got %q", empty)
+	}
+	alt := alternateProfileDir(fixed)
+	if alt != fixed+"-alt" {
+		t.Errorf("alternateProfileDir = %q", alt)
+	}
+}
+
+func TestProfileDirPathSanitizes(t *testing.T) {
+	p := profileDirPathFor("bad/ver:name")
+	base := filepath.Base(p)
+	if strings.ContainsAny(base, "/\\:*?\"<>|") {
+		t.Errorf("unsanitized base %q", base)
 	}
 }

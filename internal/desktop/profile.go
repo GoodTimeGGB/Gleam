@@ -4,19 +4,48 @@ package desktop
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"gleam/internal/buildinfo"
 )
 
 // profileDirPath returns the dedicated Chromium user-data-dir for Gleam --app windows.
-// Isolating the profile keeps the shell out of the user's default Edge/Chrome session,
-// but it also means a second spawn with the same dir hits SingletonLock and often paints
-// a blank white window — callers must not spawn --app while the lock is held.
+// Isolating the profile keeps the shell out of the user's default Edge/Chrome session.
+// The path is versioned (~/.gleam/browser-profile/<ver>) so an upgrade does not reuse
+// a lock/profile state that belonged to an older Desktop build.
 func profileDirPath() string {
+	return profileDirPathFor(buildinfo.Version)
+}
+
+// profileDirPathFor builds ~/.gleam/browser-profile/<ver>. Empty ver becomes "dev".
+func profileDirPathFor(ver string) string {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		home = "."
 	}
-	return filepath.Join(home, ".gleam", "browser-profile")
+	ver = strings.TrimSpace(ver)
+	if ver == "" {
+		ver = "dev"
+	}
+	ver = strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			return '-'
+		default:
+			return r
+		}
+	}, ver)
+	return filepath.Join(home, ".gleam", "browser-profile", ver)
+}
+
+// alternateProfileDir returns the one-shot retry profile sibling (primary + "-alt").
+// Used when the first --app spawn fails to paint; keeps the primary profile intact.
+func alternateProfileDir(primary string) string {
+	if primary == "" {
+		return "browser-profile-alt"
+	}
+	return primary + "-alt"
 }
 
 // chromiumProfileLockNames are files Chromium writes under user-data-dir while a
@@ -88,12 +117,29 @@ func chromeAppArgs(target, profile, appName string) []string {
 	}
 }
 
-// shouldFallbackAfterAppLaunch is true when an --app spawn failed to produce a
-// titled Gleam window within the readiness wait (blank/white shell, profile lock
-// race, or broken Chrome --app on that machine). Callers should open the system
-// default browser instead of leaving a useless empty window.
-func shouldFallbackAfterAppLaunch(titledWindowCount int, readinessOK bool) bool {
-	return !readinessOK || titledWindowCount <= 0
+// gpuSoftFallbackFlags are optional Chromium flags for a single retry when the first
+// --app spawn fails to produce a titled window (GPU/compositor glitches on some GPUs).
+func gpuSoftFallbackFlags() []string {
+	return []string{
+		"--disable-gpu",
+		"--disable-gpu-compositing",
+	}
+}
+
+// chromeAppArgsWithGPUFallback is chromeAppArgs plus GPU soft-fallback flags.
+func chromeAppArgsWithGPUFallback(target, profile, appName string) []string {
+	return append(chromeAppArgs(target, profile, appName), gpuSoftFallbackFlags()...)
+}
+
+// appShellReady is true when --app produced a titled Gleam window within the readiness wait.
+func appShellReady(titledWindowCount int, readinessOK bool) bool {
+	return readinessOK && titledWindowCount > 0
+}
+
+// shouldRetryAppLaunch reports whether the first --app attempt failed and a single
+// alternate-flags/profile retry should run. attempt is 0-based (only attempt 0 retries).
+func shouldRetryAppLaunch(attempt int, titledWindowCount int, readinessOK bool) bool {
+	return attempt == 0 && !appShellReady(titledWindowCount, readinessOK)
 }
 
 // preferEdgeOverChrome keeps Edge before Chrome in the candidate list.

@@ -225,6 +225,7 @@ const MenuBar = (() => {
   const pop = $('#menubar-pop');
   let openId = null;
   let focusBefore = null;
+  let byKeyboard = false;   // 鼠标打开的菜单按 Esc 关掉时，不把焦点环留在菜单按钮上
 
   // 浏览器里没有 webContents：编辑项退回 execCommand，剪贴板读取走 Clipboard API
   function browserEdit(act) {
@@ -312,6 +313,7 @@ const MenuBar = (() => {
     const btn = bar.querySelector(`[data-menu="${id}"]`);
     if (!btn) return;
     if (!openId) focusBefore = document.activeElement;
+    byKeyboard = !!focusFirst;
     openId = id;
     bar.querySelectorAll('.menubar-item').forEach((b) => b.setAttribute('aria-expanded', String(b === btn)));
     render(id);
@@ -353,7 +355,7 @@ const MenuBar = (() => {
     if (openId && !pop.contains(e.target) && !bar.contains(e.target)) close();
   }, true);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && openId) { e.preventDefault(); e.stopPropagation(); const b = bar.querySelector(`[data-menu="${openId}"]`); close(); if (b) b.focus(); }
+    if (e.key === 'Escape' && openId) { e.preventDefault(); e.stopPropagation(); const b = bar.querySelector(`[data-menu="${openId}"]`); const kb = byKeyboard; close(); if (b && kb) b.focus(); }
   }, true);
   window.addEventListener('blur', close);
   window.addEventListener('resize', close);

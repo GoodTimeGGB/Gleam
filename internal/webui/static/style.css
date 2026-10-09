@@ -4296,3 +4296,58 @@ html[data-theme] ::-webkit-scrollbar-track { background: transparent; }
   html[data-theme] .rail[data-overlay="open"] .rail-head { border-bottom-color: var(--surface-line); }
   .app { grid-template-columns: 0 minmax(0, 1fr) 0; }
 }
+
+/* ===================================================================
+ * v8：品牌——官方折角标记 + 微光黄绿（#D7FB58）作为默认主题「微光」。
+ * 黄绿在白底上只有 1.18:1，所以浅色模式把它只用在「填充」上（发送 / 主按钮），
+ * 文字、链接、焦点环、选中态用同色相加深的橄榄绿 #556812（白底 6.22:1）。
+ * 深色模式底色贴近 #0B0B0A，黄绿直接做文字与线条（16.7:1）。
+ * 填充色单独走 --accent-fill / --on-accent-fill：其它主题默认等于原强调色，行为不变。
+ * =================================================================== */
+html[data-theme] {
+  --accent-fill: var(--color-accent); --accent-fill-strong: var(--accent-strong); --on-accent-fill: var(--color-on-accent);
+  --focus-ring: rgba(var(--accent-rgb) / 0.45); --brand-bg: #0B0B0A; --brand-lime: #D7FB58;
+}
+html[data-accent="gleam"] {
+  --color-accent: #D7FB58; --accent-rgb: 215 251 88; --accent-strong: #C9F03C; --color-on-accent: #0B0B0A;
+}
+html[data-theme="light"][data-accent="gleam"] {
+  --frame: #F5F5F2; --panel: #FFFFFF; --line: #E6E6E1; --surface: #FFFFFF; --surface-line: #E7E7E2;
+  --heat-0: #EDEDE8; --nav-sel: #E6E7E0; --hover: rgba(30 32 10 / 0.045);
+  --color-bg: #F5F5F2;
+  --color-fg: #1A1A17; --color-fg-muted: #5E5F57; --color-fg-faint: #7A7B72;
+  --color-accent: #556812; --accent-rgb: 85 104 18; --accent-strong: #46560F; --color-on-accent: #FFFFFF;
+  --accent-fill: #D7FB58; --accent-fill-strong: #C9F03C; --on-accent-fill: #0B0B0A;
+  --focus-ring: #556812;
+  --pop-shadow: 0 10px 28px -8px rgba(0 0 0 / 0.14), 0 2px 6px rgba(0 0 0 / 0.04);
+}
+html[data-theme="dark"][data-accent="gleam"] {
+  --frame: #161615; --panel: #0B0B0A; --line: #2A2A27; --surface: #121211; --surface-line: #2A2A27;
+  --heat-0: #1F1F1D; --nav-sel: rgba(255 255 255 / 0.09); --hover: rgba(255 255 255 / 0.05);
+  --color-bg: #161615; --color-card: #121211;
+  --color-fg: #ECEDE8; --color-fg-muted: #A3A49C; --color-fg-faint: #7C7D76;
+  --color-accent: #D7FB58; --accent-rgb: 215 251 88; --accent-strong: #C9F03C; --color-on-accent: #0B0B0A;
+  --accent-fill: #D7FB58; --accent-fill-strong: #C9F03C; --on-accent-fill: #0B0B0A;
+  --focus-ring: rgba(215 251 88 / 0.6);
+}
+
+/* 大面积填充：发送键、主按钮、品牌方块——用 fill 色 + 深色字 */
+html[data-theme] .btn-primary, html[data-theme] .send-btn, html[data-theme] .composer .send-btn { background: var(--accent-fill); color: var(--on-accent-fill); }
+html[data-theme] .btn-primary:hover:not(:disabled), html[data-theme] .send-btn:hover:not(:disabled), html[data-theme] .composer .send-btn:hover:not(:disabled) { background: var(--accent-fill-strong); color: var(--on-accent-fill); }
+html[data-theme] .send-btn svg { color: var(--on-accent-fill); }
+/* 焦点环：浅色微光用实心橄榄绿，满足 3:1 */
+html[data-theme] :focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
+html[data-theme] .btn:focus-visible { border-color: var(--focus-ring); box-shadow: 0 0 0 2px rgba(var(--accent-rgb) / 0.22); }
+html[data-theme="light"][data-accent="gleam"] .btn:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
+html[data-theme="light"][data-accent="gleam"] .input:focus, html[data-theme="light"][data-accent="gleam"] .textarea:focus,
+html[data-theme="light"][data-accent="gleam"] .input:focus-visible, html[data-theme="light"][data-accent="gleam"] .textarea:focus-visible { border-color: var(--color-accent); }
+
+/* 品牌标记：始终是深色方块 + 黄绿折角，不随主题变色 */
+.brand-tile { display: block; flex: none; border-radius: 22%; }
+.topbar-brand { gap: 8px; }
+.topbar-brand .brand-tile { width: 18px; height: 18px; border-radius: 4px; }
+.hero-art .brand-tile { width: 96px; height: 96px; border-radius: 21px; }
+html[data-theme="dark"] .hero-art .brand-tile { box-shadow: 0 0 0 1px var(--line); }
+.onboarding-icon .brand-tile { width: 48px; height: 48px; border-radius: 11px; }
+.onboarding-icon:has(.brand-tile) { background: none; box-shadow: none; }
+.accent-swatch[data-accent="gleam"] span { box-shadow: inset 0 0 0 1px rgba(11 11 10 / 0.18); }

@@ -1,12 +1,22 @@
 //go:build ignore
 
-// 生成 Gleam 应用图标 assets/gleam.ico（多尺寸 PNG 压缩 ICO）。
-// 新 logo：黄绿色 "<" 折角符号 + 深色圆角背景。
+// 生成 Gleam 应用图标。图形来源是 assets/gleam-logo.svg 里的同一条路径（官方折角 "<" 标记，
+// 黄绿 #d7fb58，底色 #0b0b0a），这里只做栅格化，改图形请先改 SVG 再同步 markPath。
+//
+// 产物：
+//
+//	assets/gleam.ico                     Windows 图标：16/24/32/48/64/128/256（PNG 压缩 ICO）
+//	assets/icons/gleam-<N>.png           圆角方块 PNG：16…1024（构建、托盘、Electron 都从这里取）
+//	assets/icons/gleam-macos-1024.png    macOS 网格版：主体 824/1024 居中留边
+//	assets/gleam.icns                    macOS 图标：ic07…ic14（内含 PNG）
+//
 // 用法：go run scripts/make-icon.go
+// Windows 资源（exe 图标）再跑一次：rsrc -ico assets/gleam.ico -arch amd64 -o cmd/gleam/rsrc_windows_amd64.syso
 package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"image/png"
@@ -14,191 +24,247 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 )
 
-// drawIcon 绘制 Gleam 折角图标：深色圆角底 + 黄绿色 "<" 折角。
-func drawIcon(size int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	s := float64(size)
+// markPath 与 assets/gleam-logo.svg 完全相同（1024×1024 坐标系，由参考稿矢量化得到）。
+const markPath = "M761.6 179.9C757.1 181.7 681.7 214.6 638.5 233.6C629.9 237.4 613.3 244.7 601.6 249.9C579 259.8 487.5 300.5 465.2 310.5C426.4 327.9 413.5 333.5 385.8 344.9C312.4 375.1 282.9 388.8 253.2 406.5C232.8 418.7 229.3 425 226.3 455.7C221.5 504.6 223.8 573.8 231.2 599.3C234.5 611.1 238.6 615.1 259.3 626.5C309 654.2 406 697.8 634.4 795.1C664.6 808 697.7 822.2 707.8 826.6C749.1 844.6 754.9 846.5 768 846.6C785.5 846.6 797 827.4 799.7 793.4C802.1 763.9 793.6 714.2 784.6 705.4C771.3 692.3 703.2 660.9 491.3 570.1C386.5 525.2 378.1 521.5 375.6 519.5C372.6 517.1 373.4 515 378.3 512.6C380 511.7 480.1 466.7 499.7 458C502.4 456.8 531.4 443.8 564.2 429.1C635.1 397.3 627.7 400.5 655.9 388.6C749.7 349 786.9 327.2 793.3 308.2C799.3 290.2 799.8 210.6 794.1 195.2C790.3 185.4 770.9 176.2 761.6 179.9Z"
 
-	// 背景色 #1a1a1a
-	bgR, bgG, bgB := uint8(0x1a), uint8(0x1a), uint8(0x1a)
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			a := uint8(roundedAlpha(float64(x)+0.5, float64(y)+0.5, s, s*0.18))
-			img.SetRGBA(x, y, color.RGBA{bgR, bgG, bgB, a})
+var (
+	bgColor   = color.NRGBA{0x0b, 0x0b, 0x0a, 0xff}
+	markColor = color.NRGBA{0xd7, 0xfb, 0x58, 0xff}
+)
+
+const cornerRatio = 0.22 // 圆角半径 / 边长
+
+type pt struct{ x, y float64 }
+
+// parsePath 只认 potrace 输出用到的 M / C / Z（绝对坐标），返回展平后的多边形。
+func parsePath(d string) [][]pt {
+	r := strings.NewReplacer("M", " M ", "C", " C ", "Z", " Z ", ",", " ")
+	tok := strings.Fields(r.Replace(d))
+	var polys [][]pt
+	var cur []pt
+	num := func(i int) float64 { v, _ := strconv.ParseFloat(tok[i], 64); return v }
+	for i := 0; i < len(tok); {
+		switch tok[i] {
+		case "M":
+			if len(cur) > 0 {
+				polys = append(polys, cur)
+			}
+			cur = []pt{{num(i + 1), num(i + 2)}}
+			i += 3
+		case "C":
+			i++
+			for i+5 < len(tok) && !isCmd(tok[i]) {
+				p0 := cur[len(cur)-1]
+				p1, p2, p3 := pt{num(i), num(i + 1)}, pt{num(i + 2), num(i + 3)}, pt{num(i + 4), num(i + 5)}
+				for k := 1; k <= 24; k++ {
+					t := float64(k) / 24
+					u := 1 - t
+					cur = append(cur, pt{
+						u*u*u*p0.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
+						u*u*u*p0.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y,
+					})
+				}
+				i += 6
+			}
+		case "Z":
+			polys = append(polys, cur)
+			cur = nil
+			i++
+		default:
+			i++
 		}
 	}
-
-	thick := s * 0.18
-	halfT := thick / 2
-	vx, vy := s*0.20, s*0.50
-	tx, ty := s*0.80, s*0.20
-	bx, by := s*0.80, s*0.80
-
-	// 上臂方向及法向量
-	tDX, tDY := tx-vx, ty-vy
-	tLen := math.Hypot(tDX, tDY)
-	tNX, tNY := -tDY/tLen, tDX/tLen
-
-	// 下臂方向及法向量
-	bDX, bDY := bx-vx, by-vy
-	bLen := math.Hypot(bDX, bDY)
-	bNX, bNY := -bDY/bLen, bDX/bLen
-
-	chevCol := color.RGBA{0xC8, 0xE8, 0x4D, 255}
-
-	// 上臂平行四边形四角
-	topArm := [4][2]float64{
-		{vx - tNX*halfT, vy - tNY*halfT},
-		{tx - tNX*halfT, ty - tNY*halfT},
-		{tx + tNX*halfT, ty + tNY*halfT},
-		{vx + tNX*halfT, vy + tNY*halfT},
+	if len(cur) > 0 {
+		polys = append(polys, cur)
 	}
-	// 下臂平行四边形四角
-	botArm := [4][2]float64{
-		{vx - bNX*halfT, vy - bNY*halfT},
-		{bx - bNX*halfT, by - bNY*halfT},
-		{bx + bNX*halfT, by + bNY*halfT},
-		{vx + bNX*halfT, vy + bNY*halfT},
+	return polys
+}
+
+func isCmd(s string) bool { return s == "M" || s == "C" || s == "Z" }
+
+// coverage 用 n×n 子采样 + 非零环绕扫描线算每个像素被多边形覆盖的比例。
+func coverage(polys [][]pt, size int, scale, offX, offY float64) []float64 {
+	const n = 8
+	cov := make([]float64, size*size)
+	for y := 0; y < size; y++ {
+		for sy := 0; sy < n; sy++ {
+			py := float64(y) + (float64(sy)+0.5)/n
+			type cross struct {
+				x float64
+				w int
+			}
+			var xs []cross
+			for _, poly := range polys {
+				for i := range poly {
+					a, b := poly[i], poly[(i+1)%len(poly)]
+					ay, by := a.y*scale+offY, b.y*scale+offY
+					if (ay <= py) == (by <= py) {
+						continue
+					}
+					t := (py - ay) / (by - ay)
+					x := a.x*scale + offX + t*(b.x-a.x)*scale
+					w := 1
+					if by < ay {
+						w = -1
+					}
+					xs = append(xs, cross{x, w})
+				}
+			}
+			sort.Slice(xs, func(i, j int) bool { return xs[i].x < xs[j].x })
+			wind := 0
+			for k := 0; k+1 <= len(xs); k++ {
+				wind += xs[k].w
+				if wind == 0 || k+1 == len(xs) {
+					continue
+				}
+				x0, x1 := xs[k].x, xs[k+1].x
+				for sx := 0; sx < n; sx++ {
+					off := (float64(sx) + 0.5) / n
+					for x := int(math.Floor(x0 - off)); x <= int(math.Ceil(x1)); x++ {
+						px := float64(x) + off
+						if px >= x0 && px < x1 && x >= 0 && x < size {
+							cov[y*size+x] += 1.0 / (n * n)
+						}
+					}
+				}
+			}
+		}
 	}
+	return cov
+}
 
-	fillPoly(img, topArm[:], chevCol)
-	fillPoly(img, botArm[:], chevCol)
+// roundedCoverage 圆角方块的覆盖率（同样子采样，边缘抗锯齿）。
+func roundedCoverage(size int, x0, y0, w, rad float64) []float64 {
+	const n = 8
+	cov := make([]float64, size*size)
+	inside := func(px, py float64) bool {
+		if px < x0 || py < y0 || px > x0+w || py > y0+w {
+			return false
+		}
+		cx := math.Max(x0+rad, math.Min(px, x0+w-rad))
+		cy := math.Max(y0+rad, math.Min(py, y0+w-rad))
+		return math.Hypot(px-cx, py-cy) <= rad
+	}
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			c := 0
+			for sy := 0; sy < n; sy++ {
+				for sx := 0; sx < n; sx++ {
+					if inside(float64(x)+(float64(sx)+0.5)/n, float64(y)+(float64(sy)+0.5)/n) {
+						c++
+					}
+				}
+			}
+			cov[y*size+x] = float64(c) / (n * n)
+		}
+	}
+	return cov
+}
 
-	// 臂端圆头
-	drawCap(img, tx, ty, halfT, chevCol)
-	drawCap(img, bx, by, halfT, chevCol)
-
+// drawIcon 画一个 size 像素的图标；body 是方块占边长的比例（macOS 网格用 824/1024），rounded 控制是否圆角。
+func drawIcon(size int, body float64, rounded bool) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	s := float64(size)
+	w := s * body
+	x0 := (s - w) / 2
+	rad := 0.0
+	if rounded {
+		rad = w * cornerRatio
+	}
+	tile := roundedCoverage(size, x0, x0, w, rad)
+	mark := coverage(parsePath(markPath), size, w/1024, x0, x0)
+	for i := range tile {
+		ta := tile[i]
+		ma := math.Min(mark[i], ta)
+		if ta <= 0 {
+			continue
+		}
+		mix := func(b, m uint8) uint8 {
+			if ta == 0 {
+				return 0
+			}
+			v := (float64(b)*(ta-ma) + float64(m)*ma) / ta
+			return uint8(math.Round(v))
+		}
+		img.Pix[i*4+0] = mix(bgColor.R, markColor.R)
+		img.Pix[i*4+1] = mix(bgColor.G, markColor.G)
+		img.Pix[i*4+2] = mix(bgColor.B, markColor.B)
+		img.Pix[i*4+3] = uint8(math.Round(ta * 255))
+	}
 	return img
 }
 
-// fillPoly 用扫描线填充凸多边形。
-func fillPoly(img *image.RGBA, poly [][2]float64, col color.RGBA) {
-	n := len(poly)
-	size := img.Bounds().Dx()
-	for y := 0; y < size; y++ {
-		py := float64(y) + 0.5
-		var xs []float64
-		for i := 0; i < n; i++ {
-			j := (i + 1) % n
-			y0, y1 := poly[i][1], poly[j][1]
-			if (y0 <= py && py < y1) || (y1 <= py && py < y0) {
-				t := (py - y0) / (y1 - y0)
-				xs = append(xs, poly[i][0]+t*(poly[j][0]-poly[i][0]))
-			}
-		}
-		sort.Float64s(xs)
-		for k := 0; k+1 < len(xs); k += 2 {
-			x0 := int(math.Ceil(xs[k] - 0.5))
-			x1 := int(math.Floor(xs[k+1] - 0.5))
-			for x := x0; x <= x1; x++ {
-				if x >= 0 && x < size && img.At(x, y).(color.RGBA).A > 0 {
-					img.SetRGBA(x, y, col)
-				}
-			}
-		}
+func encode(img image.Image) []byte {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
 	}
+	return buf.Bytes()
 }
 
-// drawCap 在指定位置画一个实心圆，用于臂端圆头。
-func drawCap(img *image.RGBA, cx, cy, r float64, col color.RGBA) {
-	size := img.Bounds().Dx()
-	ri := int(math.Ceil(r))
-	for dy := -ri; dy <= ri; dy++ {
-		for dx := -ri; dx <= ri; dx++ {
-			x, y := int(cx)+dx, int(cy)+dy
-			if x < 0 || x >= size || y < 0 || y >= size {
-				continue
-			}
-			if math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy) <= r {
-				if img.At(x, y).(color.RGBA).A > 0 {
-					img.SetRGBA(x, y, col)
-				}
-			}
-		}
-	}
-}
-
-func roundedAlpha(px, py, size, rad float64) float64 {
-	in := func(v, lo, hi float64) bool { return v >= lo && v <= hi }
-	if in(px, rad, size-rad) || in(py, rad, size-rad) {
-		return 255
-	}
-	cx := math.Max(rad, math.Min(px, size-rad))
-	cy := math.Max(rad, math.Min(py, size-rad))
-	if d := math.Hypot(px-cx, py-cy); d <= rad {
-		return 255
-	}
-	return 0
-}
-
-func main() {
-	sizes := []int{256, 64, 48, 32, 16}
-	type entry struct {
-		size  int
-		bytes []byte
-	}
-	var entries []entry
+func writeICO(path string, sizes []int) {
+	var out bytes.Buffer
+	le := binary.LittleEndian
+	_ = binary.Write(&out, le, [3]uint16{0, 1, uint16(len(sizes))})
+	var blobs [][]byte
 	for _, s := range sizes {
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, drawIcon(s)); err != nil {
-			panic(err)
-		}
-		entries = append(entries, entry{s, buf.Bytes()})
+		blobs = append(blobs, encode(drawIcon(s, 1, true)))
 	}
+	offset := 6 + 16*len(sizes)
+	for i, s := range sizes {
+		dim := uint8(s)
+		if s >= 256 {
+			dim = 0
+		}
+		out.Write([]byte{dim, dim, 0, 0})
+		_ = binary.Write(&out, le, uint16(1))
+		_ = binary.Write(&out, le, uint16(32))
+		_ = binary.Write(&out, le, uint32(len(blobs[i])))
+		_ = binary.Write(&out, le, uint32(offset))
+		offset += len(blobs[i])
+	}
+	for _, b := range blobs {
+		out.Write(b)
+	}
+	must(os.WriteFile(path, out.Bytes(), 0o644))
+}
 
-	_ = os.MkdirAll("assets", 0o755)
-	f, err := os.Create(filepath.Join("assets", "gleam.ico"))
+// writeICNS 写 macOS 图标：每个条目是「4 字节类型 + 4 字节大端长度 + PNG」。
+func writeICNS(path string) {
+	entries := []struct {
+		typ  string
+		size int
+	}{{"ic11", 32}, {"ic12", 64}, {"ic07", 128}, {"ic08", 256}, {"ic13", 256}, {"ic09", 512}, {"ic14", 512}, {"ic10", 1024}}
+	var body bytes.Buffer
+	for _, e := range entries {
+		data := encode(drawIcon(e.size, 824.0/1024, true))
+		body.WriteString(e.typ)
+		_ = binary.Write(&body, binary.BigEndian, uint32(8+len(data)))
+		body.Write(data)
+	}
+	var out bytes.Buffer
+	out.WriteString("icns")
+	_ = binary.Write(&out, binary.BigEndian, uint32(8+body.Len()))
+	out.Write(body.Bytes())
+	must(os.WriteFile(path, out.Bytes(), 0o644))
+}
+
+func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
-	be := newBina(f)
-	be.u16(0)
-	be.u16(1)
-	be.u16(uint16(len(entries)))
-	offset := 6 + 16*len(entries)
-	for _, e := range entries {
-		dim := e.size
-		if dim >= 256 {
-			dim = 0
-		}
-		be.u8(dim)
-		be.u8(dim)
-		be.u8(0)
-		be.u8(0)
-		be.u16(1)
-		be.u16(32)
-		be.u32(uint32(len(e.bytes)))
-		be.u32(uint32(offset))
-		offset += len(e.bytes)
-	}
-	for _, e := range entries {
-		if _, err := f.Write(e.bytes); err != nil {
-			panic(err)
-		}
-	}
 }
 
-type binary struct{ f *os.File }
-
-func newBina(f *os.File) *binary { return &binary{f: f} }
-
-func (b *binary) u8(v int) {
-	var p [1]byte
-	p[0] = byte(v)
-	_, _ = b.f.Write(p[:])
-}
-func (b *binary) u16(v uint16) {
-	var p [2]byte
-	p[0], p[1] = byte(v), byte(v>>8)
-	_, _ = b.f.Write(p[:])
-}
-func (b *binary) u32(v uint32) {
-	var p [4]byte
-	for i := 0; i < 4; i++ {
-		p[i] = byte(v >> (8 * i))
+func main() {
+	must(os.MkdirAll(filepath.Join("assets", "icons"), 0o755))
+	writeICO(filepath.Join("assets", "gleam.ico"), []int{16, 24, 32, 48, 64, 128, 256})
+	for _, s := range []int{16, 24, 32, 48, 64, 128, 256, 512, 1024} {
+		must(os.WriteFile(filepath.Join("assets", "icons", "gleam-"+strconv.Itoa(s)+".png"), encode(drawIcon(s, 1, true)), 0o644))
 	}
-	_, _ = b.f.Write(p[:])
+	must(os.WriteFile(filepath.Join("assets", "icons", "gleam-macos-1024.png"), encode(drawIcon(1024, 824.0/1024, true)), 0o644))
+	writeICNS(filepath.Join("assets", "gleam.icns"))
 }

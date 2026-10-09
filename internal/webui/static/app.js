@@ -4108,8 +4108,8 @@ function setThreadMode(on) {
   document.querySelector('.cue-deck').style.display = on ? 'none' : '';
 }
 
-// 首页 / 空任务的插图位：Gleam 自己的折线标记，与 index.html 里的静态版保持一致
-const HERO_ART = `<div class="hero-art" aria-hidden="true"><svg viewBox="0 0 96 96" width="96" height="96" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="18" width="60" height="60" rx="18" stroke-width="1.6" opacity=".35"/><g stroke-width="3"><circle cx="48" cy="48" r="7"/><path d="M48 30v6M48 60v6M30 48h6M60 48h6M35.3 35.3l4.2 4.2M56.5 56.5l4.2 4.2M35.3 60.7l4.2-4.2M56.5 39.5l4.2-4.2"/></g></svg></div>`;
+// 首页 / 空任务的插图位：Gleam 官方折角标记（深色方块 + 黄绿 "<"），与 index.html 里的静态版保持一致
+const HERO_ART = `<div class="hero-art" aria-hidden="true"><img class="brand-tile" src="/assets/gleam-logo.svg" width="96" height="96" alt=""></div>`;
 
 function resetFeedToEmpty(title, desc, opts = {}) {
   const feed = $('#goal-feed');
@@ -4810,7 +4810,7 @@ async function runGEOAnalyze() {
  * ============================================================ */
 const UIPrefs = (() => {
   const KEY = 'gleam-ui';
-  let p = Object.assign({ themeMode: 'light', accent: 'emerald', lang: 'zh', font: 'sans', text: 's', zoom: 'm', width: 'standard' }, load());
+  let p = Object.assign({ themeMode: 'light', accent: 'gleam', lang: 'zh', font: 'sans', text: 's', zoom: 'm', width: 'standard' }, load());
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* 隐私模式 */ } }
   function get() { return p; }
@@ -4827,7 +4827,7 @@ function applyTheme() {
   const { themeMode, accent } = UIPrefs.get();
   const dark = effectiveDark();
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-  document.documentElement.setAttribute('data-accent', accent || 'emerald');
+  document.documentElement.setAttribute('data-accent', accent || 'gleam');
   const mc = document.querySelector('meta[name="theme-color"]');
   if (mc) {
     // 取当前主题的窗框色：每个主题各自定义 --frame，这里不再写死两种
@@ -4880,7 +4880,7 @@ const I18N_EN = {
   '个人': 'Personal', '智能体': 'Agent', '安全': 'Safety', '开发': 'Developer', '协作': 'Collaboration', '外观': 'Appearance',
   '模型': 'Model', '引擎': 'Engine', 'Go 工具链': 'Go toolchain', '账号与登录': 'Account', '累计任务': 'Tasks', '连续成功': 'Streak', '本周 tokens': 'Tokens this week',
   '语言': 'Language', '明暗模式': 'Mode', '主题': 'Theme', '字体风格': 'Font', '文字大小': 'Text size', '界面缩放': 'Zoom', '内容宽度': 'Content width',
-  '系统': 'System', '浅色': 'Light', '深色': 'Dark', '跟随系统': 'System', '森林': 'Forest', '薄荷': 'Mint', '蜜蜂': 'Bee', '羊皮纸': 'Parchment',
+  '系统': 'System', '浅色': 'Light', '深色': 'Dark', '跟随系统': 'System', '微光': 'Gleam', '森林': 'Forest', '薄荷': 'Mint', '蜜蜂': 'Bee', '羊皮纸': 'Parchment',
   '无衬线': 'Sans', '衬线': 'Serif', '小': 'S', '中': 'M', '大': 'L', '标准': 'Standard', '宽': 'Wide',
   '使用统计与成长': 'Usage & growth', '检查更新': 'Check for updates', '帮助与反馈': 'Help & feedback', '账号与本地数据': 'Account & local data', '退出登录': 'Sign out',
   '所有任务': 'All tasks', '选择': 'select', '打开': 'open', '个': '',

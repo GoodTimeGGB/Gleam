@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/chrome.css">
+  <link rel="stylesheet" href="/assets/settings2.css">
   <script>
   // 首帧主题引导：在渲染前应用本地保存的皮肤，避免闪烁。
   (function () {
@@ -666,41 +667,75 @@
             <input class="input" id="settings-search" placeholder="搜索设置…" autocomplete="off">
           </div>
           <div class="settings-group-label">个人</div>
-          <button class="settings-tab active" data-stab="persona" role="tab" aria-selected="true">协作</button>
-          <button class="settings-tab" data-stab="appearance" role="tab" aria-selected="false">外观</button>
+          <button class="settings-tab active" data-stab="profile" role="tab" aria-selected="true">个人资料</button>
+          <button class="settings-tab" data-stab="general" role="tab" aria-selected="false">常规</button>
+          <button class="settings-tab" data-stab="modes" role="tab" aria-selected="false">模式配置</button>
+          <button class="settings-tab" data-stab="monitor" role="tab" aria-selected="false">任务监控</button>
           <button class="settings-tab" data-stab="shortcuts" role="tab" aria-selected="false">快捷键</button>
-          <div class="settings-group-label">智能体</div>
+          <button class="settings-tab" data-stab="appearance" role="tab" aria-selected="false">外观</button>
           <button class="settings-tab" data-stab="llm" role="tab" aria-selected="false">模型</button>
-          <button class="settings-tab" data-stab="engine" role="tab" aria-selected="false">引擎</button>
           <button class="settings-tab" data-stab="memory" role="tab" aria-selected="false">记忆</button>
-          <div class="settings-group-label">安全</div>
+          <div class="settings-group-label">集成</div>
+          <button class="settings-tab" data-stab="ext" role="tab" aria-selected="false">扩展管理</button>
+          <button class="settings-tab" data-stab="hooks" role="tab" aria-selected="false">钩子</button>
+          <button class="settings-tab" data-stab="computer" role="tab" aria-selected="false">电脑操控</button>
+          <div class="settings-group-label">编程</div>
+          <button class="settings-tab" data-stab="git" role="tab" aria-selected="false">Git</button>
+          <button class="settings-tab" data-stab="worktrees" role="tab" aria-selected="false">Worktrees</button>
+          <button class="settings-tab" data-stab="index" role="tab" aria-selected="false">工作区索引</button>
+          <button class="settings-tab" data-stab="conn" role="tab" aria-selected="false">连接</button>
           <button class="settings-tab" data-stab="safety" role="tab" aria-selected="false">安全</button>
-          <div class="settings-group-label">开发</div>
           <button class="settings-tab" data-stab="go" role="tab" aria-selected="false">Go 工具链</button>
+          <button class="settings-tab" data-stab="engine" role="tab" aria-selected="false">引擎</button>
+          <div class="settings-group-label">归档管理</div>
+          <button class="settings-tab" data-stab="archived" role="tab" aria-selected="false">已归档</button>
+          <div class="settings-group-label">其他</div>
+          <button class="settings-tab" data-stab="labs" role="tab" aria-selected="false">实验功能</button>
+          <button class="settings-tab" data-stab="network" role="tab" aria-selected="false">网络</button>
           <p class="settings-nav-empty" id="settings-search-empty" hidden>没有匹配的设置</p>
         </nav>
         <div class="settings-content">
-        <section class="settings-profile" aria-label="本机概况">
-          <div class="settings-profile-head">
-            <span class="me-avatar me-avatar-lg" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
-            </span>
-            <div class="settings-profile-meta">
-              <strong id="sp-name">我的</strong>
-              <small id="sp-sub">本地模式 · 数据只在这台电脑</small>
+        <!-- 个人资料：头像取名字首字母；统计全部来自 /api/growth；账户区按是否真的登录给不同的行 -->
+        <div class="settings-panel active" data-stab="profile">
+          <section class="s2-profile" aria-label="个人资料">
+            <span class="s2-avatar" id="sp-avatar" aria-hidden="true">G</span>
+            <div class="s2-profile-row">
+              <div class="s2-profile-meta">
+                <div class="s2-profile-name"><strong id="sp-name">我的</strong><span class="s2-tag" id="sp-tag" hidden></span></div>
+                <small id="sp-sub">本地模式 · 数据只在这台电脑</small>
+              </div>
+              <div class="s2-profile-actions">
+                <button class="btn btn-secondary btn-sm" type="button" id="sp-edit">编辑</button>
+                <button class="btn btn-secondary btn-sm" type="button" id="sp-account">账号与登录</button>
+              </div>
             </div>
-            <button class="btn btn-secondary btn-sm" type="button" id="sp-account">账号与登录</button>
-          </div>
-          <div class="stat-row" id="sp-stats">
-            <div class="stat-cell"><b id="sp-tasks">—</b><span>累计任务</span></div>
-            <div class="stat-cell"><b id="sp-skills">—</b><span>技能</span></div>
-            <div class="stat-cell"><b id="sp-streak">—</b><span>连续成功</span></div>
-            <div class="stat-cell"><b id="sp-week">—</b><span>本周 tokens</span></div>
-          </div>
-        </section>
+            <div class="s2-section-label">使用统计</div>
+            <div class="stat-row s2-stats" id="sp-stats">
+              <div class="stat-cell"><b id="sp-tasks">—</b><span>累计任务</span></div>
+              <div class="stat-cell"><b id="sp-skills">—</b><span>技能</span></div>
+              <div class="stat-cell"><b id="sp-streak">—</b><span>连续成功</span></div>
+              <div class="stat-cell"><b id="sp-week">—</b><span>本周 tokens</span></div>
+            </div>
+            <div class="s2-section-label">账户与订阅</div>
+            <div class="s2-card" id="sp-account-card"></div>
+          </section>
+        </div>
+        <div class="settings-panel" data-stab="general" hidden><div class="s2-page" id="s2-general"></div></div>
+        <div class="settings-panel" data-stab="modes" hidden><div class="s2-page" id="s2-modes"></div></div>
+        <div class="settings-panel" data-stab="monitor" hidden><div class="s2-page" id="s2-monitor"></div></div>
+        <div class="settings-panel" data-stab="ext" hidden><div class="s2-page" id="s2-ext"></div></div>
+        <div class="settings-panel" data-stab="hooks" hidden><div class="s2-page" id="s2-hooks"></div></div>
+        <div class="settings-panel" data-stab="computer" hidden><div class="s2-page" id="s2-computer"></div></div>
+        <div class="settings-panel" data-stab="git" hidden><div class="s2-page" id="s2-git"></div></div>
+        <div class="settings-panel" data-stab="worktrees" hidden><div class="s2-page" id="s2-worktrees"></div></div>
+        <div class="settings-panel" data-stab="index" hidden><div class="s2-page" id="s2-index"></div></div>
+        <div class="settings-panel" data-stab="conn" hidden><div class="s2-page" id="s2-conn"></div></div>
+        <div class="settings-panel" data-stab="archived" hidden><div class="s2-page" id="s2-archived"></div></div>
+        <div class="settings-panel" data-stab="labs" hidden><div class="s2-page" id="s2-labs"></div></div>
+        <div class="settings-panel" data-stab="network" hidden><div class="s2-page" id="s2-network"></div></div>
 
-        <!-- 协作 -->
-        <div class="settings-panel active" data-stab="persona">
+        <!-- 协作：入口已并进「常规」页（settings2.js），这块表单保留给 app.js 的既有绑定，不再单独显示 -->
+        <div class="settings-panel" data-stab="persona" hidden>
           <div class="card card--glass">
             <h2 class="section-title">协作</h2>
             <div class="field">
@@ -1616,5 +1651,8 @@
 
   <script src="/assets/app.js"></script>
   <script src="/assets/chrome.js"></script>
+  <script src="/assets/settings2.js"></script>
+  <script src="/assets/settings2-models.js"></script>
+  <script src="/assets/settings2-pages.js"></script>
 </body>
 </html>

@@ -13,4 +13,4 @@ package buildinfo
 //
 // so packaged Desktop binaries cannot silently stick on an old default.
 // Version must be a package-level var (not const) for -X to take effect.
-var Version = "1.0.2"
+var Version = "1.1.1"

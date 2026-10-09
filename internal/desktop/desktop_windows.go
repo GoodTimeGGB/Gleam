@@ -4,7 +4,6 @@ package desktop
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,10 +14,28 @@ import (
 	"unsafe"
 )
 
-// 窗口管理：Edge/Chrome --app 窗口独立于启动器进程，单靠记录 cmd.Process
-// 既无法「复用已有窗口」，也无法在退出时可靠关窗（启动器进程常立即退出，
-// 真正持有窗口的是独立浏览器进程）。因此统一用 Win32 按窗口标题枚举
-// app 窗口：左键 → 已存在则前置激活、否则新开；退出 → 发 WM_CLOSE 优雅关窗。
+// Window management notes:
+//
+// Edge/Chrome --app windows live outside the Gleam process. Recording cmd.Process
+// alone cannot reuse an existing shell or close it reliably (the launcher often
+// exits immediately; the real owner is a Chromium process tree).
+//
+// We therefore:
+//   - Enumerate top-level windows by title ("Gleam · 微光") for activate / close
+//   - Use a dedicated --user-data-dir under ~/.gleam/browser-profile
+//   - Never spawn a second --app while that profile is still locked (blank white
+//     shells are the usual Chromium SingletonLock symptom)
+//   - After close: wait until titled windows are gone, kill tracked process trees,
+//     then clear stale lock files before the next open
+//   - If --app fails to produce a titled window, fall back to the system default browser
+//
+// a81cbb8 regression (corrected here):
+//   closeWindowPlatform waited for WM_CLOSE then returned early without finishing
+//   process-tree / profile-lock cleanup, and taskkill'ed PIDs from
+//   GetWindowThreadProcessId (often a renderer, not the profile-owning browser).
+//   That left SingletonLock held → tray Open / show-window spawned another --app
+//   against a locked profile → blank white window while http://127.0.0.1:8787/ still
+//   worked in a normal browser tab.
 
 var (
 	user32   = syscall.NewLazyDLL("user32.dll")
@@ -45,15 +62,17 @@ const (
 	swShow    = 5
 	wmClose   = 0x0010
 
-	// DWM 窗口属性（Windows 11 支持，旧系统调用失败会被静默忽略）。
 	dwmwaUseImmersiveDarkMode = 33
 	dwmwaBorderColor          = 34
 	dwmwaCaptionColor         = 35
 	dwmwaTextColor            = 36
+
+	appLaunchReadyTimeout = 8 * time.Second
+	appCloseWaitTimeout   = 5 * time.Second
+	pollInterval          = 200 * time.Millisecond
 )
 
-// windowTitle 是 app 窗口标题，与 index.html 的 <title> 及 --app-name 保持一致。
-// 用「微光」这个不易与文件夹（如 D:\PersonalProject\Gleam 资源管理器）撞名的词匹配。
+// windowTitle matches index.html <title> and --app-name / --window-name.
 const windowTitle = "Gleam · 微光"
 
 var (
@@ -62,47 +81,38 @@ var (
 	launching bool
 )
 
-// browserPaths 返回优先使用的 Edge/Chrome 可执行文件路径。
+// browserPaths returns Edge-first executable candidates (Chrome is fallback).
+// GLEAM_BROWSER overrides the entire preference list when set.
 func browserPaths() []string {
-	env := os.Getenv("GLEAM_BROWSER")
-	var paths []string
-	if env != "" {
-		paths = append(paths, env)
+	if env := os.Getenv("GLEAM_BROWSER"); env != "" {
+		return []string{env}
 	}
 	local := os.Getenv("LOCALAPPDATA")
 	programs64 := os.Getenv("ProgramFiles")
 	programsX86 := os.Getenv("ProgramFiles(x86)")
-	paths = append(paths,
+	raw := []string{
 		filepath.Join(local, "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(programs64, "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(programsX86, "Microsoft", "Edge", "Application", "msedge.exe"),
 		filepath.Join(local, "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(programs64, "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(programsX86, "Google", "Chrome", "Application", "chrome.exe"),
 		filepath.Join(local, "Chromium", "Application", "chrome.exe"),
 		filepath.Join(local, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-		filepath.Join(programs64, "Microsoft", "Edge", "Application", "msedge.exe"),
-		filepath.Join(programs64, "Google", "Chrome", "Application", "chrome.exe"),
-		filepath.Join(programsX86, "Microsoft", "Edge", "Application", "msedge.exe"),
-		filepath.Join(programsX86, "Google", "Chrome", "Application", "chrome.exe"),
-	)
-	return paths
+	}
+	return preferEdgeOverChrome(raw)
 }
 
-func profileDir() string {
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		home = "."
-	}
-	return filepath.Join(home, ".gleam", "browser-profile")
-}
+func profileDir() string { return profileDirPath() }
 
 func openWindowPlatform(target string, onClose func()) bool {
-	// 已有 app 窗口：前置激活，不再新开
 	if hwnds := findGleamWindows(); len(hwnds) > 0 {
 		for _, h := range hwnds {
 			activateWindow(h)
 		}
 		return true
 	}
-	// 浏览器启动到窗口标题出现有数秒窗口，期间连点左键应被合并，避免在同一
-	// 浏览器实例里重复弹出多个 app 窗口。
+
 	mu.Lock()
 	if launching {
 		mu.Unlock()
@@ -116,6 +126,36 @@ func openWindowPlatform(target string, onClose func()) bool {
 		mu.Unlock()
 	}
 
+	profile := profileDir()
+	// Profile still locked with no titled window: a previous Chromium tree is alive
+	// (classic post-a81cbb8 reopen failure). Do not spawn a second --app.
+	if anyProfileLockPresent(profile) {
+		if !waitUntil(2*time.Second, pollInterval, func() bool {
+			return !anyProfileLockPresent(profile) || len(findGleamWindows()) > 0
+		}) {
+			if hwnds := findGleamWindows(); len(hwnds) > 0 {
+				for _, h := range hwnds {
+					activateWindow(h)
+				}
+				clearLaunching()
+				return true
+			}
+			clearLaunching()
+			return openDefaultBrowser(target)
+		}
+		if hwnds := findGleamWindows(); len(hwnds) > 0 {
+			for _, h := range hwnds {
+				activateWindow(h)
+			}
+			clearLaunching()
+			return true
+		}
+		// Lock cleared or stale — drop markers before spawn.
+		if !anyProfileLockPresent(profile) || len(findGleamWindows()) == 0 {
+			removeStaleProfileLocks(profile)
+		}
+	}
+
 	exe := ""
 	for _, p := range browserPaths() {
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
@@ -125,27 +165,15 @@ func openWindowPlatform(target string, onClose func()) bool {
 	}
 	if exe == "" {
 		clearLaunching()
-		return false
+		return openDefaultBrowser(target)
 	}
-	u, _ := url.Parse(target)
-	appName := windowTitle
-	args := []string{
-		"--app=" + target,
-		"--window-size=1280,840",
-		"--app-name=" + appName,
-		"--window-name=" + appName,
-		"--user-data-dir=" + profileDir(),
-		"--no-first-run",
-		"--no-default-browser-check",
-		"--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate",
-		"--disable-session-crashed-bubble",
-		"--disable-infobars",
-	}
+
+	args := chromeAppArgs(target, profile, windowTitle)
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
 		clearLaunching()
-		return false
+		return openDefaultBrowser(target)
 	}
 	mu.Lock()
 	procs = append(procs, cmd)
@@ -167,69 +195,86 @@ func openWindowPlatform(target string, onClose func()) bool {
 			go onClose()
 		}
 	}()
-	// 等待窗口真正出现（或最长 10 秒兜底）后解除启动锁。
-	go func() {
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) {
-			if len(findGleamWindows()) > 0 {
-				clearLaunching()
-				return
+
+	ready := waitUntil(appLaunchReadyTimeout, pollInterval, func() bool {
+		return len(findGleamWindows()) > 0
+	})
+	hwnds := findGleamWindows()
+	if shouldFallbackAfterAppLaunch(len(hwnds), ready) {
+		// Blank / unpainted --app: tear down this spawn and open the real browser.
+		killProcessTree(uint32(pid))
+		mu.Lock()
+		for i, p := range procs {
+			if p.Process != nil && p.Process.Pid == pid {
+				procs = append(procs[:i], procs[i+1:]...)
+				break
 			}
-			time.Sleep(300 * time.Millisecond)
 		}
+		mu.Unlock()
+		removeStaleProfileLocks(profile)
 		clearLaunching()
-	}()
-	_ = u
+		return openDefaultBrowser(target)
+	}
+	clearLaunching()
+	return true
+}
+
+func openDefaultBrowser(target string) bool {
+	if err := openURLPlatform(target); err != nil {
+		return false
+	}
 	return true
 }
 
 func closeWindowPlatform() {
 	hwnds := findGleamWindows()
-
-	// 优先向 app 窗口发 WM_CLOSE，优雅关闭（浏览器进程随之退出）。
 	for _, h := range hwnds {
 		pPostMessageW.Call(h, wmClose, 0, 0)
 	}
 
-	if len(hwnds) > 0 {
-		// WM_CLOSE 是异步的：投递后立即返回，浏览器需要数百毫秒处理关闭。
-		// 这里轮询等待窗口真正消失，最长 3 秒——否则下面 HTTP server 一关，
-		// 浏览器页面失去后端就变成白屏，而窗口本身还挂着。
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			if len(findGleamWindows()) == 0 {
-				return
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
+	// Always wait until titled Gleam windows are gone before tearing down the HTTP
+	// server / allowing a reopen — otherwise the shell paints white against a dead backend.
+	_ = waitUntil(appCloseWaitTimeout, pollInterval, func() bool {
+		return len(findGleamWindows()) == 0
+	})
 
-		// 优雅关闭超时：找到仍存在的窗口所属进程，强杀整棵进程树。
-		// 不能只杀 procs 里记录的启动器——Edge 的多进程架构下，启动器早已退出，
-		// 真正持有窗口的是孙子辈的渲染进程。按窗口句柄反查 PID 才杀得对。
-		for _, h := range findGleamWindows() {
-			var pid uint32
-			pGetWindowThreadProcessId.Call(h, uintptr(unsafe.Pointer(&pid)))
-			if pid > 0 {
-				killProcessTree(pid)
-			}
+	// Force-kill anything still showing a Gleam title (best-effort). Prefer tracked
+	// launcher PIDs for /T trees; window PIDs alone are unreliable (often renderers).
+	for _, h := range findGleamWindows() {
+		var pid uint32
+		pGetWindowThreadProcessId.Call(h, uintptr(unsafe.Pointer(&pid)))
+		if pid > 0 {
+			killProcessTree(pid)
 		}
-		return
 	}
 
-	// 没找到窗口句柄时，兜底结束仍被跟踪的启动器进程。
 	mu.Lock()
 	targets := append([]*exec.Cmd(nil), procs...)
+	procs = nil
+	launching = false
 	mu.Unlock()
 	for _, c := range targets {
 		if c.Process != nil {
-			_ = c.Process.Kill()
+			killProcessTree(uint32(c.Process.Pid))
 		}
+	}
+
+	_ = waitUntil(2*time.Second, pollInterval, func() bool {
+		return len(findGleamWindows()) == 0
+	})
+
+	// With no titled window left, Chromium lock files are stale or about to be —
+	// clear them so the next Open Gleam does not hit SingletonLock → blank shell.
+	if len(findGleamWindows()) == 0 {
+		removeStaleProfileLocks(profileDir())
 	}
 }
 
-// killProcessTree 强杀指定 PID 及其所有子进程。
-// taskkill /T 走进程树，比手动枚举子进程可靠（Edge 的进程层级深且随时 fork）。
+// killProcessTree force-kills pid and its children via taskkill /T.
 func killProcessTree(pid uint32) {
+	if pid == 0 {
+		return
+	}
 	cmd := exec.Command("taskkill", "/T", "/F", "/PID", fmt.Sprint(pid))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	_ = cmd.Run()
@@ -244,7 +289,7 @@ func windowOpenPlatform() bool {
 	return len(procs) > 0
 }
 
-// ---------- Win32 窗口枚举 / 激活 ----------
+// ---------- Win32 window enum / activate ----------
 
 var (
 	enumMu    sync.Mutex
@@ -252,7 +297,6 @@ var (
 	enumCb    = syscall.NewCallback(enumProc)
 )
 
-// findGleamWindows 返回所有可见、标题匹配的 app 顶层窗口句柄。
 func findGleamWindows() []uintptr {
 	enumMu.Lock()
 	defer enumMu.Unlock()
@@ -266,7 +310,7 @@ func findGleamWindows() []uintptr {
 func enumProc(hwnd uintptr, _ uintptr) uintptr {
 	vis, _, _ := pIsWindowVisible.Call(hwnd)
 	if vis == 0 {
-		return 1 // 继续枚举
+		return 1
 	}
 	n, _, _ := pGetWindowTextLengthW.Call(hwnd)
 	if n <= 0 {
@@ -285,14 +329,11 @@ func enumProc(hwnd uintptr, _ uintptr) uintptr {
 	return 1
 }
 
-// applyDarkTitlebar 把 app 窗口标题栏刷成与深色界面一致，消除顶部那条浅色
-// 「浏览器感」。DWM 属性为 Win11 能力，旧系统返回错误时静默忽略，不影响使用。
 func applyDarkTitlebar(hwnd uintptr) {
-	// 0x00BBGGRR
 	var (
 		useDark int32  = 1
 		caption uint32 = 0x00120D0B // #0B0D12
-		text    uint32 = 0x00F2F2F2 // 近白
+		text    uint32 = 0x00F2F2F2
 	)
 	pDwmSetWindowAttribute.Call(hwnd, uintptr(dwmwaUseImmersiveDarkMode),
 		uintptr(unsafe.Pointer(&useDark)), unsafe.Sizeof(useDark))
@@ -302,10 +343,6 @@ func applyDarkTitlebar(hwnd uintptr) {
 		uintptr(unsafe.Pointer(&text)), unsafe.Sizeof(text))
 }
 
-// activateWindow 还原最小化并把窗口带到前台。
-// 后台进程直接 SetForegroundWindow 常被系统拒绝：把「调用线程」与「当前前台
-// 窗口所在线程」的输入队列临时绑定（AttachThreadInput），当前调用方就获得了
-// 设置前台窗口的权限，随后再解绑。
 func activateWindow(hwnd uintptr) {
 	pShowWindow.Call(hwnd, swRestore)
 	pShowWindow.Call(hwnd, swShow)

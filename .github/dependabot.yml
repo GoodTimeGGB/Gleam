@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - type/deps
+      - area/ci
+    commit-message:
+      prefix: chore
+      include: scope
+    reviewers:
+      - gleam-ai/maintainers
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - type/deps
+    commit-message:
+      prefix: chore
+      include: scope
+    reviewers:
+      - gleam-ai/maintainers

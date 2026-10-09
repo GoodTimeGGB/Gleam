@@ -1,0 +1,43 @@
+name: AI review guidance
+
+# Does not call paid APIs or require secrets. Posts a one-time checklist comment
+# on newly opened PRs pointing maintainers at Copilot / CodeRabbit options.
+# Safe no-op if commenting fails (forks, permissions).
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  guidance:
+    name: Post AI review options
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.user.type != 'Bot' }}
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const body = [
+              '### Automated review options',
+              '',
+              'This repository does not ship a paid AI review bot by default (no required secrets).',
+              '',
+              '**Recommended (no workflow secrets):**',
+              '1. Enable **GitHub Copilot code review** for this repo (Settings → Copilot / Rulesets) when available on your plan.',
+              '2. Optionally install [CodeRabbit](https://github.com/apps/coderabbitai) as a GitHub App (org admin UI).',
+              '',
+              'Human review from `@gleam-ai/maintainers` remains required on protected branches.',
+            ].join('\\n');
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body,
+              });
+            } catch (err) {
+              core.warning(`Could not comment: ${err.message}`);
+            }

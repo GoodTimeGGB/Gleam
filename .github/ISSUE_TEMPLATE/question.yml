@@ -1,0 +1,23 @@
+name: Question
+description: Ask a usage or design question (prefer Discussions when available)
+title: "[question]: "
+labels: ["type/question", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Prefer **[GitHub Discussions](https://github.com/gleam-ai/Gleam/discussions)** for open-ended Q&A when enabled.
+        For bugs use the Bug report template; for security see SECURITY.md.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What you already tried, relevant docs links.
+    validations:
+      required: false

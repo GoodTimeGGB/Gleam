@@ -1,0 +1,7 @@
+# Gleam CODEOWNERS — require review from maintainers on protected branches
+* @gleam-ai/maintainers @vyrnsynx
+
+/.github/ @gleam-ai/maintainers @vyrnsynx
+/cmd/ @gleam-ai/maintainers
+/internal/ @gleam-ai/maintainers
+/scripts/ @gleam-ai/maintainers

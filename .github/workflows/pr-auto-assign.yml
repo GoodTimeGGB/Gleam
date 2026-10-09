@@ -1,0 +1,58 @@
+name: PR auto-assign
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  auto-assign:
+    name: Assign & request reviewers
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.user.type != 'Bot' }}
+    steps:
+      - name: Assign PR author
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const assignees = (pr.assignees || []).map(a => a.login);
+            if (!assignees.includes(author)) {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                assignees: [author],
+              });
+              core.info(`Assigned author: ${author}`);
+            }
+
+      - name: Request maintainers review
+        if: ${{ github.event.pull_request.draft == false }}
+        uses: actions/github-script@v9
+        with:
+          script: |
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                team_reviewers: ['maintainers'],
+              });
+            } catch (err) {
+              core.warning(`Could not request team reviewers: ${err.message}`);
+              try {
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.payload.pull_request.number,
+                  reviewers: ['vyrnsynx'],
+                });
+              } catch (err2) {
+                core.warning(`Fallback reviewer failed: ${err2.message}`);
+              }
+            }

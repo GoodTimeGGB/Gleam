@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/gleam-ai/Gleam/security/advisories/new
+    about: Report security issues privately — do not file a public issue.
+  - name: Support and questions
+    url: https://github.com/gleam-ai/.github/blob/main/SUPPORT.md
+    about: How to get help and where to ask non-bug questions.
+  - name: Gleam Discussions
+    url: https://github.com/gleam-ai/Gleam/discussions
+    about: Q&A and design discussion (enable Discussions in repo settings if the link 404s).
+  - name: gleam-ai website
+    url: https://gleam.wangjn.top/
+    about: Product and organization home page.

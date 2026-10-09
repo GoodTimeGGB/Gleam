@@ -1,0 +1,41 @@
+name: Performance
+description: Report a slowdown, high CPU/memory, or startup regression
+title: "[perf]: "
+labels: ["type/perf", "needs-triage"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is slow or regressing?
+    validations:
+      required: true
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Measurements
+      description: Before/after timings, memory, reproduction size.
+      placeholder: |
+        Startup: 4.2s → 9.1s
+        go test ./internal/tools/shell: 19s
+    validations:
+      required: false
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux, Other]
+    validations:
+      required: false

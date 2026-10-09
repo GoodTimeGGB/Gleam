@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Gleam（微光）——一个放在本地的桌面 AI 小工具。单文件二进制约 10MB，数据不联网。">
+  <meta name="description" content="Gleam（微光）——一个放在本地的桌面 AI 小工具。单文件二进制约 10MB，本地优先：对话与任务数据落本机；真实 LLM 仍走你配置的 API。">
   <title>Gleam 微光</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -24,14 +24,14 @@
         <a href="#demo">演示</a>
         <a href="#download">下载</a>
         <a href="#quickstart">快速开始</a>
-        <a href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/gleam-ai/Gleam" target="_blank" rel="noopener">GitHub</a>
       </nav>
     </div>
   </header>
 
   <section class="hero" id="top">
     <div class="hero-inner">
-      <p class="hero-kicker reveal">Go 手写 · 单文件 · 数据不联网 · 开源</p>
+      <p class="hero-kicker reveal">Go 手写 · 单文件 · 本地优先 · 开源</p>
       <h1 class="reveal">有个能干的桌面帮手，<br>不<span class="grad">也挺好吗</span></h1>
       <p class="hero-sub reveal">Gleam 就是放在你电脑里的一个小工具。<br>
       你说"帮我整理下桌面照片"，它真的会去干——<br>
@@ -39,7 +39,7 @@
       <strong>而且这一切都在你的电脑上完成，数据不往外传。</strong></p>
       <div class="hero-actions reveal">
         <a class="btn btn-primary" href="#download">下载试试</a>
-        <a class="btn btn-secondary" href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener">
+        <a class="btn btn-secondary" href="https://github.com/gleam-ai/Gleam" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
           GitHub
         </a>
@@ -242,7 +242,7 @@
       <p class="dl-meta reveal">
         <span class="dl-ver" id="dl-version">v1.0.0</span>
         <span>发布于 <time id="dl-date" datetime="2026-10-09">2026-10-09</time></span>
-        <span>单文件约 10 MB · MIT 许可 · <a href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener" style="color:var(--color-accent)">源码在 GitHub</a></span>
+        <span>单文件约 10 MB · MIT 许可 · <a href="https://github.com/gleam-ai/Gleam" target="_blank" rel="noopener" style="color:var(--color-accent)">源码在 GitHub</a></span>
       </p>
 
       <div class="dl-platforms reveal" id="dl-platforms">
@@ -257,12 +257,12 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/GoodTimeGGB/Gleam/releases/download/v1.0.0/Gleam-Desktop-Windows-x86_64.exe" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.0.0/Gleam-Desktop-Windows-x86_64.exe" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>桌面版</span>
               <span class="dl-size">约 10 MB · .exe</span>
             </a>
-            <a class="dl-btn" href="https://github.com/GoodTimeGGB/Gleam/releases/download/v1.0.0/Gleam-Windows-x86_64.exe" download>
+            <a class="dl-btn" href="https://github.com/gleam-ai/Gleam/releases/download/v1.0.0/Gleam-Windows-x86_64.exe" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>命令行版</span>
               <span class="dl-size">约 10 MB · .exe</span>
@@ -293,7 +293,7 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/GoodTimeGGB/Gleam/releases/download/v1.0.0/Gleam-macOS-AppleSilicon-arm64" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.0.0/Gleam-macOS-AppleSilicon-arm64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
               <span class="dl-size">约 9 MB</span>
@@ -324,7 +324,7 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/GoodTimeGGB/Gleam/releases/download/v1.0.0/Gleam-macOS-Intel-x86_64" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.0.0/Gleam-macOS-Intel-x86_64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
               <span class="dl-size">约 10 MB</span>
@@ -355,7 +355,7 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/GoodTimeGGB/Gleam/releases/download/v1.0.0/Gleam-Linux-x86_64" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.0.0/Gleam-Linux-x86_64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
               <span class="dl-size">约 10 MB</span>
@@ -377,7 +377,7 @@
 
       <div class="dl-other reveal">
         <p>不确定你的 Mac 是 Intel 还是 Apple Silicon？左上角 Apple 菜单 → 关于本机，看芯片字段。</p>
-        <p class="dl-source">源码构建：<code>git clone https://github.com/GoodTimeGGB/Gleam</code> 后运行 <code>scripts/build-desktop.sh</code>（macOS/Linux）或 <code>scripts/install.ps1</code>（Windows）</p>
+        <p class="dl-source">源码构建：<code>git clone https://github.com/gleam-ai/Gleam</code> 后运行 <code>scripts/build-desktop.sh</code>（macOS/Linux）或 <code>scripts/install.ps1</code>（Windows）</p>
         <p class="dl-tip-slow">下载慢？文件托管在 GitHub Release，国内网络可能较慢。可尝试使用 <a href="https://ghfast.top" target="_blank" rel="noopener">ghfast.top</a> 等加速工具，或从源码自行构建。</p>
       </div>
     </div>
@@ -451,7 +451,7 @@
           <p>写给自己用的，顺便开源了 · MIT 许可</p>
         </div>
         <div class="footer-links">
-          <a href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/gleam-ai/Gleam" target="_blank" rel="noopener">GitHub</a>
           <a href="#what">是什么</a>
           <a href="#download">下载</a>
           <a href="#quickstart">快速开始</a>

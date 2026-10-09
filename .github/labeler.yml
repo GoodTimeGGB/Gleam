@@ -1,0 +1,39 @@
+area/docs:
+  - changed-files:
+      - any-glob-to-any-file: ["**/*.md", "docs/**"]
+
+area/ci:
+  - changed-files:
+      - any-glob-to-any-file: [".github/workflows/**", ".github/dependabot.yml", ".github/labeler.yml"]
+
+area/agent:
+  - changed-files:
+      - any-glob-to-any-file: ["internal/agent/**", "cmd/gleam/**"]
+
+area/webui:
+  - changed-files:
+      - any-glob-to-any-file: ["internal/webui/**"]
+
+area/tools:
+  - changed-files:
+      - any-glob-to-any-file: ["internal/tools/**"]
+
+area/harness:
+  - changed-files:
+      - any-glob-to-any-file: ["internal/harness/**"]
+
+area/llm:
+  - changed-files:
+      - any-glob-to-any-file: ["internal/llm/**"]
+
+area/website:
+  - changed-files:
+      - any-glob-to-any-file: ["website/**"]
+
+type/deps:
+  - changed-files:
+      - any-glob-to-any-file: ["go.sum", "go.mod", "**/package-lock.json"]
+
+area/security:
+  - changed-files:
+      - any-glob-to-any-file: ["**/SECURITY.md", ".github/workflows/codeql.yml", ".github/workflows/dependency-review.yml"]

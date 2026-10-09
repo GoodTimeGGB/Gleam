@@ -1,0 +1,25 @@
+name: Documentation
+description: Report a docs gap, typo, or unclear instruction
+title: "[docs]: "
+labels: ["type/docs", "needs-triage"]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: File path, URL, or UI screen.
+      placeholder: README.md / docs/… / Settings → Engine
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is wrong or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+    validations:
+      required: false

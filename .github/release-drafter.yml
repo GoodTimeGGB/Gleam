@@ -1,0 +1,31 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+categories:
+  - title: "Breaking changes"
+    labels: ["type/breaking"]
+  - title: "Features"
+    labels: ["type/feature"]
+  - title: "Bug fixes"
+    labels: ["type/bug", "type/fix"]
+  - title: "Performance"
+    labels: ["type/perf"]
+  - title: "Documentation"
+    labels: ["type/docs"]
+  - title: "Dependencies"
+    labels: ["type/deps"]
+  - title: "CI / chores"
+    labels: ["area/ci", "type/chore"]
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+change-title-escapes: '\<*_&'
+version-resolver:
+  major:
+    labels: ["type/breaking"]
+  minor:
+    labels: ["type/feature"]
+  patch:
+    labels: ["type/bug", "type/fix", "type/docs", "type/deps", "type/chore", "type/perf"]
+  default: patch
+template: |
+  ## Changes
+
+  $CHANGES

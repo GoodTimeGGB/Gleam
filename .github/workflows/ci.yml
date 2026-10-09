@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format-vet-build:
+    name: Format / vet / build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: gofmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$(gofmt -l ./internal ./pkg ./cmd)
+          if [ -n "$out" ]; then
+            echo "Unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+          echo "gofmt clean"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: Cross-compile sanity (windows/amd64)
+        run: GOOS=windows GOARCH=amd64 go build -o /tmp/gleam.exe ./cmd/gleam
+
+      - name: Script gates (subset that is OS-portable)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/check-atomic-write.py .
+          python scripts/check-app-startup.py --self-test .
+          python scripts/check-py-utf8.py --self-test .
+          python scripts/check-dom-anchors.py --self-test .
+          python scripts/check-egress-owner.py --self-test .
+          python scripts/check-cue-owner.py --self-test .
+          echo "portable script gates passed"
+
+  test:
+    name: Test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test
+        shell: pwsh
+        run: |
+          # GHA Windows often exposes TEMP as an 8.3 short path (RUNNER~1), which
+          # breaks Gleam workspace root checks that compare cleaned long paths.
+          $tmp = Join-Path $env:GITHUB_WORKSPACE '.ci-tmp'
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          $env:TMP = $tmp
+          $env:TEMP = $tmp
+          go test ./... -count=1 -timeout 300s
+
+  ci-success:
+    name: CI Success
+    if: ${{ always() }}
+    needs: [format-vet-build, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        shell: bash
+        run: |
+          set -euo pipefail
+          for r in "${{ needs.format-vet-build.result }}" "${{ needs.test.result }}"; do
+            echo "result=$r"
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              exit 1
+            fi
+          done
+          echo "CI gate passed."
+

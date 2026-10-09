@@ -83,7 +83,15 @@ jobs:
           cache: true
 
       - name: go test
-        run: go test ./... -count=1 -timeout 300s
+        shell: pwsh
+        run: |
+          # GHA Windows often exposes TEMP as an 8.3 short path (RUNNER~1), which
+          # breaks Gleam workspace root checks that compare cleaned long paths.
+          $tmp = Join-Path $env:GITHUB_WORKSPACE '.ci-tmp'
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          $env:TMP = $tmp
+          $env:TEMP = $tmp
+          go test ./... -count=1 -timeout 300s
 
   ci-success:
     name: CI Success
@@ -102,3 +110,4 @@ jobs:
             fi
           done
           echo "CI gate passed."
+

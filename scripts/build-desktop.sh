@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 
 # Version owner is internal/buildinfo.Version. Read the default and also pass -X so
 # release binaries cannot silently embed a stale value if the source default drifts
-# from the intended tag. Override with: VERSION=1.0.2 bash scripts/build-desktop.sh
+# from the intended tag. Override with: VERSION=1.1.1 bash scripts/build-desktop.sh
 VERSION="${VERSION:-$(sed -n 's/^[[:space:]]*var Version = "\([^"]*\)".*/\1/p' internal/buildinfo/buildinfo.go | head -n1)}"
 if [[ -z "${VERSION}" ]]; then
   echo "failed to resolve Version from internal/buildinfo/buildinfo.go" >&2

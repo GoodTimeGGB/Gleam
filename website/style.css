@@ -130,6 +130,16 @@ body {
 .section-inner { max-width: 1160px; margin: 0 auto; }
 .section h2 { font-size: var(--fs-2xl); margin: 0 0 var(--space-2); }
 .section-sub { color: var(--color-fg-muted); margin: 0 0 var(--space-6); }
+.dl-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4);
+  color: var(--color-fg-muted); font-size: var(--fs-sm);
+  margin: calc(-1 * var(--space-4)) 0 var(--space-6);
+}
+.dl-ver {
+  color: var(--color-fg); font-weight: 600; font-variant-numeric: tabular-nums;
+  padding: 2px var(--space-3); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full); background: var(--glass-highlight);
+}
 .group-title {
   font-size: var(--fs-sm); letter-spacing: 2px; text-transform: uppercase;
   color: var(--color-accent); margin: var(--space-6) 0 var(--space-4);

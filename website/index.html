@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Gleam（微光）——一个放在本地的桌面 AI 小工具。单文件二进制约 8MB，数据不联网。">
+  <meta name="description" content="Gleam（微光）——一个放在本地的桌面 AI 小工具。单文件二进制约 10MB，数据不联网。">
   <title>Gleam 微光</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -40,7 +40,7 @@
         <a class="btn btn-secondary" href="#demo">先玩一下</a>
       </div>
       <dl class="hero-stats reveal" aria-label="关键指标">
-        <div><dt>~8.2 MB</dt><dd>就一个文件</dd></div>
+        <div><dt>~10 MB</dt><dd>就一个文件</dd></div>
         <div><dt>&lt; 20 ms</dt><dd>打开就能用</dd></div>
         <div><dt>&lt; 15 MB</dt><dd>内存占用</dd></div>
         <div><dt>≥ 50</dt><dd>任务同时跑</dd></div>
@@ -215,6 +215,30 @@
           <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l2.2 2.2L15.5 9"/><path d="M12 3l7.5 3.2v5.4c0 4.4-3 8.1-7.5 9.4-4.5-1.3-7.5-5-7.5-9.4V6.2z"/></svg></div>
           <h4>就绪体检</h4>
           <p>自建智能体最常见的九个坑——只会聊不会交付、模型被锁死、权限与日志各管各的、缓存白瞎——逐条查一遍。每一项都拿真实运行状态说话，不是一张静态清单：查完告诉你哪几项过关、哪几项该补、怎么补。只读检查，随时可跑。另附一份<b>状态落盘</b>清单：配置、会话、记忆、任务四类各住在哪、体量多大、谁能改——"我的记忆存在哪"这类问题不用再翻源码。</p>
+        </article>
+      </div>
+
+      <h3 class="group-title reveal">授权与回头路（它做什么，你说了算）</h3>
+      <div class="grid-3">
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3h6l1 6h3v4H5V9h3z"/><path d="M5 17h14v4H5z"/></svg></div>
+          <h4>批准的是什么，执行的就是什么</h4>
+          <p>计划里的路径可以写成引用（「工作区里那个文件」），批准时看到的是引用，派发时才换成真值——这两者一度是分家的：你批的是字面量，它跑的是替换后的路径。现在派发之前按真值把裁决重算一遍，只许收紧不许放宽，审批弹窗也第一次显示真值。「我允许了什么」必须能一句话答上来，否则门控只是走个形式。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8h11a5 5 0 0 1 0 10H8"/><path d="M7 4L3 8l4 4"/></svg></div>
+          <h4>改错了能退回去</h4>
+          <p>工具动文件之前先留一份快照，任务跑完把「本次改了哪些文件」写进结果，界面上能逐文件看 diff，也能一键退回这个任务之前的样子。刻意不接 git、也不在还原前再另存一份：要的就是「本任务之前」这一个确定的点，多一个选项就多一次猜。只有还原按钮而没有查看入口，那是半截功能，所以 diff 和按钮在同一区里。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></div>
+          <h4>出了哪些网，账在这儿</h4>
+          <p>每次出网都留一条结构化记录：去哪、为什么、多少字节，按类型聚合在安全页的「连接台账」里，也能用接口查。它答的是「这东西到底往哪儿发过数据」——本地优先不靠承诺，靠一本翻得动的账。台账的完整性由一道闸门对账：源码里出现的出网落点必须都登记在册（它扫不出自己新起的 HTTP 客户端，这条限制明写在文档里，不装作全覆盖）。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M4 12h10M4 18h6"/><path d="M17 15v6M14 18h6"/></svg></div>
+          <h4>它提议，你决定</h4>
+          <p>跑完的任务会留下线索——同一件事反复失败、说好的下一步没做、某个目标一直没再碰——这些线索聚成「候补目标」摆在目标工作台上。它只提议，不执行：点「采纳」也只是把那句话填进输入区，还得你按回车才算数。「到点自动跑候补目标」刻意没做，那等于把「我允许了什么」搬回后台去。它只数本机还留着的任务归档，所以「没浮出来」不等于「没发生过」——这句话也印在页面上。</p>
         </article>
       </div>
 
@@ -475,6 +499,12 @@
     <div class="section-inner">
       <h2 class="reveal">下载</h2>
       <p class="section-sub reveal">一个文件，下载就能跑。不用安装别的东西。</p>
+      <p class="dl-meta reveal">
+        <span class="dl-ver" id="dl-version">v1.0.0</span>
+        <span>发布于 <time id="dl-date" datetime="2026-10-09">2026-10-09</time></span>
+        <span>单文件约 10 MB · MIT 许可 · 不依赖任何第三方库</span>
+        <span>二进制未做代码签名与 Apple 公证，放行步骤写在各平台的「安装步骤」里</span>
+      </p>
 
       <div class="dl-platforms reveal" id="dl-platforms">
         <div class="dl-card dl-card--windows" data-platform="windows">

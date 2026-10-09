@@ -163,7 +163,7 @@ function promptModal(label, oldValue = '', title = '请输入') {
 }
 
 /* ---------- 导航 ---------- */
-const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: initMemoryOnce, schedules: loadSchedules, tools: loadTools, settings: loadSettings, market: loadMarket, growth: loadGrowth, geo: loadGEO, readiness: loadReadiness, feedback: loadFeedbackView };
+const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: initMemoryOnce, schedules: loadSchedules, tools: loadTools, settings: () => { loadSettingsProfile(); return loadSettings(); }, market: loadMarket, growth: loadGrowth, geo: loadGEO, readiness: loadReadiness, feedback: loadFeedbackView };
 
 function showView(name) {
   document.querySelectorAll('.nav-item[data-view]').forEach((b) => {
@@ -1995,14 +1995,14 @@ async function searchMemory() {
   const q = $('#memory-search').value.trim() || $('#memory-content').value.trim();
   const hits = $('#memory-hits');
   if (!q) {
-    hits.innerHTML = `<div class="empty">${ICONS.search}<div class="empty-title">搜索你的长期记忆</div><p class="empty-desc">输入关键词回车即可；下方也可以直接写入一条新记忆。</p></div>`;
+    hits.innerHTML = `<div class="empty empty--card">${ICONS.search}<div class="empty-title">搜索你的长期记忆</div><p class="empty-desc">在右上角输入关键词回车即可；上方也可以直接写入一条新记忆。</p></div>`;
     return;
   }
   try {
     const { hits: list } = await api('GET', `/api/memory?q=${encodeURIComponent(q)}&k=8`);
     hits.innerHTML = '';
     if (!list || !list.length) {
-      hits.innerHTML = `<div class="empty">${ICONS.search}<div class="empty-title">没有相关记忆</div><p class="empty-desc">换个关键词试试，或在下方写入这条你想让它记住的事。</p></div>`;
+      hits.innerHTML = `<div class="empty empty--card">${ICONS.search}<div class="empty-title">没有相关记忆</div><p class="empty-desc">换个关键词试试，或在上方写入这条你想让它记住的事。</p></div>`;
       return;
     }
     list.forEach((h) => {
@@ -2043,43 +2043,84 @@ async function loadSchedules() {
     LiveRail.schedules((jobs || []).length);
     list.innerHTML = '';
     if (!jobs || !jobs.length) {
-      list.innerHTML = `<div class="empty">${ICONS.spinner}<div class="empty-title">暂无定时任务</div><p class="empty-desc">创建一个任务，让 Gleam 按时自动执行目标。</p></div>`;
+      list.innerHTML = `<div class="empty empty--card"><div class="empty-hero" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div><div class="empty-title">暂无定时任务</div><p class="empty-desc">创建一个任务，让 Gleam 按时自动执行目标。</p></div>`;
+      setSchFormOpen(true);
       return;
     }
-    jobs.forEach((j) => {
-      const row = el('div', 'card row');
-      const main = el('div', 'row-main');
-      const freq = j.schedule_text || j.when_text || (j.interval_sec ? '每隔 ' + humanInterval(j.interval_sec) : '按计划执行');
-      main.innerHTML = `<div class="row-title">${esc(j.name)} <span class="badge badge--${j.enabled ? 'success' : 'cancelled'}">${j.enabled ? '启用' : '停用'}</span></div>
-        <div class="row-sub">${esc(freq)} · ${esc(j.goal)}${j.next_run ? ' · 下次 ' + esc(new Date(j.next_run).toLocaleString()) : ''}</div>`;
-      const actions = el('div', 'row-actions');
-      const toggle = el('button', 'btn btn-ghost btn-sm');
-      toggle.type = 'button';
-      toggle.textContent = j.enabled ? '暂停' : '恢复';
-      toggle.title = j.enabled ? '暂停后到点不再执行，随时可恢复' : '恢复按原计划执行';
-      toggle.setAttribute('aria-label', `${j.enabled ? '暂停' : '恢复'}定时任务 ${j.name}`);
-      toggle.addEventListener('click', async () => {
-        try { await api('POST', `/api/schedules/${encodeURIComponent(j.name)}/enabled`, { enabled: !j.enabled }); toast(j.enabled ? '任务已暂停' : '任务已恢复', 'success'); loadSchedules(); }
-        catch (err) { toast(err.message, 'error'); }
-      });
-      const del = el('button', 'btn btn-danger btn-sm');
-      del.innerHTML = ICONS.trash;
-      del.title = '删除定时任务';
-      del.setAttribute('aria-label', `删除定时任务 ${j.name}`);
-      del.addEventListener('click', async () => {
-        const ok = await confirmModal(`删除定时任务「${j.name}」？此操作不可恢复。`, '删除任务');
-        if (!ok) return;
-        try { await api('DELETE', `/api/schedules/${encodeURIComponent(j.name)}`); toast('已删除', 'success'); loadSchedules(); }
-        catch (err) { toast(err.message, 'error'); }
-      });
-      actions.appendChild(toggle);
-      actions.appendChild(del);
-      row.appendChild(main);
-      row.appendChild(actions);
-      list.appendChild(row);
-    });
+    jobs.forEach((j) => list.appendChild(scheduleCard(j)));
   } catch (err) { toast(err.message, 'error'); }
 }
+
+
+// 定时任务卡片：开关 · 标题 + 状态 · 目标预览 · 时间胶囊 · 更多（删除）
+function scheduleCard(j) {
+  const card = el('article', 'auto-card' + (j.enabled ? '' : ' is-off'));
+  const head = el('div', 'auto-card-head');
+  const sw = el('button', 'switch');
+  sw.type = 'button';
+  sw.setAttribute('role', 'switch');
+  sw.setAttribute('aria-checked', String(!!j.enabled));
+  sw.setAttribute('aria-label', `${j.enabled ? '暂停' : '恢复'}定时任务 ${j.name}`);
+  sw.title = j.enabled ? '暂停后到点不再执行，随时可恢复' : '恢复按原计划执行';
+  sw.addEventListener('click', async () => {
+    sw.disabled = true;
+    try { await api('POST', `/api/schedules/${encodeURIComponent(j.name)}/enabled`, { enabled: !j.enabled }); toast(j.enabled ? '任务已暂停' : '任务已恢复', 'success'); loadSchedules(); }
+    catch (err) { toast(err.message, 'error'); sw.disabled = false; }
+  });
+  const more = el('button', 'icon-btn auto-card-more');
+  more.type = 'button';
+  more.title = '更多';
+  more.setAttribute('aria-label', `更多操作：${j.name}`);
+  more.setAttribute('aria-haspopup', 'menu');
+  more.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>';
+  const menu = el('div', 'pop-menu auto-card-menu');
+  menu.hidden = true;
+  menu.setAttribute('role', 'menu');
+  const del = el('button', 'menu-item menu-item--danger');
+  del.type = 'button';
+  del.setAttribute('role', 'menuitem');
+  del.innerHTML = ICONS.trash + '<span>删除</span>';
+  del.addEventListener('click', async () => {
+    menu.hidden = true;
+    const ok = await confirmModal(`删除定时任务「${j.name}」？此操作不可恢复。`, '删除任务');
+    if (!ok) return;
+    try { await api('DELETE', `/api/schedules/${encodeURIComponent(j.name)}`); toast('已删除', 'success'); loadSchedules(); }
+    catch (err) { toast(err.message, 'error'); }
+  });
+  menu.appendChild(del);
+  more.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.auto-card-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
+    menu.hidden = !menu.hidden;
+  });
+  head.appendChild(sw);
+  head.appendChild(more);
+  head.appendChild(menu);
+
+  const title = el('div', 'auto-card-title');
+  title.innerHTML = `<strong>${esc(j.name)}</strong><span class="auto-card-state">${j.enabled ? '已启用' : '已停用'}</span>`;
+  const goal = el('p', 'auto-card-goal', j.goal || '');
+  goal.title = j.goal || '';
+  const freq = j.schedule_text || j.when_text || (j.interval_sec ? '每隔 ' + humanInterval(j.interval_sec) : '按计划执行');
+  const foot = el('div', 'auto-card-foot');
+  foot.innerHTML = `<span class="pill"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>${esc(freq)}</span>`
+    + (j.next_run && j.enabled ? `<span class="auto-card-next">下次 ${esc(new Date(j.next_run).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span>` : '');
+  card.appendChild(head);
+  card.appendChild(title);
+  card.appendChild(goal);
+  card.appendChild(foot);
+  return card;
+}
+document.addEventListener('click', () => document.querySelectorAll('.auto-card-menu').forEach((m) => { m.hidden = true; }));
+
+function setSchFormOpen(open) {
+  const form = $('#sch-form');
+  const btn = $('#sch-new-toggle');
+  form.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) setTimeout(() => $('#sch-name').focus(), 0);
+}
+$('#sch-new-toggle').addEventListener('click', () => setSchFormOpen($('#sch-form').hidden));
 
 // 自然语言时间芯片：点击填充并高亮，手动编辑则取消高亮。
 const whenInput = $('#sch-when');
@@ -2626,6 +2667,43 @@ document.querySelectorAll('.settings-tab').forEach((tab) => {
   });
 });
 
+// 设置搜索：按分区名与分区内的字段文字过滤左侧导航
+$('#settings-search').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  let any = false;
+  document.querySelectorAll('.settings-nav .settings-tab').forEach((tab) => {
+    const panel = document.querySelector(`.settings-panel[data-stab="${tab.dataset.stab}"]`);
+    const hay = (tab.textContent + ' ' + (panel ? panel.textContent : '')).toLowerCase();
+    const hit = !q || hay.includes(q);
+    tab.hidden = !hit;
+    any = any || hit;
+  });
+  document.querySelectorAll('.settings-nav .settings-group-label').forEach((lab) => {
+    let n = lab.nextElementSibling, vis = false;
+    while (n && n.classList.contains('settings-tab')) { if (!n.hidden) vis = true; n = n.nextElementSibling; }
+    lab.hidden = !vis;
+  });
+  $('#settings-search-empty').hidden = any;
+  if (q && any) {
+    const cur = document.querySelector('.settings-nav .settings-tab.active');
+    if (cur && cur.hidden) document.querySelector('.settings-nav .settings-tab:not([hidden])').click();
+  }
+});
+
+// 设置页顶部概况：只读 /api/growth 里已有的统计
+async function loadSettingsProfile() {
+  $('#sp-name').textContent = $('#me-name').textContent || '我的';
+  $('#sp-sub').textContent = $('#me-sub').textContent || '本地模式';
+  try {
+    const { stats } = await api('GET', '/api/growth');
+    if (!stats) return;
+    $('#sp-tasks').textContent = stats.total_tasks || 0;
+    $('#sp-skills').textContent = stats.total_skills || 0;
+    $('#sp-streak').textContent = stats.recent_streak || 0;
+    $('#sp-week').textContent = stats.week_tokens ? formatTokens(stats.week_tokens) : '—';
+  } catch { /* 统计拿不到就留「—」 */ }
+}
+
 /* ---------- 分模块保存 ---------- */
 function syncRuntimeState(s) {
   if (!s) return;
@@ -3159,6 +3237,8 @@ const ComposerMeta = (() => {
     if (ctx.enabled) delete ctxRead.dataset.off;
     else ctxRead.dataset.off = 'true';
     const saved = ctx.est_tokens_saved > 0 ? ` · 累计已省约 ${ctx.est_tokens_saved} tokens` : '';
+    const bar = $('#cp-context-bar');
+    if (bar) { bar.style.width = Math.max(0, Math.min(100, ctx.fill_pct || 0)) + '%'; bar.dataset.level = ctx.fill_pct >= 90 ? 'high' : ctx.fill_pct >= 60 ? 'warn' : 'fresh'; }
     ctxRead.textContent = ctx.enabled
       ? `窗口 ${ctx.short_turns}/${ctx.short_cap} 轮 · 水位 ${ctx.fill_pct}% · 待压缩 ${ctx.overflow} 轮 · 摘要 ${ctx.summary_chars} 字${saved}`
       : `自动压缩已关闭：窗口 ${ctx.short_turns}/${ctx.short_cap} 轮，窗口外的对话不会被摘要接住`;
@@ -3318,6 +3398,41 @@ $('#go-path-input')?.addEventListener('keydown', (e) => {
 /* ---------- 市场：MCP 服务器 + 技能模板 ---------- */
 bindSegmented('#mc-trust');
 
+
+// 标签筛选：只用目录里真有的 tags，客户端过滤，不新增后端
+let mcpTagActive = '';
+function renderMCPTags(presets) {
+  const row = $('#mcp-tags');
+  const tags = [...new Set(presets.flatMap((p) => p.tags || []))].slice(0, 12);
+  row.innerHTML = '';
+  if (!tags.length) return;
+  if (mcpTagActive && !tags.includes(mcpTagActive)) mcpTagActive = '';
+  ['', ...tags].forEach((t) => {
+    const b = el('button', 'chip' + (t === mcpTagActive ? ' active' : ''), t || '全部');
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(t === mcpTagActive));
+    b.addEventListener('click', () => { mcpTagActive = t; renderMCPTags(presets); applyMCPTagFilter(); });
+    row.appendChild(b);
+  });
+  applyMCPTagFilter();
+}
+function applyMCPTagFilter() {
+  document.querySelectorAll('#mcp-presets .market-item').forEach((c) => {
+    c.hidden = !!mcpTagActive && !(c.dataset.tags || '').split('|').includes(mcpTagActive);
+  });
+}
+document.querySelectorAll('#market-tabs .text-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const k = tab.dataset.mtab;
+    document.querySelectorAll('#market-tabs .text-tab').forEach((t) => {
+      t.classList.toggle('active', t === tab);
+      t.setAttribute('aria-selected', String(t === tab));
+    });
+    document.querySelectorAll('#view-market .market-panel').forEach((pn) => { pn.hidden = pn.dataset.mtab !== k; });
+  });
+});
+document.querySelectorAll('[data-goto-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.gotoView)));
+
 async function loadMarket() {
   loadMCPMarket();
   loadSkillMarket();
@@ -3335,19 +3450,26 @@ async function loadMCPMarket() {
       return;
     }
     presets.forEach((p) => wrap.appendChild(mcpPresetCard(p)));
+    renderMCPTags(presets);
   } catch (err) { toast(err.message, 'error'); }
 }
 
+// 市场条目：字母图标 · 名称 · 一行说明；细节进 title，不再堆三行小字
+function marketTile(name) {
+  const t = el('span', 'market-icon', ([...String(name || '?')][0] || '?').toUpperCase());
+  t.setAttribute('aria-hidden', 'true');
+  return t;
+}
 function mcpPresetCard(p) {
-  const card = el('div', 'card row');
-  card.style.padding = 'var(--space-3) 0';
-  const main = el('div', 'row-main');
-  main.innerHTML = `<div class="row-title">${esc(p.name)} ${p.installed ? '<span class="badge badge--success">已安装</span>' : ''}
-    ${p.params && p.params.length ? '<span class="badge badge--mode">需配置</span>' : ''}</div>
-    <div class="row-sub">${esc(p.desc)}</div>
-    <div class="stat">${esc(p.command)} · 信任 ${esc(PERM_LABELS[p.trust] || p.trust)}${p.tags && p.tags.length ? ' · ' + esc(p.tags.join(' / ')) : ''}</div>`;
+  const card = el('div', 'market-item');
+  card.dataset.tags = (p.tags || []).join('|');
+  card.appendChild(marketTile(p.name));
+  const main = el('div', 'market-main');
+  main.innerHTML = `<div class="market-name">${esc(p.name)}${p.installed ? '<span class="badge badge--success">已安装</span>' : ''}${p.params && p.params.length ? '<span class="badge badge--mode">需配置</span>' : ''}</div>
+    <div class="market-desc">${esc(p.desc)}</div>`;
+  main.title = `${p.desc || ''}\n${p.command} · 信任 ${PERM_LABELS[p.trust] || p.trust}${p.tags && p.tags.length ? ' · ' + p.tags.join(' / ') : ''}`;
   const actions = el('div', 'row-actions');
-  const btn = el('button', 'btn btn-primary btn-sm', p.installed ? '重装' : '安装');
+  const btn = el('button', 'btn btn-secondary btn-sm', p.installed ? '重装' : '安装');
   btn.addEventListener('click', () => openMCPInstallDialog(p));
   actions.appendChild(btn);
   card.appendChild(main);
@@ -3422,14 +3544,14 @@ async function loadSkillMarket() {
       return;
     }
     presets.forEach((s) => {
-      const card = el('div', 'card row');
-      card.style.padding = 'var(--space-3) 0';
-      const main = el('div', 'row-main');
-      main.innerHTML = `<div class="row-title">${esc(s.name)} ${s.installed ? '<span class="badge badge--success">已安装</span>' : ''}</div>
-        <div class="row-sub">${esc(s.description)}</div>
-        <div class="stat">${(s.steps || []).length} 步 · 参数: ${esc((s.params || []).join(', ') || '无')}</div>`;
+      const card = el('div', 'market-item');
+      card.appendChild(marketTile(s.name));
+      const main = el('div', 'market-main');
+      main.innerHTML = `<div class="market-name">${esc(s.name)}${s.installed ? '<span class="badge badge--success">已安装</span>' : ''}</div>
+        <div class="market-desc">${esc(s.description)}</div>`;
+      main.title = `${s.description || ''}\n${(s.steps || []).length} 步 · 参数: ${(s.params || []).join(', ') || '无'}`;
       const actions = el('div', 'row-actions');
-      const btn = el('button', 'btn btn-primary btn-sm', s.installed ? '重装' : '一键安装');
+      const btn = el('button', 'btn btn-secondary btn-sm', s.installed ? '重装' : '安装');
       btn.addEventListener('click', async () => {
         if (s.installed && !await confirmModal(`技能「${s.name}」已经装过了。重装会把它恢复成市场模板，你改过的步骤会被替换；只想临时别用它，请取消后到技能页点停用。`,
           '已经装过了', { okText: '重装它', danger: true })) return;
@@ -3594,7 +3716,13 @@ function renderWorkspace(ws) {
     text.textContent = ws.workspace ? '工作区 · ' + wsShort(ws.workspace) : '选择工作区';
     text.title = ws.workspace || '';
   }
+  const foot = $('#composer-ws-text');
+  if (foot) {
+    foot.textContent = ws.workspace ? wsShort(ws.workspace) : '选择工作区（可选）';
+    foot.title = ws.workspace || '';
+  }
 }
+$('#composer-ws').addEventListener('click', () => openWorkspaceDialog());
 
 $('#ws-chip').addEventListener('click', () => openWorkspaceDialog());
 
@@ -3909,7 +4037,7 @@ function resetFeedToEmpty(title, desc) {
   feed.innerHTML = '';
   const empty = el('div', 'empty');
   empty.id = 'goals-empty';
-  empty.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/><circle cx="12" cy="12" r="3"/></svg>
+  empty.innerHTML = `<div class="empty-hero" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M15 4L7 12L15 20"/></svg></div>
     <div class="empty-title">${esc(title)}</div><p class="empty-desc">${esc(desc)}</p>`;
   feed.appendChild(empty);
 }
@@ -3919,7 +4047,7 @@ async function enterConvoView(c, opts = {}) {
   setThreadMode(true);
   $('#goals-title').textContent = c.title || '新对话';
   if (opts.create) {
-    resetFeedToEmpty('新对话已开始', '在下方输入消息，Gleam 会记住这轮会话的上下文。');
+    resetFeedToEmpty('可以直接开口说了', '说出你想推进的事，Gleam 会边听边整理这轮会话的上下文。');
   }
   await loadConvoList(c.id);
   refreshWorkbench();
@@ -3939,7 +4067,7 @@ async function startNewConvo(spaceId) {
     currentConvo = c;
     setThreadMode(true);
     $('#goals-title').textContent = c.title || '新对话';
-    resetFeedToEmpty('新对话已开始', '在下方输入消息，微光会记住这轮会话的上下文。');
+    resetFeedToEmpty('可以直接开口说了', '说出你想推进的事，Gleam 会边听边整理这轮会话的上下文。');
     convoLive.clear();
     await loadConvoList(c.id);
     goalInput.focus();
@@ -4603,7 +4731,7 @@ async function runGEOAnalyze() {
  * ============================================================ */
 const UIPrefs = (() => {
   const KEY = 'gleam-ui';
-  let p = Object.assign({ themeMode: 'light', accent: 'emerald' }, load());
+  let p = Object.assign({ themeMode: 'light', accent: 'emerald', lang: 'zh', font: 'sans', text: 's', zoom: 'm', width: 'standard' }, load());
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* 隐私模式 */ } }
   function get() { return p; }
@@ -4629,6 +4757,76 @@ function applyTheme() {
     b.setAttribute('aria-pressed', String(b.dataset.mode === themeMode)));
   document.querySelectorAll('.accent-swatch').forEach((b) =>
     b.setAttribute('aria-pressed', String(b.dataset.accent === accent)));
+  // 纯前端外观偏好：字体 / 字号 / 缩放 / 内容宽度 / 语言，全部落到 <html> 属性上由 CSS 接管
+  const prefs = UIPrefs.get();
+  const de = document.documentElement;
+  de.setAttribute('data-font', prefs.font || 'sans');
+  de.setAttribute('data-text', prefs.text || 's');
+  de.setAttribute('data-zoom', prefs.zoom || 'm');
+  de.setAttribute('data-width', prefs.width || 'standard');
+  document.querySelectorAll('[data-pref]').forEach((b) => {
+    const on = String(prefs[b.dataset.pref]) === b.dataset.val;
+    if (b.getAttribute('role') === 'menuitemradio') b.setAttribute('aria-checked', String(on));
+    else b.setAttribute('aria-pressed', String(on));
+  });
+  applyLang(prefs.lang || 'zh');
+}
+
+/* ---------- 界面语言：壳层文案的中英切换（动态内容与后端消息保持中文） ---------- */
+const I18N_EN = {
+  '目标': 'Goals', '定时任务': 'Schedules', '技能': 'Skills', '工具': 'Tools', '更多': 'More', '记忆': 'Memory',
+  '市场': 'Market', '成长': 'Growth', '就绪体检': 'Readiness', '反馈与建议': 'Feedback', '设置': 'Settings', '我的': 'Me',
+  '新任务': 'New task', '搜索': 'Search', '工作区': 'Workspaces', '微光 · 本地智能体': 'Gleam · local agent',
+  '新对话': 'New chat', '选择工作区': 'Choose workspace', '选择工作区（可选）': 'Choose workspace (optional)',
+  '准备就绪': 'Ready', '可以开始一个新目标': 'Start a new goal', '全部': 'All', '进行中': 'Active', '已完成': 'Done', '需处理': 'Needs you',
+  '本地工作台': 'Local workbench', '不止于对话，': 'Beyond chat, ', '把事做完。': 'get it done.',
+  '描述一个目标，或从下方快捷入口开始。上下文留在本机，持续推进。': 'Describe a goal or start from a shortcut below. Context stays on this machine.',
+  '本周完成': 'Done this week', '条记忆': 'memories', '整理工作区': 'Tidy workspace', '项目复盘': 'Project review', '快速研究': 'Quick research',
+  '文件归档 · 生成索引': 'Archive files · build index', '进度分析 · 风险提醒': 'Progress · risks', '阅读文档 · 输出简报': 'Read docs · brief',
+  '从一个小目标开始': 'Start with a small goal', '可以直接开口说了': 'Go ahead and say it',
+  '模式': 'Mode', '权限': 'Access', '对话': 'Chat', '工作': 'Work', '编程': 'Code', '批准': 'Approve', '全自动': 'Auto',
+  'Enter 发送 · Shift+Enter 换行': 'Enter to send · Shift+Enter for newline',
+  '一切从这里开始… 描述任务，或输入 @ 引用': 'Start here… describe a task, or type @ to reference',
+  '添加文件': 'Add file', '添加文件夹': 'Add folder', '添加目标': 'Add goal', '计划模式': 'Plan mode', '添加插件': 'Add plugin', '@ 引用': '@ mention', '浏览器预览': 'Browser preview',
+  '上下文水位': 'Context usage', '立即压缩': 'Compress now', '去设置查看': 'Open settings', '当前模型': 'Current model',
+  '长期记忆': 'Long-term memory', '写入记忆': 'Save a memory', '保存': 'Save', '检索你的记忆': 'Search your memory', '写一条记忆': 'Write a memory',
+  '新建定时任务': 'New schedule', '创建': 'Create', '从市场安装': 'Install from market',
+  'MCP 服务器': 'MCP servers', '技能模板': 'Skill templates', '已安装': 'Installed', '自定义接入': 'Custom',
+  '个人': 'Personal', '智能体': 'Agent', '安全': 'Safety', '开发': 'Developer', '协作': 'Collaboration', '外观': 'Appearance',
+  '模型': 'Model', '引擎': 'Engine', 'Go 工具链': 'Go toolchain', '账号与登录': 'Account', '累计任务': 'Tasks', '连续成功': 'Streak', '本周 tokens': 'Tokens this week',
+  '语言': 'Language', '明暗模式': 'Mode', '主题': 'Theme', '字体风格': 'Font', '文字大小': 'Text size', '界面缩放': 'Zoom', '内容宽度': 'Content width',
+  '系统': 'System', '浅色': 'Light', '深色': 'Dark', '跟随系统': 'System', '森林': 'Forest', '薄荷': 'Mint', '蜜蜂': 'Bee', '羊皮纸': 'Parchment',
+  '无衬线': 'Sans', '衬线': 'Serif', '小': 'S', '中': 'M', '大': 'L', '标准': 'Standard', '宽': 'Wide',
+  '使用统计与成长': 'Usage & growth', '检查更新': 'Check for updates', '帮助与反馈': 'Help & feedback', '账号与本地数据': 'Account & local data', '退出登录': 'Sign out',
+  '所有任务': 'All tasks', '选择': 'select', '打开': 'open', '个': '',
+  '搜索会话标题、内容摘要或目标…': 'Search chats, previews or goals…', '搜索设置…': 'Search settings…',
+  '现场': 'Live', '空闲': 'Idle', '外观皮肤': 'Appearance', '深浅模式': 'Mode', '强调色': 'Accent',
+};
+const i18nOrig = new WeakMap();
+const I18N_ATTRS = ['placeholder', 'title', 'aria-label'];
+function applyLang(lang) {
+  const en = lang === 'en';
+  document.documentElement.setAttribute('lang', en ? 'en' : 'zh-CN');
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    const raw = i18nOrig.has(n) ? i18nOrig.get(n) : n.nodeValue;
+    const key = raw.trim();
+    if (!key || !(key in I18N_EN)) continue;
+    if (!i18nOrig.has(n)) i18nOrig.set(n, raw);
+    n.nodeValue = en ? raw.replace(key, I18N_EN[key]) : raw;
+  }
+  document.querySelectorAll('[placeholder],[title],[aria-label]').forEach((elx) => {
+    I18N_ATTRS.forEach((a) => {
+      const store = 'i18n' + a.replace(/-./g, (m) => m[1].toUpperCase());
+      const cur = elx.getAttribute(a);
+      if (cur == null) return;
+      const orig = elx.dataset[store] != null ? elx.dataset[store] : cur;
+      if (!(orig in I18N_EN)) return;
+      elx.dataset[store] = orig;
+      elx.setAttribute(a, en ? I18N_EN[orig] : orig);
+    });
+  });
 }
 if (darkMedia.addEventListener) darkMedia.addEventListener('change', () => { if (UIPrefs.get().themeMode === 'system') applyTheme(); });
 
@@ -4638,6 +4836,10 @@ document.querySelectorAll('.theme-mode-btn').forEach((b) => {
 document.querySelectorAll('.accent-swatch').forEach((b) => {
   b.addEventListener('click', () => { UIPrefs.set({ accent: b.dataset.accent }); });
 });
+// 设置页里的外观分段（语言 / 字体 / 字号 / 缩放 / 宽度）与头像菜单共用同一份偏好
+document.querySelectorAll('.settings-panel [data-pref]').forEach((b) => {
+  b.addEventListener('click', () => UIPrefs.set({ [b.dataset.pref]: b.dataset.val }));
+});
 
 /* ============================================================
  * 「我的」抽屉
@@ -4646,7 +4848,6 @@ const MeDrawer = (() => {
   const overlay = $('#me-overlay');
   function open() { overlay.hidden = false; loadAccount(); }
   function close() { overlay.hidden = true; }
-  $('#open-me').addEventListener('click', open);
   $('#me-close').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
@@ -5743,6 +5944,167 @@ const Onboarding = (function () {
   }
 
   return { start };
+})();
+
+
+/* ---------- 头像菜单 + 外观子菜单 ---------- */
+const MeMenu = (() => {
+  const menu = $('#me-menu');
+  const btn = $('#open-me');
+  const sub = $('#me-appearance');
+  function syncChecks() {
+    applyTheme();
+    const signedIn = !$('#me-user').hidden;
+    menu.querySelector('[data-me="signout"]').hidden = !signedIn;
+    menu.querySelector('[data-me-signout-sep]').hidden = !signedIn;
+  }
+  function place() {
+    const r = btn.getBoundingClientRect();
+    menu.style.left = Math.round(r.right + 8) + 'px';
+    menu.style.bottom = Math.max(8, Math.round(window.innerHeight - r.bottom)) + 'px';
+  }
+  function setSub(open) {
+    sub.classList.toggle('open', open);
+    sub.querySelector('[data-me="appearance"]').setAttribute('aria-expanded', String(open));
+    if (!open) openLeaf(null);
+  }
+  // 三级子菜单：同一时刻只开一个
+  function openLeaf(leaf) {
+    sub.querySelectorAll('.menu-flyout .menu-sub').forEach((s) => {
+      const on = s === leaf;
+      s.classList.toggle('open', on);
+      s.querySelector('[data-sub]').setAttribute('aria-expanded', String(on));
+    });
+  }
+  sub.querySelectorAll('.menu-flyout .menu-sub').forEach((s) => s.addEventListener('mouseenter', () => openLeaf(s)));
+  function open() { syncChecks(); place(); menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); menu.querySelector('.menu-item').focus(); }
+  function close() { if (menu.hidden) return; menu.hidden = true; setSub(false); btn.setAttribute('aria-expanded', 'false'); }
+  btn.setAttribute('aria-haspopup', 'menu');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.addEventListener('click', (e) => { e.stopPropagation(); if (menu.hidden) open(); else close(); });
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', close);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  window.addEventListener('resize', close);
+  sub.addEventListener('mouseenter', () => setSub(true));
+  sub.addEventListener('mouseleave', () => setSub(false));
+  menu.addEventListener('click', async (e) => {
+    const pr = e.target.closest('[data-pref]');
+    if (pr) { UIPrefs.set({ [pr.dataset.pref]: pr.dataset.val }); return; }
+    const leaf = e.target.closest('[data-sub]');
+    if (leaf) { const s = leaf.closest('.menu-sub'); openLeaf(s.classList.contains('open') ? null : s); return; }
+    const it = e.target.closest('[data-me]');
+    if (!it) return;
+    const act = it.dataset.me;
+    if (act === 'appearance') { setSub(!sub.classList.contains('open')); return; }
+    close();
+    if (act === 'settings') showView('settings');
+    else if (act === 'growth') showView('growth');
+    else if (act === 'update') $('#me-update').click();
+    else if (act === 'help') $('#me-help').click();
+    else if (act === 'account') MeDrawer.open();
+    else if (act === 'signout') $('#me-signout').click();
+  });
+  return { open, close };
+})();
+$('#sp-account').addEventListener('click', () => MeDrawer.open());
+document.addEventListener('keydown', (e) => {
+  // Ctrl/⌘ + , 打开设置（输入法组字时不抢）
+  if ((e.ctrlKey || e.metaKey) && e.key === ',' && !e.isComposing) { e.preventDefault(); showView('settings'); }
+});
+$('#memory-empty-write').addEventListener('click', () => $('#memory-content').focus());
+
+/* ---------- 全局任务搜索（Ctrl+K）：本机会话 + 当前已载入的目标 ---------- */
+const TaskSearch = (() => {
+  const overlay = $('#task-search');
+  const input = $('#task-search-input');
+  const list = $('#task-search-list');
+  const count = $('#task-search-count');
+  let items = [];
+  let shown = [];
+  let sel = 0;
+  let lastFocus = null;
+  const fmtTime = (s) => {
+    if (!s) return '';
+    const d = new Date(s);
+    if (isNaN(d)) return '';
+    const today = new Date();
+    return d.toDateString() === today.toDateString()
+      ? d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  };
+  async function collect() {
+    const spaceName = new Map((spaceState.spaces || []).map((sp) => [sp.id, sp.name]));
+    let convos = [];
+    try { convos = (await api('GET', '/api/conversations')).conversations || []; } catch { convos = []; }
+    const out = convos.map((c) => ({
+      kind: 'convo', id: c.id, title: c.title || '新对话',
+      sub: [spaceName.get(c.space_id || 'default') || '默认空间', c.preview || ''].filter(Boolean).join(' · '),
+      time: c.updated_at, hay: `${c.title} ${c.preview || ''} ${c.id}`.toLowerCase(),
+    }));
+    [...tasks.values()].forEach((t) => {
+      const i = t.info || {};
+      out.push({ kind: 'goal', id: i.task_id, title: i.goal || '目标', sub: '目标 · ' + (STATUS_LABEL[i.status] || i.status || ''),
+        time: i.created_at || i.started_at, hay: `${i.goal || ''} ${i.task_id || ''}`.toLowerCase() });
+    });
+    out.sort((a, b) => (new Date(b.time || 0)) - (new Date(a.time || 0)));
+    return out;
+  }
+  function render() {
+    const q = input.value.trim().toLowerCase();
+    shown = q ? items.filter((it) => it.hay.includes(q)) : items;
+    sel = Math.min(sel, Math.max(0, shown.length - 1));
+    count.textContent = String(shown.length);
+    list.innerHTML = '';
+    if (!shown.length) { list.appendChild(el('div', 'search-empty', q ? '没有匹配的任务' : '还没有任务')); return; }
+    shown.slice(0, 200).forEach((it, i) => {
+      const row = el('button', 'search-row' + (i === sel ? ' active' : ''));
+      row.type = 'button';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', String(i === sel));
+      row.innerHTML = `<span class="search-row-title">${esc(it.title)}</span><span class="search-row-sub">${esc(it.sub)}</span><span class="search-row-time">${esc(fmtTime(it.time))}</span>`;
+      row.addEventListener('mousemove', () => { if (sel !== i) { sel = i; paintSel(); } });
+      row.addEventListener('click', () => choose(it));
+      list.appendChild(row);
+    });
+  }
+  function paintSel() {
+    [...list.children].forEach((r, i) => { r.classList.toggle('active', i === sel); r.setAttribute('aria-selected', String(i === sel)); });
+    const cur = list.children[sel];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+  }
+  function choose(it) {
+    close();
+    if (it.kind === 'convo') { showView('goals'); openConvo(it.id); return; }
+    showView('goals');
+    const t = tasks.get(it.id);
+    if (t && t.card && t.card.isConnected) t.card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  async function open() {
+    lastFocus = document.activeElement;
+    overlay.hidden = false;
+    input.value = '';
+    sel = 0;
+    list.innerHTML = '<div class="search-empty">加载中…</div>';
+    input.focus();
+    items = await collect();
+    render();
+  }
+  function close() { if (overlay.hidden) return; overlay.hidden = true; if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+  input.addEventListener('input', () => { sel = 0; render(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (shown.length) { sel = (sel + 1) % Math.min(shown.length, 200); paintSel(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (shown.length) { sel = (sel - 1 + Math.min(shown.length, 200)) % Math.min(shown.length, 200); paintSel(); } }
+    else if (e.key === 'Enter') { e.preventDefault(); if (shown[sel]) choose(shown[sel]); }
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !overlay.hidden) { close(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K') && !e.isComposing) { e.preventDefault(); if (overlay.hidden) open(); else close(); }
+  });
+  $('#task-search-open').addEventListener('click', open);
+  return { open, close };
 })();
 
 /* ---------- 启动（必须是本文件的最后一段，判据见 scripts/check-app-startup.py） ---------- */

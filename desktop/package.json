@@ -1,0 +1,25 @@
+{
+  "name": "gleam-desktop",
+  "productName": "Gleam",
+  "version": "0.0.0-spike",
+  "description": "Gleam desktop shell (Electron) - Phase 0 spike",
+  "author": "Gleam",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:ts": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run build:sidecar && npm run build:ts",
+    "dev": "npm run build && electron .",
+    "start": "electron .",
+    "pack:linux": "npm run build && electron-builder --linux dir"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "electron": "37.7.0",
+    "electron-builder": "26.0.12",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,28 @@
+# Phase 0 spike: minimal config. Only the Linux unpacked target ("dir") has been built and checked.
+# Signing, notarization, installers (NSIS / dmg), auto-update and fuses are Phase 1+.
+appId: ai.gleam.desktop
+productName: Gleam
+directories:
+  output: release
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - package.json
+asar: true
+# The Go sidecar is built per platform by scripts/build-sidecar.mjs into .sidecar/<platform>-<arch>/
+# and shipped outside the asar so it can be executed directly.
+extraResources:
+  - from: .sidecar/${platform}-${arch}/
+    to: bin/
+    filter:
+      - "**/*"
+linux:
+  target:
+    - dir
+  category: Development
+win:
+  target:
+    - dir
+mac:
+  target:
+    - dir

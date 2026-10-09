@@ -805,9 +805,9 @@ body::before {
   gap: var(--space-2);
 }
 .footer-qr-card img {
-  width: 140px;
-  height: 140px;
-  object-fit: cover;
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.08);
   background: #fff;
@@ -836,6 +836,20 @@ body::before {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-4);
+}
+
+/* ---- 下载加速提示 ---- */
+.dl-tip-slow {
+  color: var(--color-fg-muted);
+  font-size: var(--fs-xs);
+  margin-top: var(--space-3);
+}
+.dl-tip-slow a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.dl-tip-slow a:hover {
+  text-decoration: underline;
 }
 
 /* ---- 偏好减少动画 ---- */

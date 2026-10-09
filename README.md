@@ -1,401 +1,178 @@
 # Gleam（微光）
 
 **本地优先的桌面 AI 智能体——眼里有活，心里有你。**
-你负责做决定，具体执行交给我。
 
-Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆、有判断、能主动推进工作**的桌面智能体。基于 Go 1.22+ 从零自研，Harness 全部自研、零第三方依赖（`go.mod` 无任何外部包），单文件二进制约 10MB。
+<p align="center">
+  <a href="https://github.com/GoodTimeGGB/Gleam/releases"><img src="https://img.shields.io/github/v/release/GoodTimeGGB/Gleam?label=version&color=blue" alt="Release"></a>
+  <a href="https://github.com/GoodTimeGGB/Gleam/stargazers"><img src="https://img.shields.io/github/stars/GoodTimeGGB/Gleam?style=social" alt="Stars"></a>
+  <a href="https://github.com/GoodTimeGGB/Gleam/blob/master/LICENSE"><img src="https://img.shields.io/github/license/GoodTimeGGB/Gleam" alt="License"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white" alt="Go"></a>
+  <a href="https://github.com/GoodTimeGGB/Gleam/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build"></a>
+</p>
 
-## 核心能力
+<p align="center">
+  你负责做决定，具体执行交给我。
+</p>
 
-| 能力 | 说明 |
+Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆、有判断、能主动推进工作**的桌面智能体。基于 Go 从零自研，零第三方依赖，单文件二进制约 10MB。
+
+---
+
+## 预览
+
+<p align="center">
+  <img src="artifacts/gleam-desktop-01.png" alt="Gleam 桌面端" width="90%">
+</p>
+
+<p align="center">
+  <img src="artifacts/settings-tab-llm-2026-09-09T06-00-49-346Z.png" alt="模型设置" width="45%">
+  <img src="artifacts/settings-tab-engine-2026-09-09T06-01-00-565Z.png" alt="引擎设置" width="45%">
+</p>
+
+---
+
+## Star 趋势
+
+<p align="center">
+  <a href="https://star-history.com/#GoodTimeGGB/Gleam&Date">
+    <img src="https://api.star-history.com/svg?repos=GoodTimeGGB/Gleam&type=Date" alt="Star History" width="600">
+  </a>
+</p>
+
+---
+
+## 技术栈
+
+| 层面 | 选型 |
 | :--- | :--- |
-| **自主任务引擎** | Plan-Execute-Reflect 三阶段循环；DAG 依赖并发执行；0-100 完成度评分；低分自动重规划；步骤超时自动重试 |
-| **三种任务模式** | **对话**（直连 LLM 快速问答，不经规划/执行）、**工作**（Plan-Execute-Reflect 全流程）、**编程**（编程准则：最小 diff + 构建验证）；工作模式规划屡败自动回落直聊，纯聊天目标不再硬失败 |
-| **上下文自动压缩** | 短期窗口外的旧对话自动汇总为滚动摘要（LLM 摘要 + 本地抽取式兜底），注入后续规划并持久化；设置页可视化统计与手动压缩，token 收益实时估算 |
-| **目标模式** | 通过 JSON-RPC 提交 `goal/submit`，实时推送进度、请求审批、回报结果（auto / plan_first / interactive 三种模式） |
-| **自研 Harness** | 工具注册表（热注册）、三层记忆、Cron 调度器、安全门控、技能系统、MCP 连接器，全部纯标准库 |
-| **安全门控与权限设置** | 三种安全模式（auto/plan_first/interactive）；每个工具可设**只读放行 / 需我批准 / 完全访问**（工具页下拉，热生效并持久化）；高风险操作执行前展示计划请求确认；信任路径与信任工具白名单 |
-| **三层记忆** | 短期环缓冲（最近 20 轮）+ 工作记忆（任务结果落盘）+ 长期记忆（自研词法索引：中文双字组 + FNV 哈希 + 余弦相似度，JSON 持久化。零第三方依赖，**不是语义向量**，口径见 `docs/known-limits.md`） |
-| **技能系统** | 执行 → 固化 → 一键复用闭环；技能 YAML 版本化，自动统计运行成功率；失败后自动优化参数并保存新版本 |
-| **主动提议** | 任务完成后给出后续建议；≥2 个工具步骤的成功任务自动建议固化为技能 |
-| **协作风格** | rigorous（严谨）/ gentle（温和）/ efficient（高效）三种风格，贯穿规划与回复提示词 |
-| **模型接入** | 9 家厂商官方入口预设（智谱 GLM / DeepSeek / Kimi / 通义 / 火山方舟 / MiniMax / OpenAI / Anthropic / OpenRouter），支持 **Token 按量 / Coding 编程 / Agent 智能体** 三类套餐一键切换；自定义接入支持 **OpenAI Chat / OpenAI Responses / Anthropic Messages** 三种线协议；设置保存即热重建客户端 |
-| **市场** | 内置 MCP 服务器目录（filesystem/fetch/memory/sequential-thinking/puppeteer/time/git/sqlite）与技能模板（速记/目录快照/网页收藏/工作日志/脚手架），关键词搜索、一键安装（参数填空 + 热连接 + 热注册）、断连重试、自定义 stdio 接入；配置持久化到覆盖层 |
-| **人格化旁白** | 自研 Narrator 模板层：各阶段用一致的"Gleam 声音"叙述进度（零 LLM、零延迟、零 token），执行器审批等待不占并发槽位，LLM 瞬时故障自动重试一次——像同事干活，不像日志刷屏 |
-| **专家角色系统** | 7 个预置角色（通用/数据分析师/内容创作者/开发工程师/项目经理/研究员/运维专家），每个角色是一份**完整场景模板**：系统提示 + 验收重点 + 产出格式 + 核心工具 + 模型档位。目标提交时选择角色，规划器自动注入领域知识与约束，让"什么算做到""产出长什么样""该挑哪档模型"都按场景落地（参考 WorkBuddy 多专家 Agent） |
-| **GEO 生成式引擎优化** | 创作前把 GEO 准则注入创作者角色；每次创作完成后自动评估产出在 AI 问答引擎中的可引用性（结构/语义/引用性/关键词四维打分），给出可直接照做的改写建议并留档；GEO 板块可手动分析任意内容、查看准则与历史，一键开关自动分析 |
-| **桌面集成工具** | 剪贴板读写、截屏保存、系统通知（任务完成弹窗）、可复用文本片段管理（参考 Alice 桌面工作流 + WorkBuddy 桌面自动化） |
-| **成长日志** | 自动记录任务完成、技能固化与效率指标，7 级成长等级（萌新微光→光华璀璨），连续活跃天数追踪（参考阿布自进化能力） |
-| **消耗看板** | 每个任务实时统计模型调用次数、输入/输出 token、工具调用、重试与去重数、耗时；服务端未返回 usage 时按中英文特征估算并标注「约」；成长页累计/近 7 天 token |
-| **低价值调用治理** | 相同参数的只读调用只真正执行一次（工具+参数指纹 + singleflight），其余复用结果；已知失败的重复调用直接跳过；仅只读结果可复用，默认开启 |
-| **辅助调用走小模型** | 上下文压缩、GEO 分析、技能参数优化等高频低难度调用走独立的 `fast_model`，规划/执行/对话仍用主模型；未配置自动回退，设置保存即热重建 |
-| **任务预算熔断** | 单任务可设模型调用次数 / token / 运行时长上限（默认 40 次 · 30 万 token · 15 分钟），超预算立即停下并征求确认，批准后追加一倍额度，拒绝则明确失败 |
-| **防打转检测** | 跨重规划统计「工具+参数」指纹，同一动作重复多轮（默认 3）即判定原地打转并停下，给出可操作建议，而不是硬耗到重规划次数用尽 |
-| **大输出预算** | 工具输出注入下游前统一截断：按「头 + 尾 + 省略说明」处理，并明确告知模型已截断、原始多长、怎么取完整内容——防止一个文件读爆整条链路 |
-| **能力菜单按需加载** | 工具数超过阈值时不再全量注入 schema：先给一份轻量能力菜单，用辅助模型（或本地关键词打分）筛出本次相关的工具，只注入它们的完整 schema |
-| **审核模型 + 门控留痕 + 出网留痕** | 对"本来会被自动放行"的中高风险动作，先用辅助模型做一次独立快筛（不给它看 Agent 的推理），被标记才升级人工；被拒/放行/加拦全程留痕，可在安全设置页回看。**数据出网同样留痕**：模型调用与 `web.fetch` 每次发包都记一条（`gleam pending --audit --egress` 可只看这类），**只记主机名与字节量、绝不记内容**——本地优先的产品得能自证"什么数据出了本机"，而审计本身不能变成新的泄露面 |
-| **验收标准（判定与生成分开）** | 规划阶段就把"做到什么算完成"写成 2–4 条可核对的验收标准，反思阶段由**独立调用、独立上下文**的环节逐条判定；总分按通过比例算出，**不采信模型自评**——让生成者给自己打分，它永远打高分。漏判的条目按未通过计，任务卡上直接展示验收清单。**独立性落在两处**：① 验收换用**不同档位**的模型（默认 `reasoning`，判据是模型 ID 不同而非档位名不同；换不成时如实回退，就绪体检里直接写"与执行者同源"，不假装独立）；② 产物核对由**代码实测**——文件在不在、是文件还是目录、长度对不对、搬走的源是否真没了，加上 `.json` 能不能解析，结果既喂给判定又当硬闸门（核对不过不许声称完成，哪怕一条验收标准都没定过）。**如实说明剩余限制**：这一层只做确定性判定，挡不住**语义**层面的问题（答非所问但自圆其说）。因此「验收通过」与「验收没核对过」被严格分开：反思器不可用时任务落「部分完成 · 验收未能核对」，绝不冒充已完成 |
-| **改动清单与写前还原（可退回的交付）** | 任务卡上列「这次动了哪些路径、现在多大、原来多大、能不能退回」，一行一个路径，可就地看**写前 → 现在**的行级对比，并一键把它退回到**本任务开始之前**。清单以**写前快照为主干**、产物核对为补充：`file.write` 是先截断再写，**一步失败的写入也可能已经留下真实改动**，只按核对列清单就会漏报，而漏报的方向是"用户以为盘上没动过"。口径只有一条时间线——退到任务开始之前，不是"上一步之前"；一次移动在清单里是两行、还原时成对退（只退目标端等于把文件复制成两份）。退不回去的行**原样说明原因**（当时 8 MB 超过上限 / 二进制未快照 / 没配数据目录），而不是笼统一句"不可还原"。落盘位置 `snapshots/<taskID>/`（内容 0600、权限位一并记住），与 `tool-output/` 同属**缓存**：按任务数裁剪，不是归档。刻意不做：不接 git（工作区未必是仓库，且要的是"这个任务之前"而不是"上一次提交之前"）、还原前不另存当前内容（没有查看入口就是半截功能，改成在二次确认里明说"当前内容不会保留"）。理由与边界见设计文档 §4.6.32；端点 `GET /api/goals/{id}/diff` · `POST /api/goals/{id}/revert` |
-| **版本口径：只说得出版本，说不出有没有新版** | 「检查更新」这一行以前答的是「当前版本 v0.1.0，已是本地运行的版本」——**没有更新源就没有"最新"这回事**，那是把"我不知道"讲成了完成时态的结论，比留空更坏：用户会照着它停止行动。现在版本只从 `GET /api/info` 取（owner 是 `internal/buildinfo`，HTML 与 JS 都不许再抄一份，取不到就显示"未知"），弹窗直说"安装包只落在本机，说不出有没有新版；升级就是替换程序本身，对话、技能、密钥都在「本地数据」那个目录里，不受影响"。两条判据由 `scripts/check-version-owner.py` 钉住（第 1 层；要比对的字面量从 owner 那里读，所以升版本时闸门自己跟着挪），负例见变异批次 H。为什么不加 `update_feed` 配置项、为什么不联网探测，见设计文档 §4.6.33 |
-| **连接与出网台账（不装连接器市场）** | 别家桌面 agent 的"连接器"是一排待安装的卡片，Gleam 反过来问：**这一根线通了之后，谁被允许动我的什么**。安全设置页一张表，一条常驻边界一行，五个问句一次答完——通到哪 / 谁能触发 / 什么东西会离开本机 / 留痕在哪 / 想关掉动哪里，末尾再补一句实测读数（本次运行发过几次、几个主机、多少字节）。内容**全部由本机运行状态现算**（`GET /api/connections`），读它本身一个包都不发；没配云端就写"这条线不存在"，市场那一行直说"你以为是连接，其实它不发请求"。三条诚实性口径：入网那行印**真实监听地址**并区分回环与局域网（这个端口没有鉴权），读数说清**只数了内存里最近 N 条**，没开审计落盘就**不许指路** `pending --audit`（把人引向一个不存在的文件，他查到的"没有记录"会被读成"确实没出过网"）。"一条都不能漏"不靠人记得：`scripts/check-egress-owner.py` 把每个 `RecordEgress` 落点与台账清单双向对账（第 1 层），负例见变异批次 I。为什么不做成连接器目录，见设计文档 §4.6.34 |
-| **候补目标（把"主动"的燃料换成本机信号）** | 别家 personal agent 的"主动"是接一排外部信号然后自己动起来，Gleam 反过来：**燃料是本机已经有的任务归档，输出只是一张不许自己跑起来的卡**。三条线索各浮一张卡——同一个目标反复失败 / 同一个目标每次只做一半 / 同一类失败跨任务反复出现；卡片带上现场（哪几次、什么归因、同一 `trace_id`）与一句**可以直接改的目标**，点「填进输入区」只把那句话放进输入框，**按回车才是执行**。三条口径钉死了：① **只提议不执行**（这一层没有手：不提交任务、不还原改动、不写卡片）；② **卡片不落盘**（它是历史的一个函数，同一段历史每次算出同一页；只有"别再提 / 已采纳"这个人的决定才落 `cues.json`，且可撤销）；③ **不调模型**（主动提议必须可复现，而它会在每次打开界面时烧一次出网）。一屏最多 3 张，够格却没挤进来的条数如实报"另有 N 条"，覆盖范围也只说"读了本机还留着的 N 条"——更早的归档已按任务数裁剪，**看不见不等于没发生**。第 3 条线索是旧承诺的兑现：`trace_id` 由"目标+模式+角色+模型"内容派生、不含时间戳，所以按它分组**天然就是失败聚类**，定时任务按点重跑的那几次自动落在同一组。三处清单（登记的线索 / 派生的分支 / 人话牌子）由 `scripts/check-cue-owner.py` 双向对账，"这一层没有手"与文案无 markdown 同一条命令判（第 1 层），负例见变异批次 J。为什么不接外部信号、为什么不自动跑，见设计文档 §4.6.35 |
-| **对话模式独立自检** | 对话模式没有规划阶段，原本无条件报满分；开启后由辅助模型在回答产出后核对一次（只读目标与回答，不看生成推理），只过一半就如实判「部分完成」。短闲聊自动跳过，核对失败一律放行不阻断对话 |
-| **提示词前缀缓存友好** | 系统提示词按「稳定段在前、易变段在后」排布：身份、规则、输出格式、角色知识、能力菜单这些逐字节不变的内容连成一段长前缀，工作目录、摘要、历史对话统一沉底。服务端前缀缓存只认**逐字节相同的最长公共前缀**，一个夹在中间的工作目录就能废掉它后面的全部内容。规划器与反思器同此布局，末尾另留一行输出格式提醒，避免把 JSON 约束推得离生成点太远 |
-| **缓存命中量化** | 解析各厂商返回的缓存命中字段（OpenAI/GLM 的 `prompt_tokens_details.cached_tokens`、DeepSeek 的 `prompt_cache_hit_tokens`、Anthropic 的 `cache_read_input_tokens`、Responses 的 `input_tokens_details.cached_tokens`）计入消耗看板；流式请求主动索要 usage（被厂商拒绝则自动退回，此后不再发该字段），Anthropic 侧按需挂 `cache_control` 断点。厂商不返回该字段时保持沉默，不假装是「命中率 0%」 |
-| **场景模板（角色即模板）** | 专家角色不只是一段人设：一个场景与另一个场景的差异落在**系统提示、验收重点、产出格式、核心工具、模型档位**五件事上。核心工具在能力菜单模式下强制附完整 schema（场景本来就靠它吃饭），产出格式注入提示词，模型档位可从配置里按场景挑模型。把差异沉淀在模板里，就不必为了新场景去改底层 Runtime |
-| **提示词与行为回归评测** | 提示词的稳定段被服务端前缀缓存折扣过，所以"做减法"省的从来不是钱，而是注意力稀释与指令冲突——**这件事没法用"省了多少字节"论证，只能靠评测回答"删了会不会变差"**。`gleam eval` 是一套**不依赖模型裁判**的回归评测：默认 `select` 深度只跑工具筛选（本地关键词打分，零模型调用、确定性、可离线进 CI），另有 `plan` / `full` 两个需要模型的深度。断言只看**相关度前 N 名**而不是"在不在菜单里"（菜单有按注册顺序补齐的兜底，永远填满，"在菜单里"证明不了相关）；`--save` 存基线、`--baseline` 报回归、`--strict` 回归时非零退出，可直接当门禁；`--tier` 模拟生效档位，用来量测按档位条件化的规则。红的用例会打印目标、逐条断言的实测值与自带的说明，失败必须能自己解释自己。**`--repeat N` 另外报出「可重复性」**：同一配置重跑 N 遍，多少条用例结果完全一致。两个数不能互相替代——**通过率回答"对不对"，可重复性回答"稳不稳"**。不稳的用例会打印"重跑 N 遍得到几种结果、抖的是哪一部分"，因为在它变稳之前，那次的绿可能只是掷硬币掷出来的，不能当改动有效的证据 |
-| **规则资产化与按档位条件化** | 稳定段里的规则不再散落在组装函数里，而是 `internal/agent/rules.go` 里**有 ID、有落点、有适用范围**的条目：一共几条、各自何时生效一处看得全，"减法"从"改代码"变成"改 `Scope`"。适用范围**只允许落在稳定维度**（任务模式 / 模型档位 / 角色）——挂到"本次目标"上会让稳定段逐任务变化、前缀缓存全碎，这一点由签名兜住（渲染函数拿不到目标）。同一 ID 可注册多个变体、先匹配到的生效：编程模式那条"必须安排验证步骤"对未配档位与 `economy` 保留原文，对 `coding` / `office` / `reasoning`（用户为这一档单独配了模型）换成"验一次就够、不要反复重跑"——判据是用户的配置，不是从档位名猜能力强弱 |
-| **规则集身份（这次用了哪版提示词）** | 一次产出的行为由代码 / 模型 / 规则表三者共同决定，前两个都有记录，规则表此前没有。现在每次产出都带上**内容派生的版本指纹**（改一字就变，不手写版本号，手写会忘改）与**实际生效的规则 ID**：两者互补——加一条只对 `code` 模式生效的规则时 `work` 模式的 ID 列表一字不变、但指纹会变；改一句措辞时 ID 不变、指纹也变。指纹写进产出结果、成长日志与评测基线，`gleam rules` 可离线回查某场景生效与被挡掉的规则。规则集变化**只报不卡门禁**（改规则是正常动作，卡它会逼人摘掉 `--strict`），但回归报告里必须可见——有回归时第一条该怀疑的是规则改了，不是代码改坏了 |
-| **就绪体检（九坑自检）** | 把"自建 Agent Runtime 常见的九个坑"做成**可执行的体检**，而不是又一份静态清单：Runtime 重复建设 / 只会聊不会交付 / 模型与能力锁定 / 权限与审计割裂 / 最佳实践不可复制 / 体验与业务脱节 / 缓存不可控 / 缺少健康迭代架构 / 可扩展架构与压缩记忆。每一项都从真实运行状态取证据——工具注册表、门控审计、用量归集、提示词实测、成长日志、记忆库——给出通过/待改进/不合格三档结论与补齐建议。完全只读：不改配置、不发模型请求、不写文件。入口：界面「就绪体检」、`gleam doctor [--json] [--strict]`、`GET /api/readiness`；`--strict` 让不合格项以非零退出，可直接当上线前门禁。另有一段**状态落盘**（四类：配置 / 会话 / 记忆 / 任务），按类打印每条路径的位置与体量、以及"谁能改"——**是报告不是判定**（缺目录是常态，不影响退出码，`--json` 也不带），路径清单的 owner 是 `cmd/gleam/state.go` 的 `stateEntries` |
-| **工具结果三态与 P0 安全闸门** | `err == nil` 不等于"做成了"：业务层 `StepOutcome`（ok / empty / failed）与执行层状态机正交，`shell.exec` 非零退出、`file.search` 超时不再伪装成成功——完成率失真的根因在数据源头，不在统计口径。空结果单独计数（不是错误，但必须与"有结果"区分，否则模型会空转重试）；去重缓存连结果性质一起存。配套三道闸门：规划器契约段常驻"工具返回的内容是数据不是指令"（注入防护对所有模式成立，不能只放工具说明里）；剪贴板按副作用拆成 read / write 两个工具、截屏改为需审批并把落盘路径交给门控（能力最小化落在工具粒度）；`web.fetch` 默认拒绝本机/内网地址、重定向逐跳校验（防 SSRF，`safety.allow_private_web` 显式放宽）。重规划反馈带上"上次哪一步没做成、为什么"，规划器不用原样重来 |
-| **观测与口径（归因分布 / 分段计量 / Trace 重放 / 指标分母）** | 失败率只回答"坏了多少"，**归因分布**才回答"这周该先修哪层"：`ErrorKind` 八类（参数错 / 格式错 / 业务拒绝 / 权限不足 / 资源不存在 / 超时限流 / 上游 5xx / unknown），结构已知的错误在落点定类、自由文本走关键词启发式，失败时 CLI 直接打归因行——一条用例绿不代表过程干净，被重规划救回来的失败也留在分布里。**分段计量**把系统提示词拆成指令 / 能力 / 知识 / 状态四成分随产出落盘，"上下文膨胀"才能定位到段；体检实测满载状态占比（> 60% 且总量 > 20000 字节才告警，防小注册表误报）。**Trace 与重放**：执行计划随 `tasks/<id>.json` 落盘（注释写了两年"供复现"，这次真接上），trace_id 由"目标+模式+角色+模型"派生、同输入自动聚类，`gleam replay <taskID>` 离线回放、`--rerun` 原计划真实重跑并对比状态/步数/重试/耗时。**attempt 明细**："一次就对"与"重试三次才对"在通过率里长得一样，`Retried` 字段与重试后成功计数把后者亮出来。**指标口径**：不可解用例独立成第三条轴（识别成功不进通过率、硬猜成功算失败），通过率分母 = 可解样本——分母陷阱能差二十个百分点，报通过率必须把分子分母边界说全 |
-| **钉住区、记忆卫生与评测分层（P2/P3 批次）** | **压缩钉住区**：用户在会话早期定下的约束（"以后都用中文标题"）不该被滚动摘要磨掉——`Manager` 钉住区压缩不动、注入排易变段最前、绝不重排；摘要带"累计省略 N 轮 / 约 M 字"，压缩丢了多少必须说出来。**记忆卫生**：写入前余弦判重（同一目标跑 10 次不再产生 10 条互相挤占的记录）、`memory.delete` 工具（软删优先、走用户审批——模型能写也能删）、检索相似度阈值过滤长尾噪音。**评测分层**：`--layer smoke` 跑零模型调用的确定性冒烟层；**保留池**照跑计入聚合但不显示单条结果——被盯着调的样本会过拟合，没被盯着的样本绿了才算泛化。**badcase 回流**：`gleam eval --emit-case <taskID>` 把失败任务转用例草稿，note 强制先回答"换更强模型会不会消失"——会消失是研究问题不进门槛。**用户重试率 / 中断率**：最接近真相的质量信号——同会话短时间相似目标再提交记重试、取消记中断，`gleam doctor` 报两条比率；重试的原始 trace 天然是 badcase 池，与回流闭环互相喂饱。**首次验收通过率 / 返工轮数**：成功率看不见"返工"——重做三轮才成与一次做对，在数据里长得一模一样。所以每个目标多记两个数：是不是**第一轮**就走完流程并通过完成判定（验收 + 产物核对），以及反思判未达标后**真正重新执行**的轮数；计划本身没通过校验的那种重来**不算返工**（一步都没执行，谈不上重做），但它确实让那次尝试没走完，所以"首次通过"会落成 false。比率的分母**只算记过这个口径的工作模式任务**——对话没有产物可核、历史条目从没记过，把它们算成"没通过"会让比率随使用习惯漂移、而不是随质量漂移。`gleam doctor` 报比率，`gleam replay` 报单任务那一行（一次通过 / 返工 N 轮 / 没走到验收，三种情形分得开）。**技能筛选**：`skill.list` 支持按目标关键词筛选，判据抽成 `internal/textmatch` 与工具路由**共用一份实现**——两处各写一份，"相关"就会有两个含义，讨论"筛得准不准"也就没有意义了；中文按相邻二元组、英文与数字按**整词**匹配（子串匹配会让 `go` 命中 `goals`，两字母检索词能让半个候选列表"相关"起来）；**有上限才有意义**，筛了却把 200 条全返回等于没筛；一条都没匹配上时**不按名字补齐**——一旦结果永远被填满，"在列表里"就不再意味着"相关"。**任务绑定配置快照**：事后留痕回答不了"当时用什么跑的"——`RuleSetVersion` 只在产出时事后留痕、不绑定任务，一个跑五分钟的任务中途改了模型或档位，前半段和后半段用的就不是同一套配置，而"配置变了"与"模型发挥不稳"在数据里长得一模一样。所以任务**启动时**取一次快照（收尾时再取，记下的是一个从未完整生效过的配置），只记影响行为的关键项（全量会把 API Key 明文写进任务记录，而且改一个无关字段也算"配置变了"，真正影响结果的那几项反而看不出来），路径类字段不记——那属于"这次在哪跑"，不属于"用什么跑"；档位表**深拷贝**，否则用户改一次档位就把所有历史快照一起改掉。`gleam replay --rerun` 优先吃当时那份快照（复现的前提是只动一个变量），旧任务没有该字段时回退当前配置，但**必须印一行说明走的是哪一条**——以为在复现、其实变量变了两个，是最坏的复盘姿势 |
-| **长时程与审计（P4/P5 批次）** | **流式三级超时**：只设总超时抓不住"每 60 秒吐一个字"——流式路径单独计时：首字节 30s（连接建了却不吐字）+ 块间 15s（吐着吐着停了），命中即中断并按可重试分类；三个 provider 共用一份看门狗实现。**审批等待落盘**：进程若在等待审批期间退出，`gleam pending` 重启后仍能列出"卡在哪一步、要批什么"，人工重新提交——不做完整状态机恢复（桌面单机下收益未验证）。**shell 边界与凭证隔离**：`cwd` 走与文件工具同一份边界校验（未配根目录时一律拒绝，失败朝安全方向失败），子进程环境剔除 `*_API_KEY`/`*_TOKEN`/`*_SECRET` 等凭证变量——模型能读回命令输出，凭证进了子进程就等于进了上下文。**全量审计落盘**：`audit.jsonl` 追加式记录，自动放行的副作用动作也留痕（只读不记，避免噪音淹掉真事件），重启后可复盘**审计的四种用法**：一份 append-only 记录能回答的问题不止一个——回放（排给人看）、重跑（`--rerun` 原样再执行一遍并逐项对比）、**恢复**（`--from <stepID>`，该步之前**沿用当时结果、不重新执行**，从该步往下跑）、分叉（`--from <stepID> --tool/--args`，同一前提换一种走法）、比较（`--diff <A> <B>`）。**运行中落盘**：任务记录是跑完之后写一次的终态快照，进程若在运行中退出（关窗口、重启、强杀）那次运行**什么都没有**——没有记录就没有回放、没有归因，连"跑到哪一步了"都答不上来。所以每步结束追加一行到 `runs/<taskID>.jsonl`：**一行一条而不是一个数组**（追加要 O(1)，崩了也只坏最后半行，整份拒绝解析等于把仅有的凭据也丢掉）；**正常结束就删**，于是留下的只有没跑完的运行，正好是唯一需要它的那批；**不安全的 taskID 宁可不记**也不"净化后照写"（净化会把 `a/b` 与 `a_b` 映射到同一个文件，读的人会以为看到的是完整的一次运行）。**沿用不是复用**：`Carried` 与 `Deduped` 必须分开——复用是这次跑过了、结果被省下来，沿用是这次**根本没跑**；回放要回答的第一个问题就是"这一步到底执行了没有"，而两种"没真跑"的原因完全不同（一个省调用，一个省副作用）。**预置必须早于所有 goroutine**，否则依赖沿用步骤的下游会去等一个永远不关的完成信号——不是"偶尔失败"，是死等。**缺一条历史结果就拒绝**，不能"顺手跑一遍"：那会把恢复悄悄变成重跑，而重跑有副作用。**回放产物落 `replays/`，不进 `tasks/`**——后者是质量统计的分母来源，把复盘动作混进去，用户重放一次历史任务，统计里就多出一个"用户提交过的任务"。**计数只有一份实现**，并有一条**跨实现对照**（真跑一次执行器，拿它的五项汇总与 `countSteps` 逐项对照）：最容易分叉的是「跑完了但业务上失败」（`Status=succeeded` 而 `Outcome=failed`），按 Status 算会把它洗成成功。**接线断言（第四次）**：回放记录跑完才写，所以运行日志的接线写在调用点的话单测照样全绿，而每次回放都不留任何运行中的凭据——这根线接在组装执行器的地方。 |
+| **语言** | Go 1.22+，零第三方依赖（`go.mod` 仅标准库） |
+| **二进制** | 单文件 ~10MB，纯 Go 零 cgo，五平台交叉编译 |
+| **通信** | JSON-RPC 2.0（stdio）· HTTP REST + SSE（Web UI） |
+| **前端** | 内嵌单页应用（`go:embed`），深色玻璃拟态，375-1440px 响应式 |
+| **LLM 协议** | OpenAI Chat · OpenAI Responses · Anthropic Messages，SSE 流式 |
+| **记忆** | 自研词法索引（中文双字组 + FNV 哈希 + 余弦相似度），JSON 持久化 |
+| **配置** | 自研 YAML 子集解析，设置覆盖层，保存即热生效 |
 
-## 官方网站 Demo
+---
 
-`website/` 目录是项目官网（纯静态、零构建，可直接部署 GitHub Pages 或双击打开）：
+## 核心功能
 
-- **核心模块介绍**：引擎三件套（Planner / Executor / Reflector）+ Harness 六件套（Registry / Memory / Safety / Skill / Scheduler / MCP）+ 成本治理六件套（消耗看板 / 调用去重 / 辅助小模型 / 预算熔断 / 提示词缓存友好 / 缓存命中量化）+ 循环治理与安全六件套（防打转 / 大输出预算 / 能力菜单 / 审核模型与留痕 / 验收标准 / 对话模式独立自检）+ 创作与质量（GEO / 成长日志 / 场景模板 / 就绪体检 / 回归评测）+ 授权与回头路（批准的就是执行的 / 改错了能退回去 / 出网有台账 / 候补目标只提议）逐个讲解
-- **分层架构图**：用户界面层 → 核心引擎 → 基础设施层
-- **交互式演示**：纯前端模拟的目标模式——选择示例目标、实时时间线、高风险审批卡（可点批准/拒绝）、完成度评分环，直观呈现 Plan-Execute-Reflect 循环
-- **下载区**：五个平台的产物（Windows 桌面版 / 命令行版、macOS Intel / Apple Silicon、Linux）各带未签名二进制的放行步骤；版本徽标与发布日期不是手写的自由文本——`scripts/check-version-owner.py` 要求它们等于 owner（`internal/buildinfo` 与 `pack/` 下最新那份 `SHA256SUMS-<date>.txt`），升版本或重新打包后漏改会报红
-- **快速开始**：四步上手
+### 自主任务引擎
 
-本地预览：`python -m http.server 8080 --directory website` 后打开 <http://localhost:8080>。
+Plan → Execute → Reflect 三阶段循环，DAG 依赖并发执行，0-100 完成度评分，低分自动重规划。
 
-## 一键安装（Windows）
+### 三种任务模式
 
-```powershell
-# 下载源码后，在项目根目录运行：
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1
-```
+| 模式 | 场景 |
+| :--- | :--- |
+| **对话** | 直连 LLM 快速问答，不经规划/执行 |
+| **工作** | 全流程 Plan-Execute-Reflect |
+| **编程** | 最小 diff + 构建验证 |
 
-安装脚本会自动完成：
-1. **检测 Go** — 先查 PATH，再查常见安装目录（C:\\Go、C:\\Program Files\\Go），最后查 GOROOT
-2. **未检测到则自动下载安装** — 从阿里云镜像下载 Go 1.23（约 80MB），解压到 C:\\Go，写入 PATH 和 GOPROXY
-3. **构建 Gleam** — 编译 CLI 版 + 桌面版（windowsgui，双击无黑窗）
-4. **配置环境** — 安装目录写入 PATH，创建 ~/.gleam 数据目录
+### 三层记忆
 
-也可以手动指定 Go 路径或跳过构建：
+- **短期**：最近 20 轮对话缓冲
+- **工作**：任务结果落盘，跨会话可用
+- **长期**：自研词法索引，中文双字组 + 余弦检索，零第三方依赖
 
-```powershell
-# 已有 Go，但不在 PATH 中：
-scripts/install.ps1 -GoPath "D:\MyTools\Go"
+### 安全门控
 
-# 使用预编译二进制，不从源码构建（注意：Go 的检测与下载仍会执行，
-# 脚本是「先把工具链备好，再决定要不要构建」；已装 Go 就不会下载）：
-scripts/install.ps1 -SkipBuild
+三种安全模式（auto / plan_first / interactive），每个工具可独立设置只读放行 / 需批准 / 完全访问，高风险操作执行前展示计划请求确认。
 
-# 独立检测 Go（不安装 Gleam）：
-scripts/go-check.ps1
-```
+### 模型接入
 
-> **这一步会联网，跑起来不会**：`install.ps1` 只在**本机找不到 Go** 时从阿里云镜像下载一次工具链（约 80MB）并写入用户级 PATH 与 GOPROXY；Gleam 自身运行不连任何自有服务（要联网的只有你自己配的模型 API，出网落点见 Web UI 安全页的「连接台账」）。「本地优先」说的是**运行期**，不是「安装脚本一个字节都不许下」——想完全不下载，就先自己装好 Go，或用官网的预编译二进制。
+9 家厂商官方入口预设（智谱 GLM / DeepSeek / Kimi / 通义 / 火山方舟 / MiniMax / OpenAI / Anthropic / OpenRouter），支持 Token 按量 / Coding 编程 / Agent 智能体三类套餐一键切换。
 
-### Web UI 中的 Go 检测
+### 技能系统
 
-设置页「Go 工具链」卡片实时显示检测结果（版本、路径、来源）。未检测到时：
-- 填写 Go 安装路径手动检测
-- 点击「安装 Go」查看安装指引和下载链接
+执行 → 固化 → 一键复用闭环，YAML 版本化，自动统计运行成功率，失败后自动优化参数。
 
-API 端点：`GET /api/go-status`（系统检测）、`GET /api/go-status?path=...`（仅检测指定路径）、`POST /api/go-status/install`（安装指引）。
+### 专家角色
 
-## 安装与运行（macOS / Linux）
+7 个预置角色（通用 / 数据分析师 / 内容创作者 / 开发工程师 / 项目经理 / 研究员 / 运维专家），每个角色是一份完整场景模板。
 
-这两个平台**没有一键脚本，也不需要装 Go**：下载单个二进制就能跑（官网下载区，或仓库 `dist/`、发布包 `Gleam-release-<日期>.zip`）。
+### 更多能力
 
-```bash
-# macOS：Apple Silicon 用 arm64，Intel 用 x86_64（Apple 菜单 → 关于本机，看「芯片」字段）
-chmod +x Gleam-macOS-AppleSilicon-arm64
-./Gleam-macOS-AppleSilicon-arm64 app        # 应用窗口；webui / goal / serve 等子命令与 Windows 完全一致
+- **上下文自动压缩**：旧对话滚动摘要，token 收益实时估算
+- **目标模式**：JSON-RPC 提交目标，实时推送进度与审批
+- **市场**：MCP 服务器目录 + 技能模板，关键词搜索一键安装
+- **GEO 生成式引擎优化**：创作后自动评估 AI 问答引擎可引用性
+- **成长日志**：7 级成长等级，连续活跃天数追踪
+- **消耗看板**：实时统计 token、工具调用、重试与耗时
+- **任务预算熔断**：调用次数 / token / 时长上限，超限停下征求确认
+- **防打转检测**：同一动作重复多轮自动停下
+- **改动清单与写前还原**：一键退回任务开始前的状态
+- **出网留痕**：每次发包只记主机名与字节量，绝不记内容
 
-# Linux x86_64
-chmod +x Gleam-Linux-x86_64
-./Gleam-Linux-x86_64 app                    # 应用窗口经 xdg-open 打开；无桌面环境时改用 webui 子命令
-```
-
-**首次运行会被系统的签名检查拦下**，因为二进制没有做代码签名（macOS 还需要 Apple 公证），这是刻意省掉的：
-
-- **macOS（Gatekeeper）**：终端执行 `xattr -d com.apple.quarantine ./Gleam-macOS-AppleSilicon-arm64` 去掉隔离属性；或到「系统设置 → 隐私与安全性」页面底部点「仍要打开」。
-- **Windows（SmartScreen）**：点「更多信息」→「仍要运行」。
-
-数据目录与配置三个平台一致：`~/.gleam`（`GLEAM_DATA_DIR` 可改）、`configs/config.yaml`、`GLEAM_API_KEY` 等环境变量。
-
-从源码构建（需要 Go 1.22+）：`bash scripts/build-desktop.sh` 一次产出五个平台的二进制；`bash scripts/package.sh` 另出发布包与校验和。
+---
 
 ## 快速开始
 
+### 下载
+
+前往 [Releases](https://github.com/GoodTimeGGB/Gleam/releases) 下载对应平台的二进制文件。
+
+### 运行
+
 ```bash
-# 构建（或直接 bash scripts/build-desktop.sh 一键构建两个可执行文件）
-go build -trimpath -ldflags="-s -w" -o bin/gleam.exe ./cmd/gleam
+# 桌面端（推荐）
+./gleam app
 
-# 0. 桌面端应用（推荐）：启动引擎并弹出独立应用窗口，关闭窗口即退出
-./bin/gleam.exe app                # --mock-llm 可离线体验；windowsgui 桌面版双击 GleamDesktop.exe 即可
+# 离线体验（Mock 模型，不需要 API Key）
+./gleam goal "在当前目录创建 hello.txt 并写入内容" --mock-llm
 
-# 1. 离线体验（Mock 模型，不需要 API Key）
-./bin/gleam.exe goal "在当前目录创建 hello.txt 并写入内容" --mock-llm
-
-# 2. 接入真实模型（GLM / 任意 OpenAI 兼容服务）
+# 接入真实模型
 export GLEAM_API_KEY=你的APIKey
-./bin/gleam.exe goal "列出当前目录的 Markdown 文件并总结" --mode auto
+./gleam goal "列出当前目录的 Markdown 文件并总结" --mode auto
 
-# 3. 目标模式服务（编辑器插件接入入口，stdin/stdout JSON-RPC；清单见 editor-plugin/）
-./bin/gleam.exe serve
-
-# 4. Web UI 服务（浏览器打开 http://127.0.0.1:8787，不弹窗口）
-./bin/gleam.exe webui
-
-# 5. 回归评测（默认 select 深度：纯本地、零模型调用、离线可跑）
-./bin/gleam.exe eval
-./bin/gleam.exe eval --baseline internal/eval/baseline-select.json --strict   # 当门禁：有回归就非零退出
-./bin/gleam.exe eval --tier coding                                            # 模拟生效档位，量测按档位条件化的规则
-
-# 6. 规则集回查（离线：不读配置、不连模型）
-./bin/gleam.exe rules                                                         # 全表：落点 / 条目 / 适用范围 / 版本指纹
-./bin/gleam.exe rules --task-mode work                                        # 某场景实际生效与被挡掉的几条
+# Web UI
+./gleam webui
 ```
 
-### 桌面端（`gleam app` / `GleamDesktop.exe`）
+### 从源码构建
 
-- **独立应用窗口**：自动以 Edge/Chrome 应用模式打开（无地址栏与标签页），观感即桌面应用；找不到时回退默认浏览器。
-- **关窗即退**：前端每 5 秒上报心跳；窗口全部关闭且无运行中任务、无未决审批时，进程在闲置超时（默认 90 秒，`--idle-exit-seconds` 可调）后自动退出。
-- **单实例**：默认端口已有 Gleam 实例时，直接对现有实例开新窗口，不重复启动引擎；端口被其他程序占用时自动换随机端口。
-- **`bin/GleamDesktop.exe`**：windowsgui 子系统构建，双击无控制台黑窗，直接进入应用模式。
+```bash
+go build -trimpath -ldflags="-s -w" -o bin/gleam ./cmd/gleam
+bash scripts/build-desktop.sh   # 五平台交叉编译
+```
 
-### 配置
-
-默认读取 `configs/config.yaml`（可 `--config` 指定）。环境变量优先级更高：
-`GLEAM_API_KEY`、`GLEAM_LLM_BASE_URL`、`GLEAM_LLM_MODEL`、`GLEAM_DATA_DIR`（默认 `~/.gleam`）、`GLEAM_WORKSPACE`、`GLEAM_SAFETY_MODE`。
+---
 
 ## 架构
 
 ```
-cmd/gleam/            主入口（app / serve / goal / webui / tools / rules / skills / schedule / memory / doctor / replay / eval / mcp-fake-server）
+cmd/gleam/              主入口（app / serve / goal / webui / eval / doctor ...）
 internal/
-  atomicfile/         状态落盘的唯一写入口：同目录临时文件 + Sync + rename（`os.WriteFile` 失败留下的是
-                      半截 JSON，下次打开解析失败，丢的是整份状态而不是一条记录）
-  agent/              自主任务引擎：planner（规划+校验）→ executor（DAG 并发+审批不占槽+超时重试+步骤三态）→ reflector（完成度评分）
-                      + rules.go 稳定段规则表：规则有 ID / 落点 / 适用范围，按任务模式与模型档位条件化
-                      + 规则集身份：内容派生的版本指纹 + 生效规则 ID，记进产出 / 成长日志 / 评测基线，gleam rules 回查
-                      + 重规划反馈带上次步骤摘要（哪一步没做成、为什么），不贴输出正文
-                      + narrator（人格化旁白，风格化阶段叙述，零 LLM）
+  agent/                自主任务引擎：planner → executor → reflector
   harness/
-    registry/         工具注册表（运行时热注册/替换/注销）
-    memory/           短期环缓冲 + 自研词法索引（FNV 哈希向量 + 中文双字组 + 余弦检索，非语义）+ 上下文自动压缩
-    safety/           安全门控（三级权限 × 三种模式 × 信任白名单 + 全量审计落盘 + 审批等待落盘）
-    scheduler/        Cron(5段) + 固定间隔 + 文件监听（轮询）+ HTTP 回调触发，任务持久化
-    skill/            技能固化/版本化/复用/失败自动优化（自研 YAML 子集读写）
-  tools/
-    file/ shell/ web/ 文件（工作区边界防护）/ 命令（高风险；cwd 同边界校验 + 凭证变量隔离）/ 网页抓取（默认拒绝本机/内网 + 重定向逐跳校验）
-    desktop/         桌面集成：剪贴板读写（权限分级）/ 截屏（落盘需审批）/ 系统通知/文本片段
-    std/              reply、memory.save/search/delete、schedule.*、skill.*（经适配器解耦）
-    mcp/              MCP 客户端（stdio JSON-RPC），远端工具适配为本地 Tool
-  llm/                三协议客户端（OpenAI Chat / OpenAI Responses / Anthropic，SSE 流式 + 三级超时看门狗 + 瞬时故障重试）
-                      + 厂商套餐预设（token/coding/agent 官方入口）+ 确定性 Mock
-  server/             JSON-RPC 2.0 over stdio（ndjson），双向请求（审批回路）
-  webui/              Web 操作台：HTTP REST + SSE 实时事件 + 审批等待器 + 内嵌前端（go:embed）
-  config/             配置加载 + 自研 YAML 子集解析/序列化 + 设置覆盖层
-  eval/               提示词与行为回归评测：三个深度（select 离线 / plan / full）+ 基线对比 + 已知问题归集
-  e2e/                端到端测试（构建真实二进制驱动全流程）
-pkg/types/            公共类型（Tool 接口、Plan/Step/Reflection、token 估算）
-  market/             市场目录：常见 MCP 服务器预设 + 技能模板（搜索/参数化安装）
-editor-plugin/        编辑器插件接入清单（gleam.plugin.json + 接入指引；通道为通用 JSON-RPC over stdio，不绑定具体宿主）
+    registry/           工具注册表（热注册/替换/注销）
+    memory/             三层记忆 + 上下文自动压缩
+    safety/             安全门控 + 全量审计落盘
+    scheduler/          Cron + 固定间隔 + 文件监听 + HTTP 回调
+    skill/              技能固化/版本化/复用
+  tools/                文件 / shell / web / 桌面集成 / MCP 客户端
+  llm/                  三协议客户端（OpenAI Chat / Responses / Anthropic）
+  server/               JSON-RPC 2.0 over stdio
+  webui/                HTTP REST + SSE + 内嵌前端
+  eval/                 提示词与行为回归评测
+pkg/types/              跨层类型
 ```
 
-## 目标模式 JSON-RPC API（编辑器插件接入）
+---
 
-传输：stdio，换行分隔 JSON，双向 JSON-RPC 2.0。
+## 文档
 
-**宿主 → Gleam**
+| 文档 | 说明 |
+| :--- | :--- |
+| [技术设计文档](Gleam%20技术设计文档.md) | 系统现状与决策理由（§4.6.x） |
+| [已知限制](docs/known-limits.md) | 已知限制 / 被否决的方案 / 刻意不做 |
+| [AGENTS.md](AGENTS.md) | 仓库入口与开发纪律 |
+| [CHANGELOG](pack/CHANGELOG.md) | 历次变更记录 |
 
-| 方法 | 参数 | 说明 |
-| :-- | :-- | :-- |
-| `initialize` | — | 握手，返回能力与工具列表 |
-| `goal/submit` | `{goal, context:{cwd}, references?, role?, mode, task_id?}` | 提交目标，立即返回 `task_id`；references 支持 file / goal / skill / plugin / memory |
-| `goal/status` / `goal/cancel` / `goal/list` | `{task_id}` | 状态/取消/列表 |
-| `tools/list` / `tools/call` | `{name, args}` | 直接调用工具（非只读同样走审批） |
-| `memory/save` / `memory/search` | `{content, tags}` / `{query, k}` | 长期记忆 |
-| `skills/save` / `skills/run` / `skills/list` / `skills/delete` | | 技能管理 |
-| `schedule/create` / `schedule/list` / `schedule/delete` | `{name, goal, cron\|interval_sec}` | 定时任务 |
-| `shutdown` | — | 退出 |
-
-### Web UI（`gleam webui`）
-
-浏览器操作台，与 stdio 服务共享同一引擎。输入栏提供五组控件：**权限切换**（🛡️ 请我批准 / ⚡ 完全访问，对应 plan_first / auto，切换即持久化）、**加号菜单**（📎 添加文件 / 🎯 添加目标 / 📋 计划模式 / 🧩 添加插件 / @ 引用 / 🌐 浏览器预览，六项）、**@ 自动补全**（输入 @ 触发文件·技能·记忆模糊搜索，方向键选择回车插入，文件以可移除芯片展示并自动注入目标上下文）、**模型芯片**（打字那一格就知道现在是谁在用：点开设档位表与最近拉取结果就地换，下一个任务开始用它；也能就地「拉取厂商模型」，用的是**已保存**的那份配置而非输入框草稿）、**上下文水位**（窗口 N/M 轮的占用条 + 待压缩攒了几轮，就地「立即压缩」；满了不是坏事——窗口外的对话被摘要带走不会丢，一直攒着才会让下一轮更贵。两样都不新开数据源，读的是设置页已有的出口，理由见设计文档 §4.6.30）。加号菜单里的**浏览器预览**是右侧滑出的非模态浮层：输个本机地址（`127.0.0.1:5173` 会补成 `http://127.0.0.1:5173/`）就能不切窗口看跑起来的样子，带常用端口、自己的地址栈、刷新和「在系统浏览器打开」；开着它照样能发消息、看进度，中间那一列一格不让。它只做面板，读不到被嵌页面的控制台和网络，理由见设计文档 §4.6.31。界面包含十一个视图（侧栏四个常驻 + 「更多」里七个）：**目标**（提交 + 实时进度时间线 + 审批卡 + 完成度评分环 + 技能固化建议）、**技能**（运行/停用/删除）、**记忆**（写入 + 词法检索 + 单条删除）、**定时任务**（Cron/间隔、暂停与恢复）、**工具**（内置 23 个工具的权限徽标与 schema，可按工具改放行级别）、**市场**（技能与 MCP 的安装与卸载）、**成长**（等级与事件流）、**GEO**（产出归因）、**就绪体检**（九坑自检）、**反馈与建议**（报问题/提建议 + 截图 + 指着某次运行说，见「反馈与建议」一节）、**设置**（协作风格/安全模式/引擎参数/记忆与上下文/模型——保存即热生效并持久化到 `~/.gleam/settings.yaml`，含会话压缩状态面板与手动压缩）。视觉体系由 `ui-ux-pro-max` 技能生成：深色玻璃拟态 + 状态绿 CTA + Fira Sans/Code 字体，支持 375-1440px 响应式、键盘导航与 `prefers-reduced-motion`。
-
-**三栏而不是一栏到底**：左侧功能模块、中间对话与产出、右侧**现场栏**（Live Rail）——取的是通用工作台那套「导航 / 工作面 / 设备现场」的读法，版式、令牌、交互全是本项目自研（不引入任何第三方 UI 依赖）。现场栏像一台 IoT 设备的侧面板，三段读数从上到下对应任务的现在与来路：**微光循环**（当前阶段格 + 预算闸 + 「规划中 · 12s / 等你批准 · 4s」的计时读数）、**事件流水**（工具调用次数与失败标红）、**本机**（模型、接入主机、工具数、待批准、定时任务、记忆条目、版本）。点轨道任意一格把中间区滚到那一张卡。窄屏自动收成一条竖签（点一下展开），**用户显式收展过就以用户为准**，中屏不再被 CSS 强行按回去。它不新开数据源，读的都是已经存在的出口。理由与踩过的坑见设计文档 §4.6.29。
-
-| 端点 | 说明 |
-| :-- | :-- |
-| `GET /` · `GET /assets/*` | 内嵌单页前端 |
-| `GET /api/events` | SSE 事件流（progress / approval / completed / suggestion / suggest_skill） |
-| `POST /api/goals` · `GET /api/goals` · `GET /api/goals/{id}` · `POST /api/goals/{id}/cancel` | 目标提交 / 列表 / 详情 / 取消（取消会**同时摘掉该任务名下未裁决的审批**并叫醒停在审批上的那一轮；列表与详情都回落到 `tasks/` 归档——重启之后"最近任务"不会变成「全部 0」） |
-| `GET /api/goals/{id}/diff` · `POST /api/goals/{id}/revert` | 一条路径的写前对比 / 把它退回到**本任务开始前**（详情里的 `changes` 逐路径给出「改了什么、多大、能不能退回」；`file.move` 按组成对退，不可还原的行直接说明原因） |
-| `GET /api/approvals` · `POST /api/approvals/{id}` | 待决审批列表与裁决（超时自动拒绝；任务取消后即从这份名单消失） |
-| `GET /api/tools` · `POST /api/tools/call` · `POST /api/tools/permission` | 工具列表（含权限覆盖标记）/ 直调 / 权限设置（readonly / user_approved / full_access / default，热生效 + 持久化） |
-| `GET /api/conversations` · `POST /api/conversations` · `GET /api/conversations/{id}` · `PATCH /api/conversations/{id}` · `DELETE /api/conversations/{id}` · `POST /api/conversations/{id}/activate` | 多轮会话：列表 / 新建 / 取详情 / 改名 / 删除 / 切为当前 |
-| `POST /api/conversation/reset` | 开新会话（清上下文摘要 + 丢弃已结束任务的内存记录；注意单数命名，与上面那组不同形） |
-| `GET /api/spaces` · `POST /api/spaces` · `PATCH /api/spaces/{id}` · `DELETE /api/spaces/{id}` · `POST /api/spaces/{id}/activate` | 工作空间（本地目录 + 规则 + 记忆的作用域）增删改切 |
-| `GET /api/workspace` · `POST /api/workspace` · `GET /api/fs` | 当前工作目录查询 / 设置 / 目录浏览（选目录用） |
-| `GET /api/memory` · `POST /api/memory` · `DELETE /api/memory/{id}` | 记忆检索（词法 + 相关度）/ 写入 / 单条删除 |
-| `GET /api/skills` · `POST /api/skills` · `POST /api/skills/{name}/run` · `POST /api/skills/{name}/enabled` · `DELETE /api/skills/{name}` | 技能：列表 / 新建保存 / 直接运行 / 停用与恢复（停用状态持久化，重启后仍在）/ 删除 |
-| `GET /api/mcp` · `POST /api/mcp` · `POST /api/mcp/{name}/enabled` · `POST /api/mcp/{name}/reconnect` · `DELETE /api/mcp/{name}` | MCP：已装列表（含校验状态）/ 自定义安装，**同名即更新** / 停用与恢复 / 重连 / 卸载 |
-| `GET /api/market/mcp` · `POST /api/market/mcp/install` · `GET /api/market/skills` · `POST /api/market/skills/install` | 市场搜索与一键安装（覆盖已装要先确认，不静默盖掉本地改动） |
-| `GET /api/schedules` · `POST /api/schedules` · `POST /api/schedules/{name}/enabled` · `POST /api/schedules/{name}/notify` · `DELETE /api/schedules/{name}` | 定时任务：列表 / 新建（Cron 或间隔）/ 暂停与恢复 / 改完成通知 / 删除 |
-| `POST /api/hooks/{name}` | HTTP 回调触发：立即执行指定定时任务 |
-| `GET /api/growth` · `GET /api/growth/recent` · `GET /api/roles` | 成长统计（等级、事件计数）/ 最近事件流 / 可用角色列表 |
-| `GET /api/geo` · `POST /api/geo/analyze` · `DELETE /api/geo/history` | 产出归因：历史与统计 / 分析一段产出 / 清空历史 |
-| `GET /api/settings` · `POST /api/settings` | 设置读取/保存（校验 + 运行时热生效 + 覆盖层持久化；api_key 不回传明文，只回 `api_key_set`/`api_key_host`。密钥存 `credentials.json`（0600，Windows 上加 DPAPI），**按接入主机绑定**——换厂商就要重填，这是刻意的：把 GLM 的 key 发给别的域名等于把它发到别的公司那里去了） |
-| `POST /api/llm/test` · `POST /api/llm/models` | 连通性自测（不落盘、只回成败与原因）/ 在线拉取该接入点可用模型 id 供点选 |
-| `GET /api/providers` | 厂商官方接入预设（含 token/coding/agent 三类套餐入口） |
-| `GET /api/context` · `POST /api/context/compress` · `POST /api/context/clear` | 会话上下文状态（含节省 token 估算；**水位百分比由后端 `memory.fillPct` 算好回传**，前端只画不除，免得两处各算一个数）/ 立即压缩 / 清空摘要 |
-| `GET /api/readiness` · `GET /api/info` | 就绪体检（九坑自检，同 `gleam doctor`）/ 版本与当前模型、工具数、**记忆条数**（右侧现场栏那一格读的就是它，条数只由后端数一次） |
-| `GET /api/go-status` · `POST /api/go-status` · `POST /api/go-status/install` | 本机 Go 工具链检测 / 记录检测路径 / 取安装指引（详见「跑真实代码任务」一节） |
-| `GET /api/account` · `POST /api/account/signup` · `POST /api/account/signin` · `POST /api/account/signout` · `POST /api/account/oauth` · `POST /api/account/configure` | 账号会话与注册/登录/登出/OAuth/后端配置（默认不启用远程后端，见 `docs/known-limits.md`） |
-| `GET /api/local-data` | 本地数据目录体量（文件数与字节数），设置页"数据都落在哪"的来源 |
-| `POST /api/feedback` · `GET /api/feedback` · `GET /api/feedback/context` · `GET /api/feedback/attachment` · `POST /api/feedback/{id}/resend` · `DELETE /api/feedback/{id}` | 反馈与建议：提交（截图以 base64 随体上来）/ 本机列表 / **提交前预览会带上哪些运行现场**（与实存那份同源，前端不抄字段名）/ 取回一张截图 / 重投一条失败的 / 删掉一条。一律**先落本地** `<DataDir>/feedback/`（截图 0600，删一条连带删图）；投递状态分 `local_only` / `sent` / `failed` 三态，**没配远端不是失败**。运行现场由后端补且只列白名单字段（版本、模型名、接入**主机名**、所指任务的终态与最后一个失败步骤的工具名）——密钥、带 token 的完整 URL、工作区绝对路径、步骤错误正文都不出去。图片类型只认文件头，不认前端声称的 MIME；建表语句见「反馈与建议」一节 |
-| `GET /api/security/audit` | 权限与执行审计流水（谁放行的高风险操作） |
-| `GET /api/connections` | 「连接与出网」台账：一条常驻边界一行，五个问句（通到哪 / 谁能触发 / 会离开本机 / 留痕在哪 / 想关掉动哪里）+ 出网实测读数。**只读、全部现算**——读这个端点本身一个包都不发；清单与代码的接线由闸门对账（漏一行等于"连了没交代"），见设计文档 §4.6.34 |
-| `GET /api/cues` · `POST /api/cues/unsuppress` · `POST /api/cues/{id}/dismiss` · `POST /api/cues/{id}/adopt` | 候补目标：从本机任务归档浮出来的「你可能想动一下」，一条线索一张卡（反复失败 / 每次只做一半 / 同类失败跨任务反复），卡片附现场与 trace_id。**这一层没有手**：adopt 只记状态、不提交任务，执行仍然是用户把那句话发出去的当下。卡片不落盘（同一段历史每次算出同一页），只有人的处置决定落 `cues.json`；「别再提」可撤销。见设计文档 §4.6.35 |
-| `POST /api/heartbeat` · `POST /api/show-window` | 前端存活心跳（桌面端 app 模式生命周期依据）/ 唤起桌面窗口 |
-
-
-**Gleam → 宿主（通知/请求）**
-
-| 方法 | 说明 |
-| :-- | :-- |
-| `goal/progress`（通知） | `{task_id, phase: plan\|execute\|reflect, message, progress, kind}` |
-| `goal/ask_approval`（**请求**，需应答） | 高风险操作审批；应答 `{"approved": true/false, "note": "..."}` |
-| `goal/completed`（通知） | `{task_id, status, score, summary, steps[]}` |
-| `agent/suggestion`（通知） | 反思器产生的主动建议 |
-| `agent/suggest_skill`（通知） | 技能固化建议（含完整步骤草稿，可直接转 `skills/save`） |
-
-## 安全模型
-
-- **权限分级**：`readonly`（自动放行）→ `user_approved`（默认需批准，信任路径内放行）→ `full_access`（**始终**需人工批准，白名单不可豁免）
-- **模式**：`auto` 仅高风险审批；`plan_first` 执行前审批完整计划（中风险免重复审批）；`interactive` 每个写操作逐步审批
-- **纵深防御**：文件工具自身强制工作区边界（防目录穿越），安全门控在其之上再做审批裁决
-- **超时**：单步工具默认 30s 超时；审批等待默认 300s 超时自动拒绝；规划校验失败自动重规划
-
-## 反馈与建议
-
-界面上「反馈与建议」视图（更多菜单里）可以写问题或建议、贴截图（选文件或 Ctrl+V），对话里的每条回复也能一键「反馈这条」。落点分两层，**顺序固定为先本地、再远端**：
-
-- **本地必选**：每条反馈都落 `<DataDir>/feedback/<id>.json`，截图落同目录的 `<id>-<n>.<ext>`（权限 0600）。没网、没账号、没配远端都不影响"提交成功"这件事。想撤就删——`删除` 连带删掉截图，屏幕上截到的是别人的窗口时，"留在你机器上了"本身就是一个要能交代的答复。
-- **远端可插拔**：在「云端账号」里配了 Supabase（`supabase_url` + `anon_key`，与登录复用同一份凭证）才会再送一份出去。**不配就是 `local_only`，这不是失败**；配了没送出去才是 `failed`，界面会说清是没送到、送哪儿失败、原因是什么，并提供「重新投递」。已送达的不会重复投（否则表里多出重复行，"这条收没收到"又说不清）。
-
-**发出去的那一份和看见的那一份不完全一样**，这是刻意的：投递前先本机落住原文，再对副本脱敏——你粘在描述里的工作区绝对路径、API Key 会被换成 `‹已脱敏›`，备注里写明替换了几处。运行现场由后端补且只列白名单（版本、Go、OS、模型名、接入**主机名**、所指任务的终态与最后一个失败步骤的**工具名**）；带 token 的完整 URL、绝对路径、步骤错误正文都不出门。**截图只到本机为止**，远端那一行只有文件名/类型/字节数。决策理由见设计文档 §4.6.28。
-
-要收远端反馈，得先在 Supabase 建一张表（不建表不会静默失败，会明确回「远端没有表」）：
-
-```sql
-create table public.feedback_reports (
-  id          text primary key,
-  kind        text not null,          -- bug | suggestion
-  text        text not null,          -- 已脱敏后的正文
-  app_version text,
-  go_version  text,
-  os          text,
-  model       text,
-  llm_host    text,                   -- 只有主机名
-  task_id     text,
-  task_status text,
-  failed_tool text,                   -- 只有工具名，不带步骤错误正文
-  attachments jsonb,                  -- [{name, mime, bytes}]，没有字节
-  created_at  timestamptz not null
-);
-
-alter table public.feedback_reports enable row level security;
-
--- anon key 是公开客户端标识，不是机密：开了 RLS 又只放 insert，
--- 拿到 key 的人只能往这张表里送一条，读不到别人送的东西。
-create policy feedback_anon_insert on public.feedback_reports
-  for insert to anon with check (true);
-```
-
-表名固定 `feedback_reports`（要换别的名字得改代码里的 `feedback.FeedbackTable`——没有做配置项，因为"往哪张表收"是**收的人**的决定，不该让每个提交反馈的人各填一次）。列是**摊平**的而不是塞一个嵌套 JSON——会去这张表看东西的人用表格视图，摊平的列能直接按版本、按失败工具、按类型筛。
-
-## 测试与自测
-
-```bash
-bash scripts/verify.sh  # 统一闸门：闸门自检 + 六层（格式与引用 → 静态 → 编译 → 行为 → 端到端 → 就绪与回归）
-bash scripts/verify.sh --quick   # 只到行为层（内循环用）
-go vet ./...            # 静态检查
-go test ./...           # 全部单元测试 + 进程内 JSON-RPC 全流程 + MCP 连接器 + 端到端
-go test -count=3 ./...  # 多轮回归（验证无时序依赖的 flaky）
-bash scripts/smoke.sh   # 冒烟自测：构建真实二进制，驱动 JSON-RPC 与 Web UI 完整会话
-bash scripts/smoke-replay.sh   # 审计四用法冒烟：回放 / 重跑 / 恢复 / 分叉 / 比较
-```
-
-当前状态：`bash scripts/verify.sh` 闸门自检 + 六层全过（退出码 0；**耗时随机器负载浮动很大**——本机实测 350~800 秒，大头是进程创建而不是检查本身，见 `docs/known-limits.md`）；`go vet` 零告警；27 个测试包全绿（另 5 个包无测试）；
-`smoke.sh` 45 项与 `smoke-replay.sh` 33 条断言通过；桌面端真机验收通过（windowsgui 双击启动 → 应用窗口 → 关窗自动退出）；
-设置页与市场页浏览器实测通过；真实 MCP 服务器（@modelcontextprotocol/server-filesystem）安装→14 工具热注册→重连→卸载全链路验证通过。
-
-**闸门本身也要被验证。** 统一闸门接上去之后做的第一件事是**先把它弄红一次**：故意让第 1 层失败，确认它真的非零退出；`smoke.sh` 里把一条检查换成恒假，确认 36 通过 / 1 失败、退出码 1。理由很简单——一个永远通过的闸门比没有闸门更坏，它给出的是"已验证"的错觉。这一步立刻抓出三个真问题：`smoke.sh` 因为 shell 的 `set -e` 对 `A && B` 形式的失败不生效而**从来不会失败**（四十项检查恰好全是这个形状，另有一处 `grep … | head -1` 恒为 0），改成计数后第一次运行就抓到一条真实失败（某接口请求体是非法 JSON）；`trap` 里的临时目录清理失败会把退出码污染成 1（业务全过却报错）；`go run` 在本机偶发解析不到标准库（5 次中 1 次），闸门里改用预建二进制。
-
-**偶发失败要当「闸门可信度」问题修，不是重跑一次。** 后续批次里闸门又红过几次，都是 Go 工具链的**环境噪声**（`package internal/bytealg is not in std (…)`）——同一条命令重跑就好，`go test` / `go vet` / `go build` 都会中（所以「不用 `go run`」只是命中面之一，不是根因）。处理方式：**只在这一个签名上重试，且必须打印**——真实失败是确定性的，重试照样红（而且**一次都不会重试**，它不带这个签名）；而能被重试救活的失败，本来就不是可复现的信号。**「重试一次」这个数字后来被证伪了**：有一次第 4 层首次跑 32 秒红、紧接着的重试**也红**，两次命中的还是**不同的** std 包——噪声不是一个点，而是**一段几十秒的窗口**。所以改成**最多 3 次尝试 + 中间等 3 秒**（可覆盖）；不是无限重试，因为环境持续坏下去时闸门要如实红。判据只写一份（`scripts/lib/gonoise.sh`），`verify.sh` / `smoke.sh` / `smoke-replay.sh` 共用：第一次只加在主脚本里，结果下一次就红在 `smoke.sh` 自己的构建步骤上。另外闸门带一个 **第 0 步自检**（`scripts/lib/gonoise_probe.sh`）：四个场景分别确认"噪声后重试成功且打印""真实失败只调用一次、不被误认成噪声""噪声两次后第三次能成功（熬过窗口）""噪声一直存在时有上限地红"——重试逻辑自己也要被证明，否则它就是下一个"永远通过"。
-
-**悬空的文档引用是静默失效，所以它进了第 1 层。** 正文里写「见 §4.6.26」，而那一节还没写或改了号——Markdown 没有链接检查器管这种自造指针，读者跟着走到空处不会报错，只会以为"文档里没写"。`scripts/check-doc-refs.py` 从设计文档抓真实小节号，遍历所有 `.md` 找 `§4.6.N` 引用，悬空即打印 `文件:行号` 并非零退出（解析不到任何小节时也报错——检查本身失效比漏报更坏）。它与 `gofmt` 同属第 1 层「文本层的机器可读约定」，都便宜、都不需要编译，按成本序最早撞墙。对照清单里「有没有落地进度段」那类**不做**机械检查（防不住真正的漂移，只会给出"已守卫"的错觉）——两者的分界是：**能不能真的失败，且失败是不是即缺陷**。
-
-**后台任务的结果必须送达。** 定时任务跑完不再把结果丢掉：`scheduler.Job` 带通知策略（`always` / `on_failure` / `never`，**默认成功静默、只报异常**），`agent.Notifier` 增加 `OnTaskDone`，四个宿主各自送达（本机系统通知 / 任务时间线 / 事件流 / 控制台一行）。判定收敛成 `Job.ShouldNotify` 一个方法——散着判一定会漂移，而漂移方向通常是「某个调用点忘了判」，于是失败被静默掉。`GLEAM_NO_SYS_NOTIFY` 供自动化环境关掉真弹窗，但**关掉不是静默丢弃**（待发内容打到 stderr），否则"通知发了没有"无从断言。
-
-**截断是有损，不是丢失。** 工具输出注入下游前按「头 3/5 + 尾 2/5」截断（默认 6000 字），超限时把**完整原文**落盘到 `<数据目录>/tool-output/<taskID>/<stepID>.txt`，提示语里直接给出路径。原来的兜底是「请用 file.read 按范围取」——那要求模型先意识到自己缺了什么，而它只看到首尾，恰恰意识不到。落盘是**缓存不是归档**（按任务数裁剪，提示语里写明「临时文件」）。步骤编号来自模型、计划校验不管路径安全，所以落盘路径过两道边界：单层路径名净化 + 与工具读写同一套的 `ResolveInRoots`。
-
-仓库自己的入口与纪律在 `AGENTS.md`（入口链 + 规则 → 命令映射表 + 三条铁律）与 `docs/known-limits.md`（已知限制 / 被否决的方案 / 刻意不做，一行一条附理由）；每批新判据还要做一次负例控制（`scripts/mutation/`）。
-
-测试覆盖：YAML 子集解析（含注释边界/往返）、Cron 语义（含 dom/dow 并集）、环缓冲顺序、
-词法检索相关性、容量淘汰、上下文压缩（溢出捕获/LLM 摘要/抽取式兜底/持久化）、技能版本化、
-技能失败自动优化（Mock 跳过/非法输出忽略）、DAG 并发与依赖跳过、引用替换（`$ref:s1.field` / `{ref:s1}`）、
-超时重试（成功/耗尽/非超时不重试）、HTTP 回调触发、
-定时任务结果送达（通知策略矩阵 / fire 路径接线 / 四宿主落点 / 视图印生效值）、
-超长输出落盘（路径净化含穿越用例 / 边界校验 / 缓存裁剪 / 预算不被提示语撑破）、
-审批拒绝/批准/plan_first 整计划、重规划循环、任务取消、goal 提交→进度→审批→完成全链路、
-MCP initialize/tools.list/tools.call、Web UI REST/SSE/审批回路（进程内 + 真二进制）、
-真二进制 goal/serve/webui/MCP 四条 e2e 链路，以及浏览器可视化验收（截图核对布局、交互与响应式）。
-
-## 与设计文档的对应
-
-设计文档（`Gleam 技术设计文档.md`）Phase 0-4 全部落地：LLM 集成（GLM-5.3-Flash，OpenAI 兼容 + SSE 流式）、
-核心循环、Harness 六模块、目标模式 JSON-RPC、人格化协作层（风格配置 + 记忆驱动 + 主动提议 + 边界意识）。
-§3.1 用户界面层的 **Web UI**（设计图中的"未来"项）已实现——由 [ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) 技能驱动设计。
-
-设计文档其余条款的落实与两处有意偏差：
-
-| 设计条款 | 状态 |
-| :-- | :-- |
-| §4.2.2 技能"版本化 + 每次执行记录成功/失败、自动优化参数" | ✅ 统计 + 失败后 LLM 自动修订步骤并保存新版本（Mock 模型下跳过以保证离线自测确定性） |
-| §4.2.5 调度器事件触发（文件变化、HTTP 回调、时间到达） | ✅ 文件监听（轮询）+ `POST /api/hooks/{name}` 回调 + Cron/间隔 |
-| §6.3 编辑器插件集成 | ✅ `editor-plugin/gleam.plugin.json` 接入清单 + 接入指引 |
-| §9 风险应对：上下文自动压缩 | ✅ 短期窗口外旧对话滚动摘要（LLM + 抽取式兜底），注入规划并持久化 |
-| §9 风险应对：工具超时后自动重试或跳过 | ✅ 超时自动重试（`step_retries`，默认 1 次），非超时错误不重试 |
-| §4.2.3 工作记忆："SQLite" | ⚠️ 有意偏差：以任务结果 JSON 落盘（`tasks/`）实现同等职责，理由见 `docs/known-limits.md`「刻意不做」 |
-| MCP 资源订阅 / 断线自动重连 | ⏳ 未做（当前只有手动重连：界面「重连」→ `POST /api/mcp/{name}/reconnect`） |
-
-**MVP 后路线**：MCP 断线自动重连与资源订阅、技能分享（本地技能导出给别人安装；模板市场已上线）、Windows 文件监听原生 API（当前为轮询快照）。
-
-**下一批候选（与外部桌面端逐项对照过，尚未圈定，见各批 CHANGELOG）**：命令面板 `Ctrl+K` 与全局快捷键、会话搜索与「导出 Markdown」、审批键盘流（`A` 批准 / `D` 拒绝）、版本更新检测的**真做版**（更新源可配 + 语义化版本比较 + 默认关闭；前提是先有一个被承诺长期维护的发布渠道，见设计文档 §4.6.33）、把"闸门是否真被 `verify.sh` 调用"变成一条机械判据（新闸门只写不接线的事发生过一次）、出网**归因到任务**（哪一次发包属于哪一轮目标，台账上能按任务筛——现在只到 kind 与主机，答不出"这一条是谁让它发的"）、官网下载体积由 `package.sh` 写回卡片（现在写的是手写约数，而这件事的 owner 是构建产物，每次打包都会漂；同页的版本徽标与发布日期已经钉在 owner 上了，只剩体积还是手写的，§4.6.37）、`install.ps1 -SkipBuild` 不再顺带下载 Go（脚本先备工具链再决定要不要构建；改行为要能真机跑一遍安装脚本才敢动）、"网页素材必须是 UTF-8"的判据（`website/style.css` 曾混进 19 行 GBK 注释；与 `check-py-utf8.py` 管的不是同一件事——那个管脚本 stdout 的编码）。
-
-## 桌面端打包（多平台）
-
-```bash
-bash scripts/build-desktop.sh
-# 产物矩阵（纯 Go 零 cgo，任意平台可交叉编译）：
-#   bin/gleam.exe               Windows 10/11 x64 控制台 CLI
-#   bin/GleamDesktop.exe        Windows 桌面版（windowsgui，双击 = 引擎 + 应用窗口，关窗自动退出）
-#   bin/gleam-darwin-amd64      macOS Intel
-#   bin/gleam-darwin-arm64      macOS Apple Silicon（M 系列）
-#   bin/gleam-linux-amd64       Linux x86_64
-```
-
-所有二进制约 9-10MB（设计目标 <15MB），零外部依赖、单文件分发。macOS/Linux 在终端运行
-（`chmod +x gleam-darwin-arm64 && ./gleam-darwin-arm64 app`），应用窗口由 Chrome/Edge 应用模式承载
-（Windows 用 Edge/Chrome，macOS 用 `open -na`，Linux 用 xdg-open 回退）。未签名二进制首次运行被拦下时
-怎么放行，见上文「安装与运行（macOS / Linux）」。
+---
 
 ## 许可
 
-MIT，见 `LICENSE`（发布包 `Gleam-release-<日期>.zip` 里也带一份）。零第三方依赖，所以没有需要一并转述的
-上游许可条款——`go.mod` 里只有标准库。
+[MIT License](LICENSE)
 
 > Gleam 不做"更像人的 AI"，而是做"更可靠的同事"。

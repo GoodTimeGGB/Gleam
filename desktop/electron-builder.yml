@@ -16,13 +16,20 @@ extraResources:
     to: bin/
     filter:
       - "**/*"
+  # 应用图标：窗口/任务栏运行时读它（主进程 window.ts 从 resources/icon.png 取）。
+  # 下面各平台的 icon 是另一回事——那个是打进可执行文件、给文件管理器和安装包看的。
+  - from: ../assets/icons/gleam-512.png
+    to: icon.png
 linux:
   target:
     - dir
   category: Development
+  icon: ../assets/icons/gleam-512.png
 win:
   target:
     - dir
+  icon: ../assets/gleam.ico
 mac:
   target:
     - dir
+  icon: ../assets/gleam.icns

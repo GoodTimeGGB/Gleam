@@ -21,10 +21,35 @@ type Config struct {
 	Memory           MemoryConfig
 	Scheduler        SchedulerConfig
 	Persona          PersonaConfig
+	Network          NetworkConfig
+	Git              GitConfig
 	MCP              []MCPServerConfig
 	DataDir          string   // 数据目录，默认 ~/.gleam
 	Workspace        string   // 默认工作区（文件工具的根目录）
 	WorkspaceRecents []string // 最近使用的工作区（快速切换）
+}
+
+// GitConfig git 动作的偏好。三条都作用于 Gleam 自己的 git.* 工具，
+// 不管模型直接通过 shell.exec 拼的命令（那条路不归这里管）。
+type GitConfig struct {
+	BranchPrefix       string // 由 Gleam 创建的分支统一加这个前缀
+	ForcePush          bool   // 推送时用 --force-with-lease
+	CommitInstructions string // 生成提交说明时的写法要求
+}
+
+// NetworkConfig 出网方式（目前只作用于访问模型服务的那条路）。
+// 零值 "" 等价于 system：老配置不改也照旧走环境变量，行为不漂。
+type NetworkConfig struct {
+	ProxyMode string // system（跟随 HTTPS_PROXY 等环境变量）| manual（用 ProxyURL）| none（直连，忽略环境变量）
+	ProxyURL  string // ProxyMode == manual 时的代理地址
+}
+
+// ProxyModeOrDefault 把空值收敛成 system，界面与运行时用同一个口径。
+func (n NetworkConfig) ProxyModeOrDefault() string {
+	if n.ProxyMode == "" {
+		return "system"
+	}
+	return n.ProxyMode
 }
 
 type LLMConfig struct {
@@ -101,7 +126,8 @@ type SafetyConfig struct {
 	TrustedPaths        []string          // 信任路径：中风险文件操作自动放行
 	TrustedTools        []string          // 信任工具：直接放行（如 file.list）
 	ToolPermissions     map[string]string // 工具权限覆盖：readonly | user_approved | full_access
-	AIReview            bool              // 执行前用辅助模型快筛中高风险动作（仅配了 fast_model 时生效）
+	AIReview            bool              // 轻量扫描：执行前用辅助模型快筛中高风险动作（仅配了 fast_model 时生效）
+	DeepReview          bool              // 深度扫描：执行前把整段计划交给主模型审一遍（每条任务一次）
 	AllowPrivateWeb     bool              // 允许 web.fetch 访问本机/内网地址（默认拒绝，防 SSRF）
 }
 
@@ -109,6 +135,9 @@ type MemoryConfig struct {
 	ShortTermCap int // 短期记忆环缓冲轮数
 	VectorDim    int // 自研向量索引维度
 	MaxItems     int // 长期记忆条目上限（超出淘汰最旧）
+	// ProjectScope 打开后，任务沉淀的记忆带上当时的工作区，检索只回本工作区 + 全局的。
+	// 关着 = 全局共享（历史行为）。
+	ProjectScope bool
 }
 
 type SchedulerConfig struct {
@@ -177,6 +206,7 @@ func Default() *Config {
 		},
 		Scheduler: SchedulerConfig{Enabled: true},
 		Persona:   PersonaConfig{Name: "Gleam", Style: "efficient"},
+		Git:       GitConfig{BranchPrefix: "gleam/"},
 	}
 }
 
@@ -202,10 +232,8 @@ func Load(path string) (*Config, error) {
 		}
 		cfg.DataDir = filepath.Join(home, ".gleam")
 	}
-	if cfg.Workspace == "" {
-		cwd, _ := os.Getwd()
-		cfg.Workspace = cwd
-	}
+	// 工作区**不在这里**兜底成 CWD：那是 CLI 的便利默认，由 buildRuntime 决定要不要加。
+	// 桌面应用反过来要的就是「没选过就不绑定」——把默认塞进 Load 会让上面这句话说不出口。
 	return cfg, nil
 }
 
@@ -320,6 +348,7 @@ func (c *Config) SaveOverlay(path string) error {
 	safety.Set("mode", c.Safety.Mode)
 	safety.Set("approval_timeout_seconds", c.Safety.ApprovalTimeoutSecs)
 	safety.Set("ai_review", c.Safety.AIReview)
+	safety.Set("deep_review", c.Safety.DeepReview)
 	safety.Set("allow_private_web", c.Safety.AllowPrivateWeb)
 	tpMap := NewYMap()
 	for name, perm := range c.Safety.ToolPermissions {
@@ -332,7 +361,14 @@ func (c *Config) SaveOverlay(path string) error {
 	mem.Set("short_term_capacity", c.Memory.ShortTermCap)
 	mem.Set("vector_dim", c.Memory.VectorDim)
 	mem.Set("max_items", c.Memory.MaxItems)
+	mem.Set("project_scope", c.Memory.ProjectScope)
 	root.Set("memory", mem)
+
+	gitc := NewYMap()
+	gitc.Set("branch_prefix", c.Git.BranchPrefix)
+	gitc.Set("force_push", c.Git.ForcePush)
+	gitc.Set("commit_instructions", c.Git.CommitInstructions)
+	root.Set("git", gitc)
 
 	persona := NewYMap()
 	persona.Set("name", c.Persona.Name)
@@ -342,6 +378,11 @@ func (c *Config) SaveOverlay(path string) error {
 	sched := NewYMap()
 	sched.Set("enabled", c.Scheduler.Enabled)
 	root.Set("scheduler", sched)
+
+	netw := NewYMap()
+	netw.Set("proxy_mode", c.Network.ProxyModeOrDefault())
+	netw.Set("proxy_url", c.Network.ProxyURL)
+	root.Set("network", netw)
 
 	// 工作区（桌面端选定的任务文件夹）与最近列表
 	root.Set("workspace", c.Workspace)
@@ -448,6 +489,7 @@ func (c *Config) apply(m map[string]any) {
 		getStr(v, "mode", &c.Safety.Mode)
 		getInt(v, "approval_timeout_seconds", &c.Safety.ApprovalTimeoutSecs)
 		getBool(v, "ai_review", &c.Safety.AIReview)
+		getBool(v, "deep_review", &c.Safety.DeepReview)
 		getBool(v, "allow_private_web", &c.Safety.AllowPrivateWeb)
 		getStrs(v, "trusted_paths", &c.Safety.TrustedPaths)
 		getStrs(v, "trusted_tools", &c.Safety.TrustedTools)
@@ -464,6 +506,7 @@ func (c *Config) apply(m map[string]any) {
 		getInt(v, "short_term_capacity", &c.Memory.ShortTermCap)
 		getInt(v, "vector_dim", &c.Memory.VectorDim)
 		getInt(v, "max_items", &c.Memory.MaxItems)
+		getBool(v, "project_scope", &c.Memory.ProjectScope)
 	}
 	if v, ok := sub(m, "scheduler"); ok {
 		getBool(v, "enabled", &c.Scheduler.Enabled)
@@ -471,6 +514,15 @@ func (c *Config) apply(m map[string]any) {
 	if v, ok := sub(m, "persona"); ok {
 		getStr(v, "name", &c.Persona.Name)
 		getStr(v, "style", &c.Persona.Style)
+	}
+	if v, ok := sub(m, "git"); ok {
+		getStr(v, "branch_prefix", &c.Git.BranchPrefix)
+		getBool(v, "force_push", &c.Git.ForcePush)
+		getStr(v, "commit_instructions", &c.Git.CommitInstructions)
+	}
+	if v, ok := sub(m, "network"); ok {
+		getStr(v, "proxy_mode", &c.Network.ProxyMode)
+		getStr(v, "proxy_url", &c.Network.ProxyURL)
 	}
 	if raw, ok := m["mcp"]; ok {
 		if arr, ok := raw.([]any); ok {

@@ -74,15 +74,8 @@ MUTATIONS = [
     {
         "name": "JS 对 /api/info 的取值退回字面量兜底",
         "file": "internal/webui/static/app.js",
-        "edits": [("const ver = info.version ? 'v' + info.version : '未知';",
-                   "const ver = 'v' + (info.version || '" + VERSION + "');")],
-        "targets": [CHECK],
-    },
-    {
-        "name": "弹窗文案退回完成时态的结论（本机没有更新源，这话问不出来）",
-        "file": "internal/webui/static/app.js",
-        "edits": [("'说不出有没有新版。要升级就替换程序本身——对话、技能、密钥都存在「本地数据」那个目录里，换程序不影响它们。'",
-                    "'当前版本已是本地运行的版本，无需更新。'")],
+        "edits": [("$('#me-version').textContent = info.version ? 'v' + info.version : '未知';",
+                   "$('#me-version').textContent = 'v' + (info.version || '" + VERSION + "');")],
         "targets": [CHECK],
     },
     {

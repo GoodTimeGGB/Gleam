@@ -73,6 +73,37 @@ func TestWebUI_WorkspaceViewAndSet(t *testing.T) {
 	}
 }
 
+func TestWebUI_WorkspaceClear(t *testing.T) {
+	f := newFixture(t, nil)
+	// 先设一个工作区，再清空
+	newWs := t.TempDir()
+	f.call("POST", "/api/workspace", map[string]any{"path": newWs})
+
+	out := f.call("POST", "/api/workspace/clear", nil)
+	if out["workspace"] != "" {
+		t.Errorf("清空后 workspace = %v，应为空", out["workspace"])
+	}
+	// 最近列表要保留，否则清空一次就把历史弄丢了
+	if len(out["recents"].([]any)) == 0 {
+		t.Error("清空后 recents 不应为空")
+	}
+	// 运行时生效：文件工具不再有根目录边界
+	if f.agent.Cfg.Workspace != "" {
+		t.Errorf("cfg.Workspace = %q，应为空", f.agent.Cfg.Workspace)
+	}
+	if len(f.agent.FileTools.Roots) != 0 {
+		t.Errorf("FileTools.Roots = %v，应为空", f.agent.FileTools.Roots)
+	}
+	// 持久化：覆盖层里 workspace 也应为空
+	fresh := config.Default()
+	if err := config.LoadOverlay(fresh, filepath.Join(f.dataDir, config.OverlayFile)); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Workspace != "" {
+		t.Errorf("覆盖层 workspace = %q，应为空", fresh.Workspace)
+	}
+}
+
 func TestWebUI_WorkspaceInvalid(t *testing.T) {
 	f := newFixture(t, nil)
 	resp, err := http.Post(f.ts.URL+"/api/workspace", "application/json", strings.NewReader(`{"path":"不存在的目录xyz"}`))

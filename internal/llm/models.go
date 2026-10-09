@@ -123,7 +123,7 @@ func ListModels(ctx context.Context, protocol, baseURL, apiKey string, timeout t
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
-	hc := &http.Client{Timeout: timeout}
+	hc := &http.Client{Timeout: timeout, Transport: Transport()}
 	raw, err := getList(ctx, hc, modelEndpoint(protocol, baseURL), modelHeaders(protocol, apiKey))
 	if err != nil {
 		return nil, err

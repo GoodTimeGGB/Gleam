@@ -23,7 +23,7 @@ import (
 //
 // 台账行的 kind 与本清单必须一致，这条由 TestConnections_EveryEgressKindHasARow 在运行时判
 // （闸门只能读源码，读不出"这一行今天到底画没画出来"）。
-var egressKinds = []string{"llm", "web.fetch", "cloud", "feedback"}
+var egressKinds = []string{"llm", "web.fetch", "cloud", "feedback", "update", "go.toolchain"}
 
 // EgressKinds 出网落点清单（供测试与自述用；改这份的同时必须改台账行）。
 func EgressKinds() []string { return append([]string(nil), egressKinds...) }
@@ -68,7 +68,7 @@ func (a *Agent) ConnectionView(bindAddr string) ConnectionLedger {
 		rows = append(rows, *in)
 	}
 	rows = append(rows, a.mcpRows()...)
-	rows = append(rows, a.cloudRow(rep), a.feedbackRow(rep), marketRow())
+	rows = append(rows, a.cloudRow(rep), a.feedbackRow(rep), updateRow(rep), goToolchainRow(rep), marketRow())
 
 	return ConnectionLedger{
 		Rows: rows,
@@ -334,6 +334,43 @@ func (a *Agent) feedbackRow(rep safety.EgressReport) ConnectionRow {
 	r.Status = "已配置"
 	r.Target = llm.KeyScope(c.SupabaseURL)
 	return r
+}
+
+// updateRow 自我更新：这条线只在用户点了「更新」那一下才通。
+//
+// 它和「市场」那一行正好相反：市场是"你以为是连接、其实不是"，更新是
+// "你以为是本机操作、其实在往 GitHub 拉一个可执行文件"。自替换是这台机器上
+// 动作最大的一次出网，所以它必须有一行，且必须写清下载地址只认官方 release。
+func updateRow(rep safety.EgressReport) ConnectionRow {
+	return ConnectionRow{
+		ID: "update", Title: "自我更新", Kind: "out", KindText: "出网",
+		Target:  "GitHub 官方 release（下载地址只认官方仓库的资产，前端递不进别的来源）",
+		Status:  "待命：只有你点「检查更新 → 更新」才下载",
+		Trigger: "「我的 / 关于」里点「检查更新」，再点「下载并替换」那一下",
+		Leaves:  "不外发你的数据；这一下只往外取一个新版可执行文件，随后替换本机程序",
+		Trace:   "门控留痕 action=egress、kind=update（记主机与字节）。替换前旧程序留成 .old",
+		Stats:   egressStatsText(rep, "update"),
+		Off:     "不点它就不发任何包；只想看有没有新版就点「检查更新」，那一步只发一次 GET",
+	}
+}
+
+// goToolchainRow Go 工具链安装：这条线只在设置页点「安装 Go」那一下才通。
+//
+// 为什么它必须进台账：这是一条**用户不会想到的**出网路径——他以为在装开发工具，
+// 机器却在往镜像站拉一个 80MB 的压缩包。落的落点、装到哪里、怎么校验，都要写明白。
+// 目标主机写"镜像站"而不是某一个域名：按顺序试阿里云、官方国内镜像、官方站，
+// 真发了包的那一个由留痕读数回答（这一行有 Stats）。
+func goToolchainRow(rep safety.EgressReport) ConnectionRow {
+	return ConnectionRow{
+		ID: "go.toolchain", Title: "Go 工具链安装", Kind: "out", KindText: "出网",
+		Target:  "Go 官方下载镜像（按序试阿里云 / 官方国内镜像 / 官方站）",
+		Status:  "待命：只有你点「安装 Go」才下载",
+		Trigger: "设置 → 电脑 → 未检测到 Go 时点「安装 Go」那一下",
+		Leaves:  "不外发你的数据；这一下只往外取一个 Go 归档，装进 <数据目录>/tools/go",
+		Trace:   "门控留痕 action=egress、kind=go.toolchain（记主机与字节）",
+		Stats:   egressStatsText(rep, "go.toolchain"),
+		Off:     "不点它就不发任何包；已经装好的 Go 不会被重新拉取（检测到即跳过）",
+	}
 }
 
 // marketRow 模板目录：市场是随程序一起装好的静态目录，**装它本身不出网**。

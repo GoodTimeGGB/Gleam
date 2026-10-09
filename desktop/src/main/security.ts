@@ -1,6 +1,7 @@
 // Security baseline for every webContents and the default session.
-import { app, BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type Session, type WebContents } from 'electron';
 import { APP_HOST, APP_ORIGIN, APP_SCHEME } from './protocol';
+import { getShortcut, setShortcut } from './shortcut';
 
 // Note: Node's URL reports origin "null" for schemes it does not know (app:), so compare scheme + host.
 function isAppURL(raw: string): boolean {
@@ -75,6 +76,8 @@ export const IPC_CHANNELS = [
   'desktop:openExternal',
   'desktop:capture',
   'desktop:newWindow',
+  'desktop:showOpenDialog',
+  'desktop:globalShortcut',
 ] as const;
 /** main -> renderer push channel (window maximised / full-screen state). */
 export const IPC_EVENTS = ['desktop:window-state'] as const;
@@ -190,4 +193,23 @@ export function installIpc(info: () => Record<string, unknown>, newWindow: () =>
   }));
 
   ipcMain.handle('desktop:newWindow', guard(() => { newWindow(); }));
+
+  // 附件：调用系统文件选择器。properties 与 Electron dialog.showOpenDialog 一致。
+  // 全局唤起快捷键：读当前 / 设新的（空串 = 取消）。
+  // 组合合法性由 Electron 判，我们只把它的结论原样带回去，好让界面说人话。
+  ipcMain.handle('desktop:globalShortcut', guard((_e, action: unknown, accelerator: unknown) => {
+    if (action === 'get') return { ok: true, accelerator: getShortcut() };
+    if (action === 'set') {
+      if (typeof accelerator !== 'string') throw new Error('bad accelerator');
+      return setShortcut(accelerator);
+    }
+    throw new Error('bad shortcut action');
+  }));
+
+  ipcMain.handle('desktop:showOpenDialog', guard(async (e, options: unknown) => {
+    const win = senderWindow(e);
+    const opts = typeof options === 'object' && options !== null ? options : {};
+    const result = await dialog.showOpenDialog(win, opts as Electron.OpenDialogOptions);
+    return result.canceled ? [] : result.filePaths;
+  }));
 }

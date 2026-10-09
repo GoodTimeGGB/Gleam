@@ -47,6 +47,7 @@ import (
 	"gleam/internal/server"
 	"gleam/internal/tools/desktop"
 	"gleam/internal/tools/file"
+	gittools "gleam/internal/tools/git"
 	"gleam/internal/tools/mcp"
 	"gleam/internal/tools/shell"
 	"gleam/internal/tools/std"
@@ -175,8 +176,27 @@ type runtime struct {
 	growth  *growth.Log
 }
 
+// runtimeOption 装配的可选开关。
+type runtimeOption func(*runtimeConfig)
+
+// runtimeConfig 装配过程中的可调项。
+type runtimeConfig struct {
+	noDefaultWorkspace bool
+}
+
+// WithNoDefaultWorkspace 关闭「没指定工作区就用当前目录兜底」。
+// 桌面应用用它：打包后进程 CWD 是主目录，把文件边界悄悄划到整个主目录没有意义；
+// 用户没显式选过工作区时，界面停在「不指定工作区」才是诚实的。
+func WithNoDefaultWorkspace() runtimeOption {
+	return func(rc *runtimeConfig) { rc.noDefaultWorkspace = true }
+}
+
 // buildRuntime 装配全部子系统。
-func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScript string, notifier agent.Notifier) (*runtime, error) {
+func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScript string, notifier agent.Notifier, opts ...runtimeOption) (*runtime, error) {
+	var rc runtimeConfig
+	for _, opt := range opts {
+		opt(&rc)
+	}
 	if configPath == "" {
 		if _, err := os.Stat("configs/config.yaml"); err == nil {
 			configPath = "configs/config.yaml"
@@ -194,6 +214,19 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	}
 	// 设置覆盖层（设置页保存的用户偏好，优先于 config.yaml；命令行标志在其后仍可覆盖）
 	_ = config.LoadOverlay(cfg, filepath.Join(cfg.DataDir, config.OverlayFile))
+	// 工作区兜底放在覆盖层之后：配置、环境与用户选择都看过一遍了，还是空，才轮到「当前目录」。
+	// CLI 沿用这个便利默认；桌面应用用 WithNoDefaultWorkspace 跳过它。
+	if cfg.Workspace == "" && !rc.noDefaultWorkspace {
+		if cwd, err := os.Getwd(); err == nil {
+			cfg.Workspace = cwd
+		}
+	}
+
+	// 工作区根：空表示没有文件边界（工具不再限定目录，写操作仍逐条走安全门控）。
+	var wsRoots []string
+	if cfg.Workspace != "" {
+		wsRoots = []string{cfg.Workspace}
+	}
 
 	// 本地凭证（LLM API Key / 云端会话），独立 0600 文件。
 	// 密钥的**取用**推迟到预设解析之后（applyLLMKey）：作用域是按生效主机算的，
@@ -210,6 +243,12 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 		cfg.Safety.Mode = "auto"
 	}
 	agent.DataDir(cfg)
+
+	// 出网方式先定下来：模型客户端的传输层在这里取一次，之后再改要重启。
+	// 代理地址填错不拦启动——那是设置页该报的错，不是"程序起不来"。
+	if err := llm.SetProxyMode(cfg.Network.ProxyMode, cfg.Network.ProxyURL); err != nil {
+		fmt.Fprintf(os.Stderr, "[gleam] 代理设置没生效（%v），本次按跟随系统处理\n", err)
+	}
 
 	// LLM 客户端（协议工厂：openai_chat / openai_responses / anthropic；厂商套餐解析官方入口）
 	var client llm.Client
@@ -269,10 +308,22 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 
 	// 注册表与内置工具
 	reg := registry.New()
-	fileTools := file.New(cfg.Workspace)
+	fileTools := file.New(wsRoots...)
 	fileTools.RegisterAll(reg)
 	// shell.exec 的工作目录限制在工作区内（P5-1），与文件工具同一套边界
-	reg.MustRegister(shell.NewWithRoots(time.Duration(cfg.Agent.StepTimeoutSecs)*time.Second, cfg.Workspace))
+	reg.MustRegister(shell.NewWithRoots(time.Duration(cfg.Agent.StepTimeoutSecs)*time.Second, wsRoots...))
+	// git 动作（建分支 / 提交 / 推送）：三个偏好每次动作时现取，改设置立即生效，不用重启
+	gitCfg := func() gittools.Config {
+		return gittools.Config{
+			BranchPrefix:       cfg.Git.BranchPrefix,
+			ForcePush:          cfg.Git.ForcePush,
+			CommitInstructions: cfg.Git.CommitInstructions,
+			Roots:              wsRoots,
+		}
+	}
+	reg.MustRegister(gittools.NewBranch(gitCfg))
+	reg.MustRegister(gittools.NewCommit(gitCfg))
+	reg.MustRegister(gittools.NewPush(gitCfg))
 	webTool := web.New()
 	// web.fetch 默认拒绝本机/内网地址（防提示词注入把 Agent 当 SSRF 跳板）；
 	// 本地优先的场景（读本机 dev server、内网 wiki）用配置显式放宽。
@@ -300,7 +351,7 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 
 	// 安全门控
 	gate := safety.New(cfg.Safety.Mode, cfg.Safety.TrustedTools, cfg.Safety.TrustedPaths,
-		[]string{cfg.Workspace}, time.Duration(cfg.Safety.ApprovalTimeoutSecs)*time.Second)
+		wsRoots, time.Duration(cfg.Safety.ApprovalTimeoutSecs)*time.Second)
 	// 审计全量落盘（P5-2）：内存环只够复盘最近 200 条，重启即失忆。
 	// 追加式 JSONL——审计的价值在于"发生过什么"，重写会把它变成"当前状态"。
 	gate.SetAuditPath(filepath.Join(cfg.DataDir, auditFile))
@@ -343,9 +394,9 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	a.Auth = authMgr
 
 	// 依赖 Agent 的适配器工具
-	reg.MustRegister(std.NewMemSave(&memAdapter{m: mem}))
-	reg.MustRegister(std.NewMemSearch(&memAdapter{m: mem}))
-	reg.MustRegister(std.NewMemDelete(&memAdapter{m: mem}))
+	reg.MustRegister(std.NewMemSave(&memAdapter{m: mem, scope: a.MemoryScope}))
+	reg.MustRegister(std.NewMemSearch(&memAdapter{m: mem, scope: a.MemoryScope}))
+	reg.MustRegister(std.NewMemDelete(&memAdapter{m: mem, scope: a.MemoryScope}))
 	if sched != nil {
 		reg.MustRegister(std.NewScheduleCreate(&schedAdapter{a: a}))
 		reg.MustRegister(std.NewScheduleList(&schedAdapter{a: a}))
@@ -778,13 +829,25 @@ func gApprovalTimeout() time.Duration {
 
 // ---------- 适配器 ----------
 
-type memAdapter struct{ m *memory.Manager }
+// memAdapter 把记忆子系统接给内存工具。scope 决定条目归属哪个工作区：
+// 直接复用 agent.memoryScope，规则只有一处定义（开了项目级记忆才带工作区）。
+type memAdapter struct {
+	m     *memory.Manager
+	scope func() string
+}
+
+func (a *memAdapter) scopeNow() string {
+	if a.scope == nil {
+		return ""
+	}
+	return a.scope()
+}
 
 func (a *memAdapter) Remember(content string, tags []string) (string, error) {
-	return a.m.Remember(content, tags)
+	return a.m.RememberScoped(content, "", a.scopeNow(), tags)
 }
 func (a *memAdapter) Search(query string, k int) []std.SearchHit {
-	hits := a.m.Relevant(query, k)
+	hits := a.m.RelevantScoped(query, k, a.scopeNow())
 	out := make([]std.SearchHit, 0, len(hits))
 	for _, h := range hits {
 		out = append(out, std.SearchHit{ID: h.ID, Content: h.Content, Tags: h.Tags, Score: h.Score})

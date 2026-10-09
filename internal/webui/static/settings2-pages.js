@@ -39,7 +39,9 @@
       card(
         row({ icon: 'compress', title: '会话上下文自动压缩', desc: '窗口外的旧对话自动摘要成长期上下文，省 token 不丢前情。',
           control: toggle(s.agent.context_compress, (v) => save({ agent: { context_compress: v } })) }),
-        row({ icon: 'memory', title: '项目级记忆', desc: '按工作区分开保存的记忆。Gleam 目前的长期记忆是全局共享的。', disabled: true }),
+        row({ icon: 'memory', title: '项目级记忆',
+          desc: '打开后，任务沉淀的记忆带上当时的工作区，检索只回本工作区 + 全局的；关着就是全局共享（历史行为）。立即生效，不用重启。',
+          control: toggle(s.memory.project_scope, (v) => save({ memory: { project_scope: v } }), { labelText: '项目级记忆' }) }),
       ),
       label('记忆文件'),
       card(
@@ -127,6 +129,73 @@
   /* ============================== 电脑操控 ============================== */
   const DESKTOP_ICONS = { 'desktop.clipboard.read': 'clipboard', 'desktop.clipboard.write': 'clipboard', 'desktop.notify': 'bell', 'desktop.screenshot': 'camera', 'desktop.snippets': 'snippet' };
   const PERM_OPTS = [{ value: 'default', label: '默认' }, { value: 'readonly', label: '只读放行' }, { value: 'user_approved', label: '需我批准' }, { value: 'full_access', label: '完全访问' }];
+  // 全局唤起快捷键：桌面壳专属（浏览器里没有 globalShortcut）。
+  // 浏览器里那一行照实说"只在桌面版可用"，而不是摆一个按了没反应的按钮。
+  function globalShortcutRow() {
+    const desk = window.gleamDesktop;
+    if (!desk || typeof desk.globalShortcut !== 'function') {
+      return row({ icon: 'shortcuts', title: '全局唤起快捷键', desc: '在任何应用里按快捷键唤出 Gleam（只在桌面版可用）。', disabled: true });
+    }
+    let cur = '';
+    const val = h('span', { class: 's2-keys' });
+    const paint = () => { val.textContent = cur || '未设置'; val.dataset.empty = String(!cur); };
+    const rec = btn('录制', () => recordShortcut(val, (accel) => { cur = accel; paint(); }), 'btn btn-secondary btn-sm');
+    const clr = btn('清除', async () => {
+      const r = await desk.globalShortcut('set', '').catch((e) => ({ ok: false, error: e.message }));
+      if (!r.ok) { toast(r.error || '清除失败', 'error'); return; }
+      cur = ''; paint(); toast('已清除', 'success');
+    }, 'btn btn-ghost btn-sm');
+    paint();
+    desk.globalShortcut('get').then((r) => { cur = (r && r.accelerator) || ''; paint(); }).catch(() => {});
+    return row({
+      icon: 'shortcuts', title: '全局唤起快捷键',
+      desc: '在任何应用里按这个组合把 Gleam 拉到前台。只在本机注册，不联网。',
+      control: h('div', { class: 's2-shortcut-ctl' }, val, rec, clr),
+    });
+  }
+
+  // recordShortcut 录一次组合键。**必须带修饰键**：单键抢全局（比如字母 A）会非常讨厌。
+  function recordShortcut(labelEl, done) {
+    const before = labelEl.textContent;
+    labelEl.textContent = '按下组合键…（Esc 取消）';
+    labelEl.dataset.empty = 'false';
+    const onKey = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', onKey, true);
+        labelEl.textContent = before;
+        return;
+      }
+      const accel = toAccelerator(e);
+      if (!accel) { toast('至少要带一个修饰键（Ctrl / Alt / Shift / Win）', 'info'); return; }
+      document.removeEventListener('keydown', onKey, true);
+      labelEl.textContent = before;
+      window.gleamDesktop.globalShortcut('set', accel).then((r) => {
+        if (!r.ok) { toast(r.error || '注册失败（可能被别的程序占用了）', 'error'); return; }
+        done(r.accelerator);
+        toast('已设置：' + r.accelerator, 'success');
+      }).catch((err) => toast(err.message || '注册失败', 'error'));
+    };
+    document.addEventListener('keydown', onKey, true);
+  }
+
+  // toAccelerator 把一次 keydown 转成 Electron 认的组合串；只有修饰键或没修饰键时返回空。
+  function toAccelerator(e) {
+    const mods = [];
+    if (e.ctrlKey) mods.push('CommandOrControl');
+    if (e.altKey) mods.push('Alt');
+    if (e.shiftKey) mods.push('Shift');
+    if (e.metaKey) mods.push('Super');
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key) || !mods.length) return '';
+    const k = e.key;
+    let key = k;
+    if (k === ' ') key = 'Space';
+    else if (k.length === 1) key = k.toUpperCase();
+    else if (!/^F\d{1,2}$/.test(k)) key = k.length <= 12 ? k[0].toUpperCase() + k.slice(1) : '';
+    return key ? mods.join('+') + '+' + key : '';
+  }
+
   S2.register('computer', async () => {
     const root = $('#s2-computer');
     const { tools = [] } = await api('GET', '/api/tools').catch(() => ({ tools: [] }));
@@ -147,7 +216,7 @@
       card(
         row({ icon: 'globe', title: '浏览器操控', desc: '让 Gleam 驱动浏览器打开网页、点击和填写表单。', disabled: true }),
         row({ icon: 'mouse', title: '鼠标与键盘操控', desc: '模拟点击与键盘输入来操作其他应用。', disabled: true }),
-        row({ icon: 'shortcuts', title: '全局唤起快捷键', desc: '在任何应用里按快捷键唤出 Gleam。', disabled: true }),
+        globalShortcutRow(),
       ));
   });
   // 自绘插画：一块键盘 + 一个屏幕，用当前主题的线条色和强调色
@@ -165,18 +234,26 @@
   </svg>`;
 
   /* ============================== Git / Worktrees ============================== */
-  S2.register('git', () => {
-    const prefix = h('input', { class: 'input s2-input', value: 'gleam/', disabled: true, 'aria-label': '分支前缀' });
-    const instr = h('textarea', { class: 'input s2-textarea', rows: 4, disabled: true, placeholder: '例如：使用 Conventional Commits，说明写中文。', 'aria-label': '提交说明指令' });
+  S2.register('git', async () => {
+    const s = await settings(true);
+    const g = s.git || {};
+    // 这三条只作用于 Gleam 自己的 git.branch / git.commit / git.push 工具；
+    // 模型在 shell.exec 里自己拼的 git 命令不归这里管，界面上要说清楚，别让人以为它是全局开关。
+    const prefix = h('input', { class: 'input s2-input', value: g.branch_prefix || '', 'aria-label': '分支前缀', placeholder: 'gleam/' });
+    prefix.addEventListener('change', () => save({ git: { branch_prefix: prefix.value.trim() } }, '已保存，下次建分支生效'));
+    const instr = h('textarea', { class: 'input s2-textarea', rows: 4, 'aria-label': '提交说明指令', placeholder: '例如：使用 Conventional Commits，说明写中文。' });
+    instr.value = g.commit_instructions || '';
+    instr.addEventListener('change', () => save({ git: { commit_instructions: instr.value.trim() } }, '已保存，会附在编程任务的指引里'));
     $('#s2-git').replaceChildren(
-      head('Git', 'Gleam 目前不会替你建分支、提交或推送：编程任务里的 git 命令都通过 shell.exec 执行，并经过安全门控。下面这些偏好等 Gleam 自己管理分支后再开放。'),
+      head('Git', '由 Gleam 自己执行的分支、提交与推送（走安全门控；推送每次都要你批准）。模型在 shell.exec 里自己拼的 git 命令不归这里管。'),
       label('分支'),
       card(
-        row({ icon: 'branch', title: '分支前缀', desc: '由 Gleam 创建的分支统一加上这个前缀。', control: prefix, disabled: true }),
-        row({ icon: 'git', title: '始终强制推送', desc: '推送时使用 --force-with-lease。', control: toggle(false, () => {}, { disabled: true }), disabled: true }),
+        row({ icon: 'branch', title: '分支前缀', desc: '由 Gleam 创建的分支统一加上这个前缀；已经有了就不重复加。', control: prefix }),
+        row({ icon: 'git', title: '始终强制推送', desc: '推送时使用 --force-with-lease——比裸 --force 安全：远端有新提交就拒绝，不会把别人的活覆盖掉。',
+          control: toggle(!!g.force_push, (v) => save({ git: { force_push: v } }), { labelText: '始终强制推送' }) }),
       ),
       label('提交说明'),
-      card(row({ icon: 'edit', title: '提交说明指令', desc: '生成提交说明时附加的写法要求。', disabled: true }), h('div', { class: 's2-card-pad' }, instr)));
+      card(row({ icon: 'edit', title: '提交说明指令', desc: '写提交说明时的写法要求，会附在编程任务的指引里，由模型按它写。' }), h('div', { class: 's2-card-pad' }, instr)));
   });
   S2.register('worktrees', () => {
     const limit = h('select', { class: 's2-select', disabled: true, 'aria-label': '数量上限' }, h('option', { text: '15 个' }));
@@ -305,7 +382,9 @@
           control: h('span', { class: 's2-always' }, toggle(true, () => {}, { disabled: true, labelText: '静态检查' }), h('small', { text: '始终开启' })) }),
         row({ icon: 'shield', title: '轻量扫描', desc: '对本来会自动放行的中高风险动作，先用辅助模型快筛一遍，被标记才交给你确认。',
           control: toggle(s.safety.ai_review, (v) => save({ safety: { ai_review: v } }), { labelText: '轻量扫描' }) }),
-        row({ icon: 'search', title: '深度扫描', desc: '执行前对整段计划和改动做完整的模型审查。', disabled: true }),
+        row({ icon: 'search', title: '深度扫描',
+          desc: '执行前把整段计划交给主模型审一遍。逐动作的轻量扫描看不见"每步都正常、连起来却在做另一件事"；这一步看的是全局。它否决时会停下来问你，你说继续就继续。',
+          control: toggle(s.safety.deep_review, (v) => save({ safety: { deep_review: v } }), { labelText: '深度扫描' }) }),
       ));
   });
 
@@ -420,15 +499,56 @@
     const proxyDesc = keys.length
       ? keys.map((k) => `${k}=${net.proxy_env[k]}`).join(' · ')
       : '没有检测到 HTTPS_PROXY / HTTP_PROXY 环境变量：直接连接。';
+
+    // 代理方式：三选一，选中「手动」时才露出地址输入框。
+    // 改完要重启才切换——传输层是带连接池复用的，中途换等于每次请求重新握手。
+    const curMode = net.proxy_mode || 'system';
+    const modeSel = h('select', { class: 's2-select', 'aria-label': '代理方式' },
+      h('option', { value: 'system', text: '跟随系统' }),
+      h('option', { value: 'manual', text: '手动' }),
+      h('option', { value: 'none', text: '不使用' }));
+    modeSel.value = curMode;
+    const urlIn = h('input', {
+      class: 'input s2-input', placeholder: 'http://127.0.0.1:7890',
+      'aria-label': '代理地址', value: net.proxy_url || '',
+    });
+    urlIn.hidden = curMode !== 'manual';
+    modeSel.addEventListener('change', async () => {
+      const v = modeSel.value;
+      urlIn.hidden = v !== 'manual';
+      if (v === 'manual') { urlIn.focus(); return; } // 手动要等地址填好，那一步再存
+      await save({ network: { proxy_mode: v } }, '已保存，重启 Gleam 后生效');
+      S2.show('network');
+    });
+    const commitURL = async () => {
+      const raw = urlIn.value.trim();
+      if (!raw) { toast('先填代理地址，例如 http://127.0.0.1:7890', 'info'); urlIn.focus(); return; }
+      try {
+        await save({ network: { proxy_mode: 'manual', proxy_url: raw } }, '已保存，重启 Gleam 后生效');
+        S2.show('network');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    urlIn.addEventListener('change', commitURL);
+    urlIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitURL(); } });
+    // 注意：这里用 settings2 的 h()，第二参是属性对象——传字符串会被当成 Object.entries 展开，
+    // 逐个 setAttribute('0'|'o'…) 直接抛「'o' is not a valid attribute name」。
+    const proxyCtl = h('div', { class: 's2-proxy-ctl' }, modeSel, urlIn);
+    const proxyModeDesc = '跟随系统：按启动 Gleam 时的 HTTPS_PROXY / HTTP_PROXY / NO_PROXY 环境变量；'
+      + '手动：只走下面这一条地址；不使用：直连，环境变量一律忽略。改完重启 Gleam 才切换。';
+    const effDesc = curMode === 'none'
+      ? '直连：代理已关闭，环境变量不再生效。'
+      : curMode === 'manual'
+        ? `手动：${net.proxy_url || '（还没填地址，保存后才生效）'}`
+        : proxyDesc;
     root.replaceChildren(
       head('网络', 'Gleam 访问模型服务时的连通情况与代理方式。'),
       h('div', { class: 's2-label-row' }, label('连接检测'), run),
       list,
       label('代理'),
       card(
-        row({ icon: 'globe', title: '代理方式', desc: '跟随系统：按启动 Gleam 时的 HTTPS_PROXY / HTTP_PROXY / NO_PROXY 环境变量走代理。',
-          control: select([{ value: 'system', label: '跟随系统' }, { value: 'manual', label: '手动（暂不支持）', disabled: true }, { value: 'none', label: '不使用（暂不支持）', disabled: true }], 'system', () => {}, { labelText: '代理方式' }) }),
-        row({ icon: 'link', title: '当前生效', desc: proxyDesc }),
+        row({ icon: 'globe', title: '代理方式', desc: proxyModeDesc,
+          control: proxyCtl }),
+        row({ icon: 'link', title: '当前生效', desc: effDesc }),
       ));
     paint();
   });

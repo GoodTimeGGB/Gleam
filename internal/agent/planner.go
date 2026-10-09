@@ -25,7 +25,10 @@ type Planner struct {
 	Style    string // 协作风格：rigorous | gentle | efficient
 	Role     string // 专家角色 ID（general/analyst/writer/coder/pm/researcher/ops）
 	TaskMode string // 任务模式：work | code（chat 不经过规划器）
-	TaskID   string // 任务 ID：把这次调用的用量归集到消耗看板
+	// CommitHint 用户在设置里写下的「提交说明指令」。只在 code 模式下附进稳定段：
+	// 它影响的是"怎么写提交说明"，别的模式用不上。用户改一次、缓存失效一次，属预期。
+	CommitHint string
+	TaskID     string // 任务 ID：把这次调用的用量归集到消耗看板
 	// MaxToolSchemas 单次规划最多注入多少个工具的完整 schema；0 表示不限（全量注入）。
 	// 工具一多，全量 schema 既烧 token 又让模型挑不清——超限时改为「能力菜单 + 按需筛选」。
 	MaxToolSchemas int
@@ -458,6 +461,13 @@ func (p *Planner) buildSystemPromptMeasured(goal, cwd string, recent []memory.Tu
 			b.WriteString("\n\n" + blk)
 		}
 	})
+	// 提交说明写法：用户写的，只在编程模式附上。放在稳定段（改设置才变），
+	// 与 SlotCode 相邻——它管的是编程时的产出规矩。
+	if p.TaskMode == "code" && strings.TrimSpace(p.CommitHint) != "" {
+		bd.Instruction += seg(func() {
+			b.WriteString("\n\n## 提交说明写法\n" + strings.TrimSpace(p.CommitHint) + "\n")
+		})
+	}
 	bd.Capability += seg(func() {
 		b.WriteString(p.toolMenuSection())
 	})

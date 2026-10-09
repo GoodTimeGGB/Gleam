@@ -139,9 +139,18 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/spaces/{id}/activate", s.handleSpaceActivate)
 	mux.HandleFunc("DELETE /api/spaces/{id}", s.handleSpaceDelete)
 
+	// 检查更新（问 GitHub release；替换走显式确认）
+	mux.HandleFunc("GET /api/update/check", s.handleUpdateCheck)
+	mux.HandleFunc("POST /api/update/apply", s.handleUpdateApply)
+
+	// 从本机其他 AI 工具导入（记忆 / MCP / 技能检测）
+	mux.HandleFunc("GET /api/import/scan", s.handleImportScan)
+	mux.HandleFunc("POST /api/import/apply", s.handleImportApply)
+
 	// 工作区（任务文件夹）
 	mux.HandleFunc("GET /api/workspace", s.handleWorkspaceGet)
 	mux.HandleFunc("POST /api/workspace", s.handleWorkspaceSet)
+	mux.HandleFunc("POST /api/workspace/clear", s.handleWorkspaceClear)
 	mux.HandleFunc("GET /api/fs", s.handleFsBrowse)
 
 	// 厂商预设 / 市场 / MCP 管理
@@ -1040,6 +1049,16 @@ func (s *Server) handleWorkspaceSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, view)
 }
 
+// handleWorkspaceClear 回到「不指定工作区」。
+func (s *Server) handleWorkspaceClear(w http.ResponseWriter, _ *http.Request) {
+	view, err := s.Agent.WorkspaceClear()
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
 // handleFsBrowse 浏览文件系统目录（选择工作区用）。
 func (s *Server) handleFsBrowse(w http.ResponseWriter, r *http.Request) {
 	res, err := s.Agent.WorkspaceBrowse(r.URL.Query().Get("path"))
@@ -1082,7 +1101,7 @@ func (s *Server) handleGoStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, st)
 		return
 	}
-	writeJSON(w, 200, DetectGo())
+	writeJSON(w, 200, s.managedGoStatus())
 }
 
 // handleGoStatusSet 接收用户指定的 Go 安装路径并重新检测。
@@ -1098,23 +1117,7 @@ func (s *Server) handleGoStatusSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, st)
 }
 
-// handleGoInstall downloads and installs Go toolchain (Windows: zip to C:\\Go).
-func (s *Server) handleGoInstall(w http.ResponseWriter, r *http.Request) {
-	st := DetectGo()
-	if st.Found {
-		writeJSON(w, 200, st)
-		return
-	}
-
-	// Download Go zip via PowerShell script (reuses the go-check.ps1 logic)
-	// For now, return instructions; actual download is handled by the install script.
-	writeJSON(w, 200, map[string]any{
-		"found":    false,
-		"message":  "请运行安装脚本：powershell -ExecutionPolicy Bypass -File scripts/install.ps1",
-		"script":   "scripts/install.ps1",
-		"download": "https://mirrors.aliyun.com/golang/go1.23.4.windows-amd64.zip",
-	})
-}
+// handleGoInstall 见 goinstall.go：真下载并展开到 <数据目录>/tools/go。
 
 // ---------- 首次引导 ----------
 

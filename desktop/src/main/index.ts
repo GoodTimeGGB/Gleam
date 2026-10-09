@@ -7,6 +7,7 @@ import { APP_ORIGIN, installAppProtocol, registerAppScheme } from './protocol';
 import { hardenContents, hardenSession, installIpc } from './security';
 import { Sidecar, type SidecarSpec } from './sidecar';
 import { createMainWindow } from './window';
+import { installGlobalShortcut } from './shortcut';
 
 const t0 = Date.now();
 const log = (msg: string) => console.log(`[desktop +${Date.now() - t0}ms] ${msg}`);
@@ -112,6 +113,8 @@ function run(): void {
     }
 
     win = createMainWindow({ width: w, height: h });
+    // 全局唤起快捷键：装在这一个窗口上（它才是"那个 Gleam"）
+    installGlobalShortcut(win);
     win.on('closed', () => (win = null));
     win.webContents.once('did-finish-load', () => log('renderer did-finish-load'));
     await win.loadURL(`${APP_ORIGIN}/`);

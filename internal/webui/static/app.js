@@ -162,6 +162,43 @@ const Modal = (() => {
   return { open, close: () => close(false), settle };
 })();
 
+/* ---------- 输入框弹层协调 ----------
+ * 以前每个弹层各管各的：点加号开一个，再点曲别针又开一个，两个会叠在一起；
+ * 位置也各自按卡片的左/右边写死，按钮换行后弹层就和按钮错位。
+ * 这里收成一处：任何弹层打开前先关掉别的，并且一律贴在触发按钮的正上方。
+ */
+const Popovers = (() => {
+  const reg = new Map(); // id -> 收起函数
+  function register(id, close) { reg.set(id, close); }
+  function closeOthers(id) { reg.forEach((close, k) => { if (k !== id) close(); }); }
+  function closeAll() { reg.forEach((close) => close()); }
+  return { register, closeOthers, closeAll };
+})();
+// 弹层是固定定位的：窗口一改尺寸，它们和按钮的对应关系就旧了，直接收起最省事
+window.addEventListener('resize', () => Popovers.closeAll());
+
+// 把弹层摆到按钮正上方：底边离按钮顶边 gap，左缘与按钮对齐，并夹在视口内；上方放不下就翻到下方。
+//
+// 用**绝对定位 + 参照块坐标**而不是固定定位：外壳里带 transform / backdrop-filter 的祖先会变成
+// 固定定位的包含块，那时 `top` 就不再是「距视口」，算出来的位置会整体偏掉。绝对定位只认最近的
+// 定位祖先（弹层各自的 offsetParent），把视口边界换算进这套坐标即可，两种祖先都算得对。
+function anchorPopover(pop, btn, gap = 8) {
+  pop.hidden = false; // 先显示才量得到尺寸
+  pop.style.position = 'absolute';
+  pop.style.right = 'auto';
+  pop.style.bottom = 'auto';
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  const cb = pop.offsetParent || document.body;
+  const cbr = cb.getBoundingClientRect();
+  const b = btn.getBoundingClientRect();
+  const left = Math.max(4 - cbr.left, Math.min(b.left - cbr.left, window.innerWidth - w - 4 - cbr.left));
+  let top = b.top - gap - h - cbr.top;
+  if (b.top - h - gap < 4) top = b.bottom + gap - cbr.top; // 上方放不下 → 翻到下方
+  top = Math.max(4 - cbr.top, Math.min(top, window.innerHeight - h - 4 - cbr.top));
+  pop.style.left = Math.round(left) + 'px';
+  pop.style.top = Math.round(top) + 'px';
+}
+
 // 应用内确认框（替代原生 confirm，避免弹出系统浏览器标题/地址）。
 function confirmModal(message, title = '请确认', { okText = '确定', danger = false } = {}) {
   return new Promise((resolve) => {
@@ -219,7 +256,7 @@ function promptModal(label, oldValue = '', title = '请输入') {
 }
 
 /* ---------- 导航 ---------- */
-const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: initMemoryOnce, schedules: loadSchedules, tools: loadTools, settings: () => { loadSettingsProfile(); return loadSettings(); }, market: loadMarket, sites: loadSites, growth: loadGrowth, geo: loadGEO, readiness: loadReadiness, feedback: loadFeedbackView };
+const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: () => { initMemoryOnce(); LocalImport.renderMemory(); }, schedules: loadSchedules, tools: loadTools, settings: () => { loadSettingsProfile(); return loadSettings(); }, market: loadMarket, sites: loadSites, growth: loadGrowth, geo: loadGEO };
 
 function showView(name) {
   document.querySelectorAll('.nav-item[data-view]').forEach((b) => {
@@ -303,30 +340,31 @@ let currentMode = 'auto';      // 安全模式：auto（完全访问）| plan_fi
 let currentTask = 'work';      // 任务模式：chat | work | code
 let currentRole = 'general';
 
-const PERM_FRIENDLY = { auto: '完全访问', plan_first: '请我批准', interactive: '请我批准' };
+const PERM_FRIENDLY = { auto: '完全访问', plan_first: '请我批准', interactive: '请我批准', full_access: '完全访问' };
+let currentPermLabel = 'auto'; // 前端展示用的权限标签：plan_first | auto | full_access
 // 任务档位的人读名：与 #task-seg 的三个按钮一致。卡片徽标以前直接印枚举值，
 // 刷新后从"完全访问 · 编程"变成 auto/plan_first，同一件事两种说法。
 const TASK_LABEL = { chat: '对话', work: '工作', code: '编程' };
 
-function setPerm(mode) {
+function setPerm(mode, label) {
   if (mode !== 'auto') {
-    _doSetPerm(mode);
+    _doSetPerm(mode, label);
     return;
   }
   PermWarning.show().then((confirmed) => {
     if (!confirmed) {
-      _doSetPerm(currentMode, false);
+      _doSetPerm(currentMode, currentPermLabel, false);
       return;
     }
-    _doSetPerm(mode);
+    _doSetPerm(mode, label);
     toast('已切换到“完全访问”，高风险操作仍会请你批准', 'warning', 5000);
   });
 }
 
-$('#perm-seg').addEventListener('click', (e) => {
+$('#perm-list').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-perm]');
   if (!btn) return;
-  setPerm(btn.dataset.perm);
+  setPerm(btn.dataset.perm, btn.dataset.permLabel);
 });
 
 $('#task-seg').addEventListener('click', (e) => {
@@ -335,14 +373,18 @@ $('#task-seg').addEventListener('click', (e) => {
   currentTask = btn.dataset.task;
   document.querySelectorAll('#task-seg button').forEach((b) =>
     b.setAttribute('aria-pressed', String(b === btn)));
-  // 对话模式与工作区/权限模式无关：隐藏以聚焦
+  // 对话模式与工作区无关：隐藏工作区芯片以聚焦（执行方式那颗按钮会自己显示成「仅对话」）
   $('#ws-chip').hidden = currentTask === 'chat';
-  $('#perm-seg').hidden = currentTask === 'chat';
   goalInput.placeholder = composerPlaceholder();
 });
 
 // 输入框占位：会话里统一写「继续当前会话…」，首页按任务档位给例子
+// 「这台机器现在跑不了」：没配模型，或者配了模型但没填密钥。由 paintModelChip 维护，
+// 输入框的占位文案跟着它走——摆一个能用的样子出来，比说清楚更糟。
+let llmUnusable = false;
+
 function composerPlaceholder() {
+  if (llmUnusable) return '还没有可用的模型：先去「设置 → 模型」选厂商并填入密钥';
   if (typeof viewingConvo !== 'undefined' && viewingConvo) return '继续当前会话…';
   return currentTask === 'chat'
     ? '随便聊点什么…'
@@ -368,13 +410,100 @@ goalInput.addEventListener('keydown', (e) => {
   e.preventDefault(); submitGoal();
 });
 // 输入框自适应高度
+// 手动拖出来的输入区高度：0 = 跟随内容。设了之后它是下限，内容更长时继续长。
+// 初值必须延到脚本末尾再读：UIPrefs 定义在文件后半，这里直接读会撞 TDZ。
+// 文本框是 flex 项（flex: 1 1 0%），height 压不过 flex 布局——要改高度得同时摘掉 flex。
+let composerH = 0;
+function applyComposerH() {
+  if (composerH > 0) {
+    goalInput.style.flex = 'none';
+    // 样式表里那条 max-height: 200px 是给「跟随内容」用的，手动拖的时候得撤掉，
+    // 否则拖到 200 就不动了，看着像坏了
+    goalInput.style.maxHeight = 'none';
+    goalInput.style.height = composerH + 'px';
+    goalInput.style.overflowY = 'auto';
+  } else {
+    goalInput.style.flex = '';
+    goalInput.style.maxHeight = '';
+    goalInput.style.height = '';
+    goalInput.style.overflowY = '';
+  }
+}
 function autoResize() {
+  if (composerH > 0) return; // 手动定过高度就交给用户，不再跟内容走
   goalInput.style.height = 'auto';
   goalInput.style.height = Math.min(goalInput.scrollHeight, 200) + 'px';
 }
 goalInput.addEventListener('input', autoResize);
-setTimeout(autoResize, 0);
+
+// 输入框上沿那枚把手：按住上下拖改高度，双击回到跟随内容
+(() => {
+  const grip = $('#composer-grip');
+  if (!grip) return;
+  let drag = null;
+  grip.addEventListener('pointerdown', (e) => {
+    drag = { y: e.clientY, h: goalInput.getBoundingClientRect().height };
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add('is-dragging');
+    e.preventDefault();
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const max = Math.round(window.innerHeight * 0.6);
+    composerH = Math.round(Math.max(56, Math.min(drag.h + (drag.y - e.clientY), max)));
+    applyComposerH();
+  });
+  const endDrag = (e) => {
+    if (!drag) return;
+    drag = null;
+    grip.classList.remove('is-dragging');
+    try { grip.releasePointerCapture(e.pointerId); } catch { /* 已经释放 */ }
+    UIPrefs.set({ composerH });
+  };
+  grip.addEventListener('pointerup', endDrag);
+  grip.addEventListener('pointercancel', endDrag);
+  grip.addEventListener('dblclick', () => { composerH = 0; UIPrefs.set({ composerH: 0 }); applyComposerH(); autoResize(); });
+})();
+
+setTimeout(() => { composerH = Number(UIPrefs.get().composerH) || 0; applyComposerH(); autoResize(); }, 0);
 $('#goal-submit').addEventListener('click', submitGoal);
+
+/* 输入框右键菜单：跟着鼠标出现（系统原生菜单的手感）。 */
+const goalCtxMenu = $('#goal-ctx-menu');
+function showGoalCtxMenu(x, y) {
+  if (!goalCtxMenu) return;
+  goalCtxMenu.hidden = false; // 先显示才能量到真实尺寸
+  const w = goalCtxMenu.offsetWidth, h = goalCtxMenu.offsetHeight;
+  // 贴到窗口边缘时往回缩一档，别让菜单被边缘裁掉
+  const left = Math.max(8, Math.min(x, window.innerWidth - w - 8));
+  const top = Math.max(8, Math.min(y, window.innerHeight - h - 8));
+  goalCtxMenu.style.left = left + 'px';
+  goalCtxMenu.style.top = top + 'px';
+}
+function hideGoalCtxMenu() { if (goalCtxMenu) goalCtxMenu.hidden = true; }
+Popovers.register('ctx', hideGoalCtxMenu);
+goalInput.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  Popovers.closeOthers('ctx');
+  showGoalCtxMenu(e.clientX, e.clientY);
+});
+document.addEventListener('click', (e) => {
+  if (!goalCtxMenu || goalCtxMenu.hidden) return;
+  if (!e.target.closest('#goal-ctx-menu')) hideGoalCtxMenu();
+});
+if (goalCtxMenu) {
+  goalCtxMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-ctx]');
+    if (!item) return;
+    const action = item.dataset.ctx;
+    if (window.gleamDesktop && window.gleamDesktop.edit) {
+      window.gleamDesktop.edit(action).catch(() => {});
+    } else {
+      try { document.execCommand(action); } catch { /* ignore */ }
+    }
+    hideGoalCtxMenu();
+  });
+}
 
 // 聊天区滚动到底部：只在用户本来就贴在底部时自动滚——
 // 上滑翻历史时，进度/流式事件不该把人拽回底部（滚动劫持）。
@@ -452,9 +581,15 @@ const plusMenu = $('#plus-menu');
 
 function togglePlus(open) {
   const show = open ?? plusMenu.hidden;
-  plusMenu.hidden = !show;
+  if (show) {
+    Popovers.closeOthers('plus'); // 先收别的，再开这个
+    anchorPopover(plusMenu, plusBtn);
+  } else {
+    plusMenu.hidden = true;
+  }
   plusBtn.setAttribute('aria-expanded', String(show));
 }
+Popovers.register('plus', () => togglePlus(false));
 plusBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlus(); });
 plusMenu.addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', () => togglePlus(false));
@@ -534,11 +669,19 @@ function siteChip() {
   return chip;
 }
 function setSiteMode(on) {
+  const was = siteMode;
   siteMode = !!on;
   // 对话档只聊天、不动文件；要做网页至少得是「通用」档
   if (siteMode && currentTask === 'chat') document.querySelector('#task-seg button[data-task="work"]')?.click();
   paintSiteSub();
   renderRefs();
+  // 站点模板只在站点模式下出现；切换时即时显隐
+  const tpl = document.querySelector('#goals-empty .site-tpl');
+  if (tpl) {
+    if (siteMode) { if (!tpl.innerHTML.trim()) SiteTemplates.paint(tpl); else tpl.hidden = false; }
+    else tpl.hidden = true;
+  }
+  if (siteMode && !was) goalInput.focus();
 }
 function paintSiteSub() {
   const sub = document.getElementById('plus-site-sub');
@@ -698,6 +841,59 @@ async function addFileRef(absPath) {
   } catch { /* 用绝对路径兜底 */ }
   addRef('file', label, '@' + absPath);
   toast('已引用文件：' + label, 'success', 2500);
+}
+async function addFolderRef(absPath) {
+  let label = absPath;
+  try {
+    const ws = await api('GET', '/api/workspace');
+    if (ws.workspace && absPath.startsWith(ws.workspace)) {
+      const rel = absPath.slice(ws.workspace.length).replace(/^[\/\\]+/, '');
+      if (rel) label = rel;
+    }
+  } catch { /* 用绝对路径兜底 */ }
+  addRef('folder', label, '@folder:' + absPath);
+  toast('已引用文件夹：' + label, 'success', 2500);
+}
+
+/* 系统文件/文件夹选择器：桌面端走 Electron dialog，浏览器兜底用隐藏的 <input> */
+function pickSystemFile() {
+  if (window.gleamDesktop && window.gleamDesktop.showOpenDialog) {
+    window.gleamDesktop.showOpenDialog({ properties: ['openFile'] }).then((paths) => {
+      if (paths && paths[0]) addFileRef(paths[0]);
+    }).catch((err) => toast('选择文件失败：' + err.message, 'error'));
+    return;
+  }
+  // 浏览器兜底：无法拿到完整路径，但至少能引用文件名
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.style.display = 'none';
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file) { addRef('file', file.name, '@file:' + file.name); toast('已引用文件：' + file.name, 'success', 2500); }
+    input.remove();
+  });
+  document.body.appendChild(input);
+  input.click();
+}
+function pickSystemFolder() {
+  if (window.gleamDesktop && window.gleamDesktop.showOpenDialog) {
+    window.gleamDesktop.showOpenDialog({ properties: ['openDirectory'] }).then((paths) => {
+      if (paths && paths[0]) addFolderRef(paths[0]);
+    }).catch((err) => toast('选择文件夹失败：' + err.message, 'error'));
+    return;
+  }
+  // 浏览器兜底：webkitdirectory 拿不到完整路径
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.style.display = 'none';
+  input.webkitdirectory = true;
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file) { addRef('folder', file.name, '@folder:' + file.name); toast('已引用文件夹：' + file.name, 'success', 2500); }
+    input.remove();
+  });
+  document.body.appendChild(input);
+  input.click();
 }
 
 /* ---------- @ 自动补全 ---------- */
@@ -873,8 +1069,7 @@ function refreshWorkbench() {
   pendingApprovals = all.filter((task) => approvalCardOf(task)).length
     + document.querySelectorAll('.approval-card.standalone-approval').length;
   const approvalBadge = $('#approval-badge');
-  approvalBadge.hidden = pendingApprovals === 0;
-  approvalBadge.textContent = pendingApprovals;
+  if (approvalBadge) { approvalBadge.hidden = pendingApprovals === 0; approvalBadge.textContent = pendingApprovals; }
   const title = $('#workbench-title');
   const detail = $('#workbench-detail');
   const dot = $('#workbench-dot');
@@ -1451,8 +1646,7 @@ let pendingApprovals = 0;
 function updateApprovalBadge(delta) {
   pendingApprovals = Math.max(0, pendingApprovals + delta);
   const badge = $('#approval-badge');
-  badge.hidden = pendingApprovals === 0;
-  badge.textContent = pendingApprovals;
+  if (badge) { badge.hidden = pendingApprovals === 0; badge.textContent = pendingApprovals; }
 }
 
 function applyResult(taskID, result) {
@@ -2146,8 +2340,7 @@ async function loadSchedules() {
     list.innerHTML = '';
     if (!jobs || !jobs.length) {
       list.innerHTML = `<div class="empty empty--card"><div class="empty-hero" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div><div class="empty-title">暂无定时任务</div><p class="empty-desc">创建一个任务，让 Gleam 按时自动执行目标。</p></div>`;
-      setSchFormOpen(true);
-      return;
+      return; // 新建表单默认收起，点右上角「新建定时任务」才展开
     }
     jobs.forEach((j, i) => { const c = scheduleCard(j); c.dataset.order = String(i); list.appendChild(c); });
     applySchView();
@@ -2695,7 +2888,7 @@ function fillSettingsFields(s) {
   $('#set-name').value = s.persona?.name || 'Gleam';
   setSegValue('#set-style', s.persona?.style || 'efficient');
   setSegValue('#set-safety-mode', s.safety?.mode || 'auto');
-  _doSetPerm(s.safety?.mode || 'auto', false);
+  _doSetPerm(s.safety?.mode || 'auto', s.safety?.mode || 'auto', false);
   $('#set-approval-timeout').value = s.safety?.approval_timeout_seconds;
   $('#set-max-replans').value = s.agent?.max_replans;
   $('#set-max-steps').value = s.agent?.max_steps;
@@ -3036,7 +3229,7 @@ async function saveSafety() {
       approval_timeout_seconds: numValue('set-approval-timeout'),
       ai_review: $('#set-ai-review').checked,
     },
-  }, { label: '安全设置', numeric: ['set-approval-timeout'], onSuccess: () => _doSetPerm(mode, false) });
+  }, { label: '安全设置', numeric: ['set-approval-timeout'], onSuccess: () => _doSetPerm(mode, mode, false) });
 }
 
 async function saveEngine() {
@@ -3212,13 +3405,20 @@ const ComposerMeta = (() => {
 
   /* ---------- 弹层开合：同一时刻只开一个 ---------- */
   function setOpen(which) {
-    [[modelBtn, modelPop], [ctxBtn, ctxPop]].forEach(([btn, pop]) => {
+    [[modelBtn, modelPop, 'model'], [ctxBtn, ctxPop, 'context']].forEach(([btn, pop, id]) => {
       const show = btn === which;
-      pop.hidden = !show;
+      if (show) {
+        Popovers.closeOthers(id); // 连同输入框里的其它弹层一起收
+        anchorPopover(pop, btn);
+      } else {
+        pop.hidden = true;
+      }
       btn.setAttribute('aria-expanded', String(show));
     });
   }
   const closeAll = () => setOpen(null);
+  Popovers.register('model', closeAll);
+  Popovers.register('context', closeAll);
   document.addEventListener('click', closeAll);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAll(); });
   [modelPop, ctxPop].forEach((pop) => pop.addEventListener('click', (e) => e.stopPropagation()));
@@ -3226,13 +3426,14 @@ const ComposerMeta = (() => {
     e.stopPropagation();
     const show = modelPop.hidden;
     closeAll();
-    if (show) { setOpen(modelBtn); paintModelList(); }
+    // 列表是打开后才画的：画完再贴一次，否则量到的是空壳高度，弹层会压住按钮
+    if (show) { setOpen(modelBtn); paintModelList(); anchorPopover(modelPop, modelBtn); }
   });
   ctxBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const show = ctxPop.hidden;
     closeAll();
-    if (show) { setOpen(ctxBtn); paintContextPanel(lastCtx); loadContext(); }
+    if (show) { setOpen(ctxBtn); paintContextPanel(lastCtx); anchorPopover(ctxPop, ctxBtn); loadContext(); }
   });
 
   /* ---------- 模型 ---------- */
@@ -3263,8 +3464,16 @@ const ComposerMeta = (() => {
   function paintModelChip() {
     const m = liveModel || (llmCfg && llmCfg.model) || '';
     const isMock = (llmCfg && llmCfg.provider === 'mock') || PROVIDER === 'mock';
-    modelName.textContent = isMock ? '演示模型' : (m ? shorten(m, 18) : '未配模型');
-    modelName.title = isMock ? '离线演示模型：不发起真实网络调用' : (m || '还没有可用模型：去设置里选择厂商并填写模型名');
+    const noKey = !isMock && !!llmCfg && llmCfg.api_key_set === false;
+    const unusable = !isMock && (!m || noKey);
+    if (llmUnusable !== unusable) {
+      llmUnusable = unusable;
+      goalInput.placeholder = composerPlaceholder();
+    }
+    modelName.textContent = isMock ? '演示模型' : (unusable ? '未配置模型' : shorten(m, 18));
+    modelName.title = isMock ? '离线演示模型：不发起真实网络调用'
+      : unusable ? '还没有可用的模型：去「设置 → 模型」选一个厂商并填入密钥'
+        : (noKey ? m + ' · 没填密钥，现在跑不了' : m);
     // 小标签只写本机配置里真有的东西：mock 档，或当前模型恰好是某个档位的模型
     const tagEl = $('#cp-model-tag');
     if (tagEl) {
@@ -3288,7 +3497,7 @@ const ComposerMeta = (() => {
     if (llmCfg && llmCfg.api_key_set === false) bits.push('无密钥');
     modelProv.textContent = bits.join(' · ');
     // 无密钥不是"能选个模型就好"：切了也调不通，所以芯片要自己红一下。
-    modelBtn.dataset.tone = (llmCfg && llmCfg.api_key_set === false) ? 'warn' : '';
+    modelBtn.dataset.tone = unusable ? 'warn' : ''; // 没模型或没密钥：整颗按钮标黄，别让人以为能跑
   }
 
   function paintModelList() {
@@ -3437,6 +3646,19 @@ setInterval(() => { fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
 
 
 /* ---------- Go 工具链检测 ---------- */
+// 来源口径归前端一处：后端给的是机器码（PATH / gleam-managed …），直接印出来像日志。
+const GO_SOURCE_LABEL = {
+  'PATH': '系统 PATH',
+  'common-path': '常见安装目录',
+  'GOROOT': 'GOROOT 环境变量',
+  'user-specified': '你指定的路径',
+  'gleam-managed': 'Gleam 自带（tools/go）',
+};
+function goSourceText(code) {
+  if (!code) return '系统 PATH';
+  return GO_SOURCE_LABEL[code] || code;
+}
+
 async function loadGoStatus(customPath) {
   const body = $('#go-status-body');
   if (!body) return;
@@ -3457,7 +3679,7 @@ function renderGoStatus(st) {
     body.innerHTML = '<div class="row" style="padding: var(--space-3) 0; align-items:center;">' +
       '<div class="row-main"><div class="row-title" style="color: var(--color-accent);">' + ICONS.check + ' Go 已检测到</div>' +
       '<div class="row-sub">' + esc(st.version || st.path) + '</div>' +
-      '<div class="row-sub">来源: ' + esc(st.source || 'PATH') + ' · ' + esc(st.root || st.bin_dir || '') + '</div></div></div>';
+      '<div class="row-sub">来源: ' + esc(goSourceText(st.source)) + ' · ' + esc(st.root || st.bin_dir || '') + '</div></div></div>';
   } else {
     body.innerHTML = '<div class="row" style="padding: var(--space-3) 0; align-items:center;">' +
       '<div class="row-main"><div class="row-title">' + ICONS.alert + ' 未检测到 Go 工具链</div>' +
@@ -3472,8 +3694,9 @@ async function installGoGuided() {
   Modal.open('安装 Go 工具链', (box) => {
     const wrap = el('div');
     wrap.innerHTML = '<p class="field-hint" style="margin: 0 0 var(--space-3);">' +
-      'Gleam 将自动下载并安装 Go 1.23.4（约 80MB，从阿里云镜像下载）。安装完成后自动写入 PATH。</p>' +
-      '<p class="field-hint" style="margin: 0 0 var(--space-3);">也可以手动安装后，在下方填写路径检测。</p>';
+      'Gleam 会依次尝试国内镜像拉取 Go 1.23.4（约 80MB），校验官方 sha256 后解压到 ' +
+      'Gleam 自己的 <code class="inline-code">tools/go</code> 目录，不动机器全局 PATH。</p>' +
+      '<p class="field-hint" style="margin: 0 0 var(--space-3);">也可以手动装好 Go 后，在下方填写路径检测。</p>';
     box.appendChild(wrap);
     const actions = el('div', 'modal-actions');
     const cancel = el('button', 'btn btn-secondary', '取消');
@@ -3482,7 +3705,7 @@ async function installGoGuided() {
     const install = el('button', 'btn btn-primary', ICONS.zap + ' 自动下载安装');
     install.type = 'button';
     install.addEventListener('click', async () => {
-      install.innerHTML = ICONS.spinner + ' 检查中…';
+      install.innerHTML = ICONS.spinner + ' 下载并解压中…';
       install.disabled = true;
       try {
         const res = await api('POST', '/api/go-status/install', {});
@@ -3491,14 +3714,15 @@ async function installGoGuided() {
           toast('Go 已就绪：' + (res.version || ''), 'success', 6000);
           Modal.close();
         } else if (res.message) {
-          // Show manual install instructions
+          // 自动下载失败：先把后端给的原因原样说出来，再给手动那条路。
           wrap.innerHTML = '<div class="callout callout--warn" style="margin: 0 0 var(--space-3);">' + ICONS.alert +
-            '<div><div class="row-title">需要手动安装 Go</div>' +
-            '<div class="row-sub">自动安装需要管理员权限。请按以下步骤操作：</div></div></div>' +
+            '<div><div class="row-title">自动安装没成功</div>' +
+            '<div class="row-sub">' + esc(res.message) + '</div></div></div>' +
             '<ol style="margin: 0 0 var(--space-3) var(--space-4); padding-left: var(--space-4); line-height: 2;">' +
-            '<li>在 Gleam 项目目录下运行安装脚本：<br><code class="inline-code">powershell -ExecutionPolicy Bypass -File scripts/install.ps1</code></li>' +
+            '<li>检查网络或代理后点「重试」；也可以换一个镜像源再试。</li>' +
+            '<li>或跑安装脚本：<br><code class="inline-code">powershell -ExecutionPolicy Bypass -File scripts/install.ps1</code></li>' +
             '<li>或手动下载 Go：<br><a href="' + esc(res.download || 'https://go.dev/dl/') + '" target="_blank" style="color:var(--color-accent);">' + esc(res.download || 'https://go.dev/dl/') + '</a></li>' +
-            '<li>安装完成后，在下方输入路径并点击「检测」</li>' +
+            '<li>装好后在下方填路径点「检测」</li>' +
             '</ol>';
           // Re-add path input
           const pathDiv = el('div', 'field');
@@ -3587,6 +3811,7 @@ async function loadMarket() {
   loadMCPMarket();
   loadSkillMarket();
   loadMCPInstalled();
+  LocalImport.renderLocal(); // 「本机检测」页签：扫本机别的工具配过的 MCP / 技能
 }
 
 async function loadMCPMarket() {
@@ -3848,9 +4073,19 @@ $('#mc-install').addEventListener('click', async () => {
 
 /* ---------- 工作区（任务文件夹） ---------- */
 function wsShort(path) {
-  if (!path) return '选择工作区';
-  const parts = String(path).replace(/[\/]+$/, '').split(/[\/]/);
+  if (!path) return '不指定工作区';
+  // Windows 用反斜杠、Unix 用正斜杠：两种分隔符都要认，否则整条绝对路径会原样怼到界面上
+  const parts = String(path).replace(/[\\/]+$/, '').split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+
+// 当前连接的 SSH 主机别名。引擎仍在这台电脑上执行，它只是「这次任务对着哪台机器」的界面标记：
+// 选了 SSH 就不再显示本地文件夹，免得两个来源同时亮着，说不清文件操作到底落在哪边。
+let activeSSH = '';
+try { activeSSH = localStorage.getItem('gleam.workspace.ssh') || ''; } catch { /* 隐私模式 */ }
+function setActiveSSH(host) {
+  activeSSH = host || '';
+  try { localStorage.setItem('gleam.workspace.ssh', activeSSH); } catch { /* 隐私模式 */ }
 }
 
 async function loadWorkspace() {
@@ -3860,21 +4095,421 @@ async function loadWorkspace() {
   } catch { /* 静默 */ }
 }
 
+let lastWsView = { workspace: '', recents: [], git_branch: '' };
 function renderWorkspace(ws) {
+  if (ws) lastWsView = ws;
+  const path = (ws && ws.workspace) || '';
+  const branch = (ws && ws.git_branch) || '';
+  const label = activeSSH ? 'SSH · ' + activeSSH : (path ? '工作区 · ' + wsShort(path) : '不指定工作区');
   const text = $('#ws-chip-text');
-  if (text) {
-    text.textContent = ws.workspace ? '工作区 · ' + wsShort(ws.workspace) : '选择工作区';
-    text.title = ws.workspace || '';
-  }
+  if (text) { text.textContent = label; text.title = activeSSH || path || ''; }
   const foot = $('#composer-ws-text');
-  if (foot) {
-    foot.textContent = ws.workspace ? wsShort(ws.workspace) : '选择工作区（可选）';
-    foot.title = ws.workspace || '';
+  if (foot) { foot.textContent = label; foot.title = activeSSH || path || ''; }
+  const chipBtn = $('#composer-ws');
+  if (chipBtn) chipBtn.classList.toggle('composer-foot--active', !!(path || activeSSH));
+  const branchWrap = $('#composer-ws-branch');
+  const branchText = $('#composer-ws-branch-text');
+  if (branchWrap && branchText) {
+    branchWrap.hidden = !branch || !!activeSSH; // SSH 标记优先，不再显示本地分支
+    branchText.textContent = branch;
   }
 }
-$('#composer-ws').addEventListener('click', () => openWorkspaceDialog());
 
-$('#ws-chip').addEventListener('click', () => openWorkspaceDialog());
+// 选择工作区：把新路径交给引擎，清掉 SSH 标记，再让界面重建。
+async function chooseWorkspace(path) {
+  try {
+    const ws = await api('POST', '/api/workspace', { path });
+    setActiveSSH('');
+    renderWorkspace(ws);
+    toast(`工作区已切换：${wsShort(ws.workspace)}`, 'success');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// 不指定工作区：引擎不再绑定根目录，最近列表保留。
+async function clearWorkspace() {
+  try {
+    const ws = await api('POST', '/api/workspace/clear');
+    setActiveSSH('');
+    renderWorkspace(ws);
+    toast('已改为不指定工作区', 'success');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ---------- 工作区下拉菜单：点左下角那颗按钮弹出来 ---------- */
+function closeWorkspaceMenu() {
+  const m = document.getElementById('ws-menu');
+  if (m) m.remove();
+  const btn = $('#composer-ws');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', onWsMenuOutside, true);
+  document.removeEventListener('keydown', onWsMenuKey, true);
+}
+function onWsMenuOutside(e) {
+  const m = document.getElementById('ws-menu');
+  if (m && !m.contains(e.target) && !e.target.closest('#composer-ws')) closeWorkspaceMenu();
+}
+function onWsMenuKey(e) { if (e.key === 'Escape') { e.preventDefault(); closeWorkspaceMenu(); } }
+Popovers.register('ws', closeWorkspaceMenu);
+
+async function openWorkspaceMenu() {
+  const btn = $('#composer-ws');
+  if (!btn) return;
+  if (document.getElementById('ws-menu')) { closeWorkspaceMenu(); return; } // 再点一次收起
+
+  let ws = { workspace: '', recents: [], git_branch: '' };
+  try { ws = await api('GET', '/api/workspace'); } catch { /* 离线时仍给出新建 / SSH 入口 */ }
+
+  const menu = el('div', 'ws-menu');
+  menu.id = 'ws-menu';
+  menu.setAttribute('role', 'menu');
+
+  const cur = activeSSH ? 'SSH · ' + activeSSH : (ws.workspace ? wsShort(ws.workspace) : '不指定工作区');
+  const head = el('div', 'ws-menu-head');
+  head.innerHTML = `<div class="ws-menu-label">当前工作区</div><div class="ws-menu-current">${esc(cur)}</div>`;
+  menu.appendChild(head);
+
+  const recents = (ws.recents || []).filter((r) => r !== ws.workspace);
+  if (recents.length) {
+    menu.appendChild(el('div', 'ws-menu-label ws-menu-label--sep', '历史'));
+    recents.forEach((r) => {
+      const row = el('button', 'ws-menu-item');
+      row.type = 'button';
+      row.setAttribute('role', 'menuitem');
+      row.innerHTML = `<span class="ws-menu-ico">${WS_ICON.folder}</span>` +
+        `<span class="ws-menu-main"><span class="ws-menu-name">${esc(wsShort(r))}</span>` +
+        `<span class="ws-menu-sub">${esc(r)}</span></span>`;
+      row.addEventListener('click', () => { closeWorkspaceMenu(); chooseWorkspace(r); });
+      menu.appendChild(row);
+    });
+  }
+
+  const mkAction = (icon, name, sub, fn) => {
+    const b = el('button', 'ws-menu-item ws-menu-item--action');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.innerHTML = `<span class="ws-menu-ico">${icon}</span>` +
+      `<span class="ws-menu-main"><span class="ws-menu-name">${esc(name)}</span>` +
+      (sub ? `<span class="ws-menu-sub">${esc(sub)}</span>` : '') + '</span>';
+    b.addEventListener('click', fn);
+    return b;
+  };
+
+  menu.appendChild(el('div', 'ws-menu-sep'));
+  menu.appendChild(mkAction(WS_ICON.folderAdd, '新建工作区…', '选一个文件夹作为工作区', () => {
+    closeWorkspaceMenu();
+    openNewWorkspaceDialog();
+  }));
+  menu.appendChild(mkAction(WS_ICON.plug, '连接 SSH…', '自动检测本机与设置里的主机', () => {
+    closeWorkspaceMenu();
+    openSSHDialog();
+  }));
+  if (ws.workspace || activeSSH) {
+    menu.appendChild(mkAction(WS_ICON.none, '不指定工作区', '文件操作不受工作区限制', () => {
+      closeWorkspaceMenu();
+      clearWorkspace();
+    }));
+  }
+
+  document.body.appendChild(menu);
+  btn.setAttribute('aria-expanded', 'true');
+  Popovers.closeOthers('ws');
+  anchorPopover(menu, btn, 6); // 贴在按钮正上方
+
+  document.addEventListener('mousedown', onWsMenuOutside, true);
+  document.addEventListener('keydown', onWsMenuKey, true);
+}
+
+const WS_ICON = {
+  folder: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>',
+  folderAdd: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><path d="M12 11v5M9.5 13.5h5"/></svg>',
+  plug: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6z"/><path d="M12 18v3"/></svg>',
+  none: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 8.5 7 7M15.5 8.5l-7 7"/></svg>',
+  server: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>',
+};
+
+// 新建工作区：桌面壳里走系统文件夹选择器；普通浏览器里没有系统选择器，退回内置浏览。
+async function pickSystemFolder() {
+  const d = window.gleamDesktop;
+  if (d && typeof d.showOpenDialog === 'function') {
+    let paths = [];
+    try { paths = await d.showOpenDialog({ properties: ['openDirectory', 'createDirectory'], title: '选择工作区文件夹' }); }
+    catch (err) { toast('打开系统选择器失败：' + err.message, 'error'); return; }
+    const picked = Array.isArray(paths) ? paths[0] : paths;
+    if (picked) chooseWorkspace(picked);
+    return; // 用户取消：什么都不做
+  }
+  openWorkspaceBrowse();
+}
+
+/* ---------- 连接 SSH：独立窗口，合并本机 ssh_config 与设置里记下的主机 ---------- */
+async function openSSHDialog() {
+  const saved = new Set(UIPrefs.get().sshHosts || []);
+  let local = [];
+  let cfgPath = '';
+  try {
+    const r = await api('GET', '/api/ssh/hosts');
+    local = r.hosts || [];
+    cfgPath = r.path || '';
+  } catch { /* 读不到配置文件不是失败：设置里记下的主机照样能选 */ }
+
+  // 本机检测到的主机排在前面，设置里记下的补在后头，去重
+  const hosts = [];
+  local.forEach((h) => { if (!hosts.includes(h)) hosts.push(h); });
+  saved.forEach((h) => { if (!hosts.includes(h)) hosts.push(h); });
+
+  Modal.open('连接 SSH', (box) => {
+    const wrap = el('div');
+    wrap.innerHTML =
+      '<p class="field-hint" style="margin:0 0 var(--space-3);">从本机 SSH 配置与「设置 → 连接」里挑选一台主机。Gleam 只读 Host 名称，不读取用户名、地址或任何密钥。</p>' +
+      '<div class="ws-ssh-list" id="ws-ssh-list" role="listbox" aria-label="SSH 主机"></div>' +
+      '<p class="field-hint" id="ws-ssh-note" style="margin:var(--space-3) 0 0;"></p>';
+    box.appendChild(wrap);
+
+    const list = $('#ws-ssh-list');
+    const note = $('#ws-ssh-note');
+    note.textContent = cfgPath ? `本机配置：${cfgPath}（只解析 Host 名称）` : '没有找到本机 SSH 配置文件。';
+
+    if (!hosts.length) {
+      list.innerHTML = '<div class="empty" style="padding:var(--space-4) 0;"><div class="empty-title">没有可用的主机</div>' +
+        '<p class="empty-desc">在 ~/.ssh/config 里写好 Host，或到「设置 → 连接」添加 SSH 连接。</p></div>';
+    } else {
+      hosts.forEach((h) => {
+        const row = el('button', 'ws-ssh-item');
+        row.type = 'button';
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', String(activeSSH === h));
+        row.innerHTML = `<span class="ws-ssh-glyph">${esc((h[0] || '?').toUpperCase())}</span>` +
+          `<span class="ws-ssh-name">${esc(h)}</span>` +
+          (activeSSH === h ? '<span class="badge badge--mode">已连接</span>' : '');
+        row.addEventListener('click', () => {
+          setActiveSSH(h);
+          Modal.close();
+          renderWorkspace(lastWsView); // 保留本地工作区信息，只是让 SSH 标记盖过它
+          toast(`已连接 SSH：${h}`, 'success');
+        });
+        list.appendChild(row);
+      });
+    }
+
+    const actions = el('div', 'modal-actions');
+    if (activeSSH) {
+      const dc = el('button', 'btn btn-secondary', '断开连接');
+      dc.type = 'button';
+      dc.addEventListener('click', () => { setActiveSSH(''); Modal.close(); loadWorkspace(); toast('已断开 SSH', 'success'); });
+      actions.appendChild(dc);
+    }
+    const cancel = el('button', 'btn btn-secondary', activeSSH ? '取消' : '关闭');
+    cancel.type = 'button';
+    cancel.addEventListener('click', Modal.close);
+    actions.appendChild(cancel);
+    box.appendChild(actions);
+  });
+}
+
+/* ---------- 新建工作区：源文件夹 / 名称 / 图标 / 颜色 / 索引 ---------- */
+// 图标与色板的备选清单（纯前端装饰，挑中的组合按路径记在本机）
+const WS_ICON_MARKUP = [
+  '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>',
+  '<path d="M4 8h13v8a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z"/><path d="M17 10h1.5a2.5 2.5 0 0 1 0 5H17"/>',
+  '<path d="M4 5h16l-6 7v6l-4 2v-8z"/>',
+  '<path d="M3.5 8 12 4l8.5 4v8L12 20l-8.5-4z"/><path d="M3.5 8 12 12l8.5-4M12 12v8"/>',
+  '<path d="M9 4 7 20M17 4l-2 16M4 9h16M3 15h16"/>',
+  '<path d="M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 5-12 3-12 8"/>',
+  '<path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 4.6-7 9-7 9z"/>',
+  '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.4"/>',
+  '<path d="M9.5 4h5v2.5h2.5V12h-2.5v2.5h-5V12H7V6.5h2.5z"/>',
+  '<path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H8l-4 3v-4.6A7.5 7.5 0 1 1 20 11.5z"/>',
+  '<circle cx="12" cy="12" r="8.5"/><path d="M8.8 14.5a4 4 0 0 0 6.4 0"/><path d="M9.5 9.8h.01M14.5 9.8h.01"/>',
+  '<path d="M12 3a9 9 0 1 0 0 18 1.7 1.7 0 0 0 1.3-2.8 1.7 1.7 0 0 1 1.3-2.8h1.8A5.6 5.6 0 0 0 22 9.8C22 6 17.5 3 12 3z"/>',
+  '<path d="M9.5 14h5l.5 4H9zM10.5 14V9.5a1.5 1.5 0 0 1 3 0V14M12 4v1.5"/>',
+  '<path d="M10 3v6l-4.5 8A2 2 0 0 0 7.2 20h9.6a2 2 0 0 0 1.7-3L14 9V3M9 3h6"/>',
+  '<path d="m8 7-5 5 5 5M16 7l5 5-5 5"/>',
+  '<path d="M4 5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M14 3v6h6"/>',
+  '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+  '<path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h11A2.5 2.5 0 0 1 20 8.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 15.5z"/><circle cx="12" cy="12" r="3"/>',
+  '<path d="m12 3 2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.4l6.1-.8z"/>',
+];
+const WS_COLORS = [
+  '#2f6b4f', '#3aa46a', '#3b78d8', '#e0912f', '#e0524f', '#d5529b', '#7d5bd6', '#4a63c8',
+  '#e0a52f', '#dd7a45', '#2fa79b', '#3b8fd8', '#6b7280', '#26292e', '#9a7fe0', '#4f9e6b',
+];
+
+// 图标 / 颜色 / 索引 / 自定义名称按工作区路径记在本机（localStorage）：引擎只认路径，
+// 这几项是界面上的标识，不该为了它们去动引擎的配置模型。
+function wsMetaStore() {
+  try { return JSON.parse(localStorage.getItem('gleam.workspace.meta') || '{}') || {}; }
+  catch { return {}; }
+}
+function wsMetaOf(path) { return wsMetaStore()[path] || {}; }
+function saveWsMeta(path, patch) {
+  try {
+    const all = wsMetaStore();
+    all[path] = Object.assign({}, all[path], patch);
+    localStorage.setItem('gleam.workspace.meta', JSON.stringify(all));
+  } catch { /* 隐私模式：记不住也不影响功能 */ }
+}
+
+function openNewWorkspaceDialog() {
+  Modal.open('新建工作区', (box) => {
+    let picked = '';
+    let touchedName = false;
+    let iconIdx = -1;
+    let colorIdx = 0;
+
+    const wrap = el('div', 'wsnew');
+    wrap.innerHTML =
+      '<div class="wsnew-field">' +
+        '<div class="wsnew-label-row"><span class="wsnew-label">源文件夹</span>' +
+        '<button type="button" class="wsnew-add" id="wsnew-add" hidden>+ 添加</button></div>' +
+        '<div id="wsnew-src"></div>' +
+      '</div>' +
+      '<div class="wsnew-field">' +
+        '<label class="wsnew-label" for="wsnew-name">工作区名称</label>' +
+        '<input class="input wsnew-input" id="wsnew-name" type="text" placeholder="输入名称..." autocomplete="off">' +
+      '</div>' +
+      '<div class="wsnew-field">' +
+        '<div class="wsnew-label">工作区图标</div>' +
+        '<div class="wsnew-icons" id="wsnew-icons" role="radiogroup" aria-label="工作区图标"></div>' +
+      '</div>' +
+      '<div class="wsnew-field">' +
+        '<div class="wsnew-label">工作区颜色</div>' +
+        '<div class="wsnew-colors" id="wsnew-colors" role="radiogroup" aria-label="工作区颜色"></div>' +
+      '</div>' +
+      '<div class="wsnew-field wsnew-field--index">' +
+        '<div class="wsnew-index">' +
+          '<div class="wsnew-index-text">' +
+            '<div class="wsnew-label">工作区索引</div>' +
+            '<p class="wsnew-hint">建立工作区索引可增强上下文理解能力，从而提升智能体回复准确性。关于工作区索引数据处理方式，' +
+            '<a href="#" class="wsnew-link" id="wsnew-more">了解详情</a>。</p>' +
+          '</div>' +
+          '<button type="button" class="wsnew-switch" id="wsnew-index" role="switch" aria-checked="true" aria-label="工作区索引"><span></span></button>' +
+        '</div>' +
+      '</div>';
+    box.appendChild(wrap);
+
+    const actions = el('div', 'modal-actions');
+    const cancel = el('button', 'btn btn-secondary', '取消');
+    cancel.type = 'button';
+    const create = el('button', 'btn btn-primary', '创建');
+    create.type = 'button';
+    create.disabled = true;
+    actions.appendChild(cancel);
+    actions.appendChild(create);
+    box.appendChild(actions);
+
+    const srcBox = $('#wsnew-src');
+    const addBtn = $('#wsnew-add');
+    const nameInput = $('#wsnew-name');
+    const idxBtn = $('#wsnew-index');
+
+    // 图标
+    const iconsBox = $('#wsnew-icons');
+    WS_ICON_MARKUP.forEach((mk, i) => {
+      const b = el('button', 'wsnew-icon');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + mk + '</svg>';
+      b.addEventListener('click', () => { iconIdx = i; paintIcons(); });
+      iconsBox.appendChild(b);
+    });
+    function paintIcons() {
+      [...iconsBox.children].forEach((b, i) => b.setAttribute('aria-checked', String(i === iconIdx)));
+    }
+
+    // 颜色
+    const colorBox = $('#wsnew-colors');
+    WS_COLORS.forEach((c, i) => {
+      const b = el('button', 'wsnew-color');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.style.setProperty('--c', c);
+      b.innerHTML = '<span></span>';
+      b.addEventListener('click', () => { colorIdx = i; paintColors(); });
+      colorBox.appendChild(b);
+    });
+    function paintColors() {
+      [...colorBox.children].forEach((b, i) => b.setAttribute('aria-checked', String(i === colorIdx)));
+    }
+
+    idxBtn.addEventListener('click', () => {
+      idxBtn.setAttribute('aria-checked', String(idxBtn.getAttribute('aria-checked') !== 'true'));
+    });
+    $('#wsnew-more').addEventListener('click', (e) => {
+      e.preventDefault();
+      toast('工作区索引还没上线：这里只先记住你的开关意向。', 'info');
+    });
+
+    // 源文件夹：空态是个虚线框，选中后变成带名字与「可读写」标记的一条
+    function paintSrc() {
+      if (!picked) {
+        addBtn.hidden = true;
+        srcBox.innerHTML = '<button type="button" class="wsnew-drop" id="wsnew-drop">' +
+          '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><path d="M12 11v5M9.5 13.5h5"/></svg>' +
+          '<span>点击添加可读写文件夹</span></button>';
+        srcBox.querySelector('#wsnew-drop').addEventListener('click', pickFolder);
+      } else {
+        addBtn.hidden = false;
+        srcBox.innerHTML = '<div class="wsnew-chip">' +
+          '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>' +
+          '<span class="wsnew-chip-name">' + esc(wsShort(picked)) + '</span>' +
+          '<span class="wsnew-chip-badge">可读写</span>' +
+          '<button type="button" class="wsnew-chip-x" id="wsnew-chip-x" aria-label="移除该文件夹">✕</button></div>';
+        srcBox.querySelector('#wsnew-chip-x').addEventListener('click', () => { picked = ''; paintSrc(); });
+      }
+      create.disabled = !picked;
+    }
+
+    async function pickFolder() {
+      const d = window.gleamDesktop;
+      if (!d || typeof d.showOpenDialog !== 'function') {
+        toast('这里没有系统文件夹选择器，请在桌面应用里新建工作区。', 'info');
+        return;
+      }
+      let paths = [];
+      try { paths = await d.showOpenDialog({ properties: ['openDirectory', 'createDirectory'], title: '选择工作区文件夹' }); }
+      catch (err) { toast('打开系统选择器失败：' + err.message, 'error'); return; }
+      const p = Array.isArray(paths) ? paths[0] : paths;
+      if (!p) return; // 用户取消
+      picked = p;
+      if (!touchedName) nameInput.value = wsShort(p);
+      const meta = wsMetaOf(p);
+      if (typeof meta.icon === 'number') iconIdx = meta.icon;
+      if (typeof meta.color === 'number') colorIdx = meta.color;
+      if (typeof meta.index === 'boolean') idxBtn.setAttribute('aria-checked', String(meta.index));
+      paintIcons();
+      paintColors();
+      paintSrc();
+    }
+
+    addBtn.addEventListener('click', pickFolder);
+    nameInput.addEventListener('input', () => { touchedName = true; });
+    cancel.addEventListener('click', () => Modal.settle(() => {}));
+    create.addEventListener('click', () => {
+      if (!picked) return;
+      saveWsMeta(picked, {
+        icon: iconIdx,
+        color: colorIdx,
+        index: idxBtn.getAttribute('aria-checked') === 'true',
+        name: nameInput.value.trim(),
+      });
+      Modal.settle(() => {});
+      chooseWorkspace(picked);
+    });
+
+    paintIcons();
+    paintColors();
+    paintSrc();
+  });
+}
+
+$('#composer-ws').addEventListener('click', () => openWorkspaceMenu());
+$('#ws-chip').addEventListener('click', () => openWorkspaceMenu());
+// 仍然给「需要选工作区」的老入口（顶栏文件夹按钮、终端「选择工作区」）留一个名字
+function openWorkspaceDialog() { openWorkspaceMenu(); }
 
 /* ================= 多会话（左侧常驻列表） ================= */
 let currentConvo = null;     // 当前激活会话 {id,title,...}
@@ -4219,15 +4854,12 @@ async function startNewConvo(spaceId) {
       spaceState.activeId = view.active_id || spaceId;
       if (view.workspace) renderWorkspace({ workspace: view.workspace });
     }
-    const c = await api('POST', '/api/conversations', { space_id: spaceId || spaceState.activeId });
-    currentConvo = c;
-    setThreadMode(true);
-    $('#goals-title').textContent = c.title || '新对话';
-    resetFeedToEmpty('可以直接开口说了', '说出你想推进的事，Gleam 会边听边整理这轮会话的上下文。');
+    // 不再立即创建会话：回到首页初始界面，等用户确认发送后由 ensureConvo() 按需创建，
+    // 避免点一次「新任务」就生成一个空会话。
+    currentConvo = null;
     convoLive.clear();
-    await loadConvoList(c.id);
+    showView('goals');
     goalInput.focus();
-    toast('已开始新对话', 'success');
   } catch (err) { toast(`新建对话失败：${err.message}`, 'error'); }
 }
 
@@ -4268,17 +4900,10 @@ function renderConvoMessages(c) {
 }
 
 // 气泡底部操作区：历史渲染和 SSE 完成回填共用这一份。
-// 以前只写在历史那半，刚跑完的回复要刷新页面才长出「反馈这条」——正是"判据对、线没接"。
+// （原先这里第一颗是「反馈这条」，指向一个早已删掉的视图——反馈功能整个撤掉了，
+//  那颗按钮点下去只会抛异常，所以连同入口一起去掉。）
 function appendMsgActs(bodyEl, m) {
   const acts = el('div', 'msg-acts');
-  // 「反馈这条」永远指着**这一次**运行（带 task_id），不是"最近一次"：
-  // 过了三天回来抱怨刚才那个回答，反馈却不该指向昨天最后跑的那件事。
-  const fb = el('button', 'msg-detail');
-  fb.type = 'button';
-  fb.textContent = '反馈这条';
-  fb.title = '就着这次回答写一条反馈：运行现场会自动带上这一次的状态';
-  fb.addEventListener('click', () => openFeedbackView(m.task_id));
-  acts.appendChild(fb);
   if (m.mode && m.mode !== 'chat') {
     const more = el('button', 'msg-detail');
     more.type = 'button';
@@ -4456,10 +5081,11 @@ async function deleteConvo(id, title) {
 // 它被当成 spaceId 送去 activate —— POST /api/spaces/[object Object]/activate 必然失败，
 // 「新对话」于是每次弹"新建对话失败"，按钮从来没通过。
 $('#convo-new').addEventListener('click', () => startNewConvo());
-// 顶部“新对话”同样创建持久化会话
+// 顶部“新对话”同样回到首页初始界面，发送时再按需创建会话
 $('#new-chat-btn').addEventListener('click', () => startNewConvo());
 
-function openWorkspaceDialog() {
+// 内置目录浏览：普通浏览器里没有系统文件夹选择器时的退路（桌面壳走 pickSystemFolder）。
+function openWorkspaceBrowse() {
   Modal.open('选择任务工作区', (box) => {
     const wrap = el('div');
     wrap.innerHTML = `
@@ -4518,14 +5144,8 @@ function openWorkspaceDialog() {
     }
 
     async function pick(path) {
-      try {
-        const ws = await api('POST', '/api/workspace', { path });
-        Modal.close();
-        toast(`工作区已切换：${wsShort(ws.workspace)}`, 'success');
-        renderWorkspace(ws);
-      } catch (err) {
-        toast(err.message, 'error');
-      }
+      Modal.close();
+      await chooseWorkspace(path);
     }
 
     const actions = el('div', 'modal-actions');
@@ -4614,12 +5234,15 @@ const PermWarning = (() => {
   return { show };
 })();
 
-function _doSetPerm(mode, persist = true) {
+function _doSetPerm(mode, label, persist = true) {
   const prev = currentMode;
+  const prevLabel = currentPermLabel;
   currentMode = mode;
-  const display = mode === 'interactive' ? 'plan_first' : mode;
-  document.querySelectorAll('#perm-seg button').forEach((b) =>
-    b.setAttribute('aria-pressed', String(b.dataset.perm === display)));
+  if (label) currentPermLabel = label;
+  // 更新下拉菜单选中状态：按展示标签区分 auto / full_access
+  document.querySelectorAll('#perm-list button').forEach((b) => {
+    b.setAttribute('aria-checked', String(b.dataset.permLabel === currentPermLabel));
+  });
   const sub = document.getElementById('plus-plan-sub');
   // L7：菜单副标题写「下一步动作」而不是「上次切换的结果」——过去时状态放这迟早过时
   if (sub) sub.textContent = (mode === 'plan_first' || mode === 'interactive') ? '切换「完全访问」' : '切换「请我批准」';
@@ -4627,7 +5250,7 @@ function _doSetPerm(mode, persist = true) {
   // 后端不答应就必须把芯片拨回去：挂着「完全访问」却按旧模式跑，
   // 下一次目标要么该批的没批、要么不该批的悄悄跑完，两种都比报错更糟。
   api('POST', '/api/settings', { safety: { mode } }).catch((err) => {
-    _doSetPerm(prev, false);
+    _doSetPerm(prev, prevLabel, false);
     toast(`权限模式未切换：${err.message}`, 'error');
   });
 }
@@ -4936,7 +5559,7 @@ function applyTheme() {
 /* ---------- 界面语言：壳层文案的中英切换（动态内容与后端消息保持中文） ---------- */
 const I18N_EN = {
   '目标': 'Goals', '定时任务': 'Schedules', '技能': 'Skills', '工具': 'Tools', '更多': 'More', '记忆': 'Memory',
-  '市场': 'Market', '成长': 'Growth', '就绪体检': 'Readiness', '反馈与建议': 'Feedback', '设置': 'Settings', '我的': 'Me',
+  '市场': 'Market', '成长': 'Growth', '就绪体检': 'Readiness', '设置': 'Settings', '我的': 'Me',
   '新任务': 'New task', '不止于对话，把事做完': 'Beyond chat, get it done', '上下文留在本机，Gleam 帮你一步步推进': 'Context stays on this machine while Gleam moves the work forward',
   '会话': 'Chats', '任务': 'Tasks', '收起侧栏': 'Collapse sidebar', '展开侧栏': 'Expand sidebar', '展开现场栏': 'Open live panel', '收起现场栏': 'Close live panel', '搜索': 'Search', '工作区': 'Workspaces', '微光 · 本地智能体': 'Gleam · local agent',
   '新对话': 'New chat', '选择工作区': 'Choose workspace', '选择工作区（可选）': 'Choose workspace (optional)',
@@ -4959,7 +5582,7 @@ const I18N_EN = {
   '语言': 'Language', '明暗模式': 'Mode', '主题': 'Theme', '字体风格': 'Font', '文字大小': 'Text size', '界面缩放': 'Zoom', '内容宽度': 'Content width',
   '系统': 'System', '浅色': 'Light', '深色': 'Dark', '跟随系统': 'System', '微光': 'Gleam', '站点': 'Sites', '我的站点': 'My sites', '共享给我的': 'Shared with me', '添加站点': 'Add site', '还没有站点': 'No sites yet', '落地页': 'Landing', '作品集': 'Portfolio', '博客与内容': 'Blog', '数据看板': 'Dashboard', '内部工具': 'Internal tool', '其他': 'Other', '森林': 'Forest', '薄荷': 'Mint', '蜜蜂': 'Bee', '羊皮纸': 'Parchment',
   '无衬线': 'Sans', '衬线': 'Serif', '小': 'S', '中': 'M', '大': 'L', '标准': 'Standard', '宽': 'Wide',
-  '使用统计与成长': 'Usage & growth', '检查更新': 'Check for updates', '帮助与反馈': 'Help & feedback', '账号与本地数据': 'Account & local data', '退出登录': 'Sign out',
+  '使用统计与成长': 'Usage & growth', '检查更新': 'Check for updates', '帮助': 'Help', '账号与本地数据': 'Account & local data', '退出登录': 'Sign out',
   '所有任务': 'All tasks', '选择': 'select', '打开': 'open', '个': '',
   '搜索会话标题、内容摘要或目标…': 'Search chats, previews or goals…', '搜索设置…': 'Search settings…',
   '现场': 'Live', '空闲': 'Idle', '外观皮肤': 'Appearance', '深浅模式': 'Mode', '强调色': 'Accent',
@@ -5143,323 +5766,34 @@ $('#me-data').addEventListener('click', async () => {
 });
 
 $('#me-update').addEventListener('click', async () => {
+  // 版本号只从 /api/info 取（owner 是 internal/buildinfo），问题交给 checkUpdate：
+  // 它去问 /api/update/check，有新版、已最新、连不上三种结果各自说人话。
   let info;
   try {
     info = await api('GET', '/api/info');
-  } catch {
-    toast('读取本机版本失败', 'error');
+  } catch (err) {
+    // 这一步拿不到，后面什么都问不了：用模态说清楚，而不是丢一条会自己消失的 toast
+    await alertModal('没能读到本机版本（' + err.message + '），检查更新没能开始，稍后再试一次。', '检查更新');
     return;
   }
-  const ver = info.version ? 'v' + info.version : '未知';
-  $('#me-version').textContent = ver;
-  // 没有联网更新源，所以"有没有新版"这件事在本机**问不出来**。以前这里给出的是一个完成时态的结论，
-  // 等于把"我不知道"讲成了答案。版本号只从 /api/info 取，owner 是 internal/buildinfo。
-  await alertModal('本机版本 ' + ver + '。Gleam 没有联网更新源：安装包只落在本机，所以这一行只能说出版本号，' +
-    '说不出有没有新版。要升级就替换程序本身——对话、技能、密钥都存在「本地数据」那个目录里，换程序不影响它们。', '检查更新');
+  $('#me-version').textContent = info.version ? 'v' + info.version : '未知';
+  await checkUpdate();
 });
 
+// 用户行那颗「?」和抽屉里的「帮助」是同一个入口：都开帮助，不各写一份文案
+const helpBtn = $('#help-btn');
+if (helpBtn) helpBtn.addEventListener('click', () => $('#me-help').click());
+
 $('#me-help').addEventListener('click', () => {
-  Modal.open('帮助与反馈', (box) => {
+  Modal.open('帮助', (box) => {
     box.innerHTML =
       '<p class="modal-text">Gleam 完全在本机运行，你的数据不会离开这台电脑。</p>' +
       '<div class="field"><label class="field-label">快速上手</label>' +
       '<p class="field-hint" style="margin-top:4px;">· 在底部输入框直接说要做什么，例如“整理当前文件夹”<br>· 「定时任务」用中文说时间即可自动执行，无需任何技术语法<br>· 模型密钥在「全部设置 → 模型」填写，只存本机<br>· 高风险操作（删除/执行命令）会先征求你的同意</p></div>' +
-      '<div class="modal-actions"><button class="btn btn-secondary" id="me-help-gofb">写一条反馈</button><button class="btn btn-primary" id="me-help-ok">知道了</button></div>';
+      '<div class="modal-actions"><button class="btn btn-primary" id="me-help-ok">知道了</button></div>';
     box.querySelector('#me-help-ok').addEventListener('click', Modal.close);
-    // 反馈视图藏在「更多」里，从这条人人都找得到的入口过去一次
-    box.querySelector('#me-help-gofb').addEventListener('click', () => { Modal.close(); openFeedbackView(); });
   });
 });
-
-/* ---------- 反馈与建议 ---------- */
-// 一条反馈**先落本机、再谈远端**，所以界面上那句"已提交"永远指的是本机那份。
-// 现场字段一个都不在这儿拼：GET /api/feedback/context 回什么就显示什么——
-// 后端改白名单时，抄一份字段名的预览会变成一句谎报（判据见 TestFeedbackContextPreview）。
-const FB_MAX_SHOTS = 5;
-const FB_MAX_TEXT = 20000;
-const FB_MAX_SHOT_BYTES = 5 * 1024 * 1024;
-const fbDraft = { kind: 'bug', shots: [], taskID: '' };
-
-const FB_DELIVERY = {
-  local_only: { text: '只存本机', cls: 'badge--mode', title: '没配远端，这条就在你这台电脑上；不是失败' },
-  sent: { text: '已送达远端', cls: 'badge--success', title: '脱敏后的副本已送到远端' },
-  failed: { text: '未送达', cls: 'badge--failed', title: '本机这份还在，重投会再试一次' },
-};
-
-function openFeedbackView(taskID) {
-  if (taskID !== undefined) fbDraft.taskID = taskID;
-  // 不在这儿自己拉数据：showView 会走 VIEW_LOADERS，再拉一遍就是两次请求。
-  showView('feedback');
-  setTimeout(() => $('#fb-text').focus(), 60);
-}
-
-function fbCount() {
-  // 括号位置错过一次：[...值].length 才对，写成 [...(值.length)] 是把数字摊开，
-  // 每次输入都抛 "is not iterable"，计数器永远停在 0。
-  const n = [...$('#fb-text').value].length;
-  $('#fb-count').textContent = n + ' / ' + FB_MAX_TEXT + ' 字';
-  $('#fb-count').classList.toggle('fb-over', n > FB_MAX_TEXT);
-}
-
-// 缩略图用 blob URL：还没提交的东西不该绕一趟后端。
-function fbAddShot(file) {
-  if (!file || !/^image\//.test(file.type)) { toast('只收图片文件', 'warning'); return; }
-  if (fbDraft.shots.length >= FB_MAX_SHOTS) { toast('截图最多 ' + FB_MAX_SHOTS + ' 张', 'warning'); return; }
-  if (file.size > FB_MAX_SHOT_BYTES) { toast('这张 ' + Math.round(file.size / 1048576) + 'MB，超过 5MB 上限', 'warning'); return; }
-  const reader = new FileReader();
-  reader.onload = () => {
-    // 真实类型由后端按文件头判，这里只留展示用的名字与大小
-    fbDraft.shots.push({ data: String(reader.result), name: file.name || '粘贴的截图', bytes: file.size });
-    fbRenderShots();
-  };
-  reader.onerror = () => toast('这张读不出来', 'error');
-  reader.readAsDataURL(file);
-}
-
-function fbRenderShots() {
-  const box = $('#fb-shots');
-  box.innerHTML = '';
-  fbDraft.shots.forEach((s, i) => {
-    const item = el('div', 'fb-shot');
-    const img = el('img', 'fb-shot-img');
-    img.src = s.data;
-    img.alt = '待提交的截图 ' + (i + 1);
-    const meta = el('span', 'fb-shot-meta', s.name + ' · ' + Math.max(1, Math.round(s.bytes / 1024)) + 'KB');
-    const rm = el('button', 'fb-shot-rm');
-    rm.type = 'button';
-    rm.innerHTML = ICONS.x;
-    rm.title = '不要这张了（只从这次提交里移除，本机文件不动）';
-    rm.setAttribute('aria-label', '移除截图 ' + (i + 1));
-    rm.addEventListener('click', () => { fbDraft.shots.splice(i, 1); fbRenderShots(); });
-    item.append(img, meta, rm);
-    box.appendChild(item);
-  });
-}
-
-async function fbRefreshContext() {
-  const box = $('#fb-context');
-  const dest = $('#fb-dest');
-  try {
-    const q = fbDraft.taskID ? '?task_id=' + encodeURIComponent(fbDraft.taskID) : '';
-    const { context: c, remote } = await api('GET', '/api/feedback/context' + q);
-    const bits = [];
-    if (c.app_version) bits.push('v' + c.app_version);
-    if (c.model) bits.push('模型 ' + c.model);
-    if (c.llm_host) bits.push('接入 ' + c.llm_host);
-    if (c.os) bits.push(c.os + ' / ' + c.go_version);
-    // 状态本身已经说了"已完成"，再补一句就成了「那次运行 已完成 · 已完成」。只有停在具体工具上才值得多说半句。
-    if (c.task_id) bits.push('那次运行 ' + (STATUS_LABEL[c.task_status] || c.task_status || '未知状态') + (c.failed_tool ? ' · 停在 ' + c.failed_tool : ''));
-    box.innerHTML = '<span class="fb-context-k">会一并带上的运行现场</span>' +
-      '<div class="fb-context-v">' + bits.map(esc).join('<span class="fb-dot">·</span>') + '</div>' +
-      '<p class="field-hint">只有这些：密钥、工作区路径、日志正文都不出去。描述里如果粘了绝对路径，发出去的副本会被换成「已脱敏」，本机这份保持原样。</p>';
-    $('#fb-ref-slot').innerHTML = c.task_id
-      ? '<button type="button" class="fb-ref" id="fb-drop-ref">指着那次运行 ' + esc(shorten(c.task_id, 14)) + ' ✕</button>'
-      : '';
-    const drop = $('#fb-drop-ref');
-    if (drop) drop.addEventListener('click', () => { fbDraft.taskID = ''; fbRefreshContext(); });
-    dest.textContent = remote ? ('本机一份，另送一份到 ' + remote) : '只存本机（还没配远端，不是失败）';
-  } catch (err) {
-    box.innerHTML = '<p class="field-hint">现场读不出来：' + esc(err.message) + '</p>';
-    dest.textContent = '远端状态暂时读不出来';
-  }
-}
-
-async function loadFeedbackView() { await fbRefreshContext(); loadFeedback(); }
-
-async function loadFeedback() {
-  const list = $('#fb-list');
-  list.innerHTML = '<div class="skeleton" style="height:56px"></div>';
-  try {
-    const { feedback: items, skipped, remote } = await api('GET', '/api/feedback');
-    list.innerHTML = '';
-    $('#fb-empty').hidden = !!(items && items.length);
-    const broken = $('#fb-broken');
-    broken.hidden = !skipped;
-    broken.textContent = '有 ' + skipped + ' 条读不动（文件坏了），已跳过——它们仍在 feedback/ 目录里。';
-    (items || []).forEach((f) => list.appendChild(fbRow(f)));
-    if (remote) $('#fb-dest').textContent = '本机一份，另送一份到 ' + remote;
-  } catch (err) {
-    loadError(list, err, loadFeedback);
-  }
-}
-
-function fbRow(f) {
-  const row = el('div', 'card row');
-  const main = el('div', 'row-main');
-  const d = FB_DELIVERY[f.delivery] || FB_DELIVERY.local_only;
-  const shots = (f.attachments || []).length;
-  main.innerHTML = `<div class="row-title"><span class="badge badge--${f.kind === 'bug' ? 'failed' : 'partial'}">${f.kind === 'bug' ? '问题' : '建议'}</span>` +
-    `<span class="badge ${d.cls}">${d.text}</span></div>` +
-    `<div class="fb-row-text">${esc(f.text)}</div>` +
-    `<div class="row-sub">${esc(new Date(f.created_at).toLocaleString())} · 只存在本机${shots ? ' · ' + shots + ' 张截图' : ''}</div>` +
-    (f.delivery_note ? `<div class="row-sub fb-note" title="${esc(d.title)}">${esc(f.delivery_note)}</div>` : '');
-  const actions = el('div', 'row-actions');
-  if (shots) {
-    const see = el('button', 'btn btn-secondary btn-sm');
-    see.type = 'button';
-    see.textContent = '看截图';
-    see.title = '从本机读回这几张图（截图不外发，所以只能在这台电脑上看）';
-    see.addEventListener('click', () => fbViewShots(f));
-    actions.appendChild(see);
-  }
-  if (f.delivery === 'failed') {
-    const retry = el('button', 'btn btn-secondary btn-sm');
-    retry.type = 'button';
-    retry.textContent = '重新投递';
-    retry.title = d.title;
-    retry.addEventListener('click', async () => {
-      retry.disabled = true;
-      try {
-        const out = await api('POST', '/api/feedback/' + encodeURIComponent(f.id) + '/resend');
-        const nd = FB_DELIVERY[out.delivery] || FB_DELIVERY.local_only;
-        toast(out.delivery_note ? '重投结果：' + nd.text + '（' + out.delivery_note + '）' : '重投结果：' + nd.text,
-          out.delivery === 'sent' ? 'success' : 'error', 7000);
-        loadFeedback();
-      } catch (err) { retry.disabled = false; toast(err.message, 'error', 7000); }
-    });
-    actions.appendChild(retry);
-  }
-  const del = el('button', 'btn btn-danger btn-sm');
-  del.type = 'button';
-  del.innerHTML = ICONS.trash;
-  del.title = '删掉这条反馈，连同它在本机的截图';
-  del.setAttribute('aria-label', '删除这条反馈：' + shorten(f.text, 20));
-  del.addEventListener('click', async () => {
-    if (!await confirmModal('删掉这条反馈？\n\n「' + shorten(f.text, 60) + '」\n\n本机归档与截图一起删除；已经送到远端的那份副本删不掉。', '删除反馈', { okText: '删除', danger: true })) return;
-    try { await api('DELETE', '/api/feedback/' + encodeURIComponent(f.id)); toast('已删除', 'success'); loadFeedback(); }
-    catch (err) { toast(err.message, 'error'); }
-  });
-  actions.appendChild(del);
-  row.append(main, actions);
-  return row;
-}
-
-// 看截图走后端读回，不是留 blob URL：历史条目是上一次会话写的，内存里没有那份图。
-function fbViewShots(f) {
-  Modal.open(esc('这条反馈的截图（' + (f.attachments || []).length + ' 张，只在本机）'), (box) => {
-    (f.attachments || []).forEach((a) => {
-      const img = el('img', 'fb-modal-shot');
-      img.src = withToken('/api/feedback/attachment?name=' + encodeURIComponent(a.name));
-      img.alt = '反馈截图 ' + a.name;
-      box.appendChild(img);
-      box.appendChild(el('p', 'field-hint', a.name + ' · ' + Math.max(1, Math.round(a.bytes / 1024)) + 'KB · ' + a.mime));
-    });
-  });
-}
-
-async function fbSubmit() {
-  const btn = $('#fb-submit');
-  const text = $('#fb-text').value.trim();
-  if (!text) { toast('先写一句描述：没有文字的截图，收到也不知道该改什么', 'warning'); $('#fb-text').focus(); return; }
-  if ([...text].length > FB_MAX_TEXT) { toast('描述超过 ' + FB_MAX_TEXT + ' 字，删减一点再提交', 'warning'); return; }
-  btn.disabled = true;
-  btn.textContent = '提交中…';
-  try {
-    const out = await api('POST', '/api/feedback', {
-      kind: fbDraft.kind,
-      text,
-      task_id: fbDraft.taskID || undefined,
-      attachments: fbDraft.shots.map((s) => ({ data: s.data })),
-    });
-    const d = FB_DELIVERY[out.delivery] || FB_DELIVERY.local_only;
-    toast('已存进本机。' + d.text + (out.delivery_note ? '：' + out.delivery_note : ''),
-      out.delivery === 'failed' ? 'warning' : 'success', 7000);
-    fbDraft.shots = []; fbDraft.taskID = '';
-    $('#fb-text').value = '';
-    $('#fb-file').value = '';
-    fbRenderShots(); fbCount(); fbRefreshContext(); loadFeedback();
-  } catch (err) { toast(err.message, 'error', 7000); }
-  btn.disabled = false;
-  btn.textContent = '提交';
-}
-
-$('#fb-kind').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-kind]');
-  if (!b) return;
-  fbDraft.kind = b.dataset.kind;
-  document.querySelectorAll('#fb-kind button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-});
-$('#fb-text').addEventListener('input', fbCount);
-$('#fb-pick').addEventListener('click', () => $('#fb-file').click());
-$('#fb-file').addEventListener('change', (e) => { [...e.target.files].forEach(fbAddShot); });
-$('#fb-submit').addEventListener('click', fbSubmit);
-$('#fb-refresh').addEventListener('click', () => { fbRefreshContext(); loadFeedback(); });
-// 粘贴截图：只在这个视图里认，否则等于在别的页面上偷偷吃剪贴板
-document.addEventListener('paste', (e) => {
-  if (!$('#view-feedback').classList.contains('active')) return;
-  const files = [...(e.clipboardData ? e.clipboardData.files : [])].filter((f) => /^image\//.test(f.type));
-  if (!files.length) return;
-  e.preventDefault();
-  files.forEach(fbAddShot);
-});
-
-/* ---------- 就绪体检（九坑自检） ---------- */
-const READINESS_LABEL = { pass: '通过', warn: '待改进', fail: '不合格' };
-const READINESS_VERDICT = {
-  ready: { text: '可以上生产', badge: 'badge--success' },
-  needs_work: { text: '基本可用 · 有待改进', badge: 'badge--partial' },
-  not_ready: { text: '暂不建议上生产', badge: 'badge--failed' },
-};
-
-async function loadReadiness() {
-  const wrap = $('#readiness-items');
-  if (!wrap) return;
-  wrap.innerHTML = '<p class="empty-hint">正在体检…</p>';
-  try {
-    const data = await api('GET', '/api/readiness');
-    renderReadiness(data.report || {});
-  } catch (e) {
-    wrap.innerHTML = `<p class="empty-hint">体检失败：${esc(e.message || String(e))}</p>`;
-  }
-}
-
-function renderReadiness(rep) {
-  const items = rep.items || [];
-  const v = READINESS_VERDICT[rep.verdict] || { text: '未知', badge: 'badge--mode' };
-  const badge = $('#ready-verdict');
-  if (badge) { badge.textContent = v.text; badge.className = 'badge ' + v.badge; }
-
-  const pass = rep.passed || 0, warn = rep.warned || 0, fail = rep.failed || 0;
-  $('#ready-pass').textContent = pass;
-  $('#ready-warn').textContent = warn;
-  $('#ready-fail').textContent = fail;
-
-  const parts = [`共 ${rep.total || 0} 项检查：${pass} 项通过`];
-  if (warn) parts.push(`${warn} 项待改进`);
-  if (fail) parts.push(`${fail} 项不合格`);
-  $('#ready-summary').textContent = parts.join('、') + '。';
-  if (fail) {
-    $('#ready-summary').textContent += '不合格项属于结构性缺口，建议优先补齐。';
-  } else if (warn) {
-    $('#ready-summary').textContent += '待改进项不影响使用，补上能让 Agent 更稳。';
-  }
-
-  const wrap = $('#readiness-items');
-  wrap.textContent = '';
-  for (const it of items) wrap.appendChild(readinessCard(it));
-}
-
-function readinessCard(it) {
-  const card = el('div', `card card--glass readiness-item readiness-item--${it.status}`);
-  const head = el('div', 'readiness-item-head');
-  head.appendChild(el('span', `readiness-mark readiness-mark--${it.status}`, String(it.index)));
-  head.appendChild(el('h3', 'readiness-item-title', it.title));
-  head.appendChild(el('span', `badge readiness-badge--${it.status}`, READINESS_LABEL[it.status] || it.status));
-  card.appendChild(head);
-  card.appendChild(el('p', 'readiness-item-summary', it.summary));
-
-  const ev = it.evidence || [];
-  if (ev.length) {
-    const ul = el('ul', 'readiness-evidence');
-    for (const line of ev) ul.appendChild(el('li', null, line));
-    card.appendChild(ul);
-  }
-  if (it.fix) card.appendChild(el('p', 'readiness-fix', '→ ' + it.fix));
-  return card;
-}
-
-const readyRefresh = $('#ready-refresh');
-if (readyRefresh) readyRefresh.addEventListener('click', loadReadiness);
 
 /* ============================================================
  * 现场栏（Live Rail）：循环轨 / 事件流水 / 本机读数
@@ -5810,13 +6144,100 @@ const BrowserPane = (() => {
   const urlIn = $('#bp-url');
   const form = $('#bp-form');
   const empty = $('#bp-empty');
-  let frame = $('#bp-frame');
-  if (!pane || !urlIn || !form || !frame || !empty) return { toggle: () => {}, isOpen: () => false };
+  const stage = pane && pane.querySelector('.bp-stage');
+  const tabsBox = $('#bp-tabs');
+  const firstFrame = $('#bp-frame');
+  if (!pane || !urlIn || !form || !stage || !tabsBox || !firstFrame || !empty) {
+    return { toggle: () => {}, isOpen: () => false, newTab: () => {} };
+  }
 
   const status = $('#bp-status');
   const backBtn = $('#bp-back');
   const fwdBtn = $('#bp-fwd');
   const quickBox = $('#bp-quick');
+
+  // ---- 标签 ----
+  // 每个标签自己带地址栈和一个独立 iframe（sandbox 属性从 HTML 里那份 clone 出来，
+  // 不在这里再抄一遍）。只有一个标签时标签条整条隐藏，界面上和没有标签时一样。
+  let seq = 0;
+  const tabs = []; // { id, hist, hi, frame, title }
+  let active = null;
+
+  // spare 是 HTML 里那份 #bp-frame：第一个标签直接拿它用，不然后面 clone 一个、
+  // 原来那个就白白留在 stage 里（一个没人管的空白 iframe）
+  let spare = firstFrame;
+  function ensureFrame(t) {
+    if (!t.frame) {
+      if (spare) { t.frame = spare; spare = null; } else {
+        t.frame = firstFrame.cloneNode(); // clone 带齐 sandbox / referrerpolicy
+        t.frame.removeAttribute('src');
+        stage.appendChild(t.frame);
+      }
+    }
+    return t.frame;
+  }
+
+  function activeFrame() { return ensureFrame(active); }
+  const current = () => (active && active.hi >= 0 ? active.hist[active.hi] : '');
+
+  function paintTabs() {
+    tabsBox.replaceChildren();
+    if (tabs.length <= 1) { tabsBox.hidden = true; return; }
+    tabsBox.hidden = false;
+    tabs.forEach((t) => {
+      const label = t.title || (t.hi >= 0 ? t.hist[t.hi].replace(/^https?:\/\//, '') : '新标签页');
+      const b = el('button', 'bp-tab' + (t === active ? ' is-active' : ''));
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(t === active));
+      b.title = label;
+      b.appendChild(el('span', 'bp-tab-label', label));
+      const x = el('span', 'bp-tab-x');
+      x.setAttribute('role', 'button');
+      x.setAttribute('aria-label', '关闭标签');
+      x.textContent = '✕';
+      x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(t.id); });
+      b.appendChild(x);
+      b.addEventListener('click', () => activate(t.id));
+      tabsBox.appendChild(b);
+    });
+  }
+
+  // activate 只切可见性，不重载：切回来还该是刚才那一页。
+  // 唯一例外是关掉面板时被清空过的标签——那种要找地址重新载一次。
+  function activate(id) {
+    const t = tabs.find((x) => x.id === id);
+    if (!t) return;
+    active = t;
+    tabs.forEach((x) => { if (x.frame) x.frame.hidden = x !== t; });
+    // 关面板时会把 src 清成 about:blank 掐断请求；切回来要重新载一次。
+    // 不能靠 src 属性判"是不是空的"——about:blank 也是个 src
+    if (t.blanked && t.hi >= 0) show(t.hist[t.hi]);
+    else paintChrome();
+  }
+
+  function newTab(rawURL) {
+    const t = { id: ++seq, hist: [], hi: -1, frame: null, title: '' };
+    tabs.push(t);
+    ensureFrame(t);
+    const url = rawURL ? normalizeURL(rawURL) : null;
+    pane.hidden = false;
+    active = t;
+    if (url) { t.hist.push(url); t.hi = 0; show(url); } else { paintChrome(); urlIn.focus(); }
+    Dock.refresh();
+    return t;
+  }
+
+  function closeTab(id) {
+    const i = tabs.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const t = tabs[i];
+    if (t.frame) { t.frame.src = 'about:blank'; t.frame.remove(); }
+    tabs.splice(i, 1);
+    if (!tabs.length) { close(); return; }
+    if (t === active) active = tabs[Math.min(i, tabs.length - 1)];
+    activate(active.id);
+  }
 
   // 常用端口：本机起服务翻来覆去就是这几个，写出来比让用户记地址有用。
   const QUICK = [
@@ -5826,8 +6247,6 @@ const BrowserPane = (() => {
     { url: 'http://127.0.0.1:8798', label: 'Gleam 自己' },
   ];
 
-  const hist = [];
-  let hi = -1;
   let opener = null;   // 谁把它打开的，关掉时把焦点还回去
 
   // normalizeURL 只放行 http/https；没写协议就补 http://（本机地址不必每次手打协议）。
@@ -5842,33 +6261,46 @@ const BrowserPane = (() => {
     return u.href;
   }
 
-  const current = () => (hi >= 0 ? hist[hi] : '');
-
   function setStatus(text, bad) {
     status.textContent = text;
     if (bad) status.dataset.bad = 'true'; else delete status.dataset.bad;
   }
 
   function paintNav() {
-    backBtn.disabled = hi <= 0;
-    fwdBtn.disabled = hi < 0 || hi >= hist.length - 1;
+    const t = active;
+    backBtn.disabled = !t || t.hi <= 0;
+    fwdBtn.disabled = !t || t.hi < 0 || t.hi >= t.hist.length - 1;
     quickBox.querySelectorAll('.bp-chip').forEach((c) => {
       const on = c.dataset.url === current();
       if (on) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current');
     });
   }
 
-  // show 只做"把这一格画成这个地址"，入不入栈由调用方决定。
-  function show(url) {
-    urlIn.value = url;
-    delete urlIn.dataset.bad;
-    frame.src = url;
-    frame.hidden = false;
-    empty.hidden = true;
-    setStatus('正在载入 ' + url + ' · 一直空白多半是它拒绝被嵌，用「在系统浏览器打开」');
-    UIPrefs.set({ browserLast: url });
+  function paintChrome() {
+    const t = active;
+    urlIn.value = t && t.hi >= 0 ? t.hist[t.hi] : '';
+    empty.hidden = !!(t && t.hi >= 0);
     paintQuick();
     paintNav();
+    paintTabs();
+  }
+
+  // show 只做"把这一格画成这个地址"，入不入栈由调用方决定。
+  function show(url) {
+    const t = active;
+    if (!t) return;
+    urlIn.value = url;
+    delete urlIn.dataset.bad;
+    const f = activeFrame();
+    f.src = url;
+    f.hidden = false;
+    tabs.forEach((x) => { if (x !== t && x.frame) x.frame.hidden = true; });
+    empty.hidden = true;
+    t.title = url.replace(/^https?:\/\//, '');
+    t.blanked = false;
+    setStatus('正在载入 ' + url + ' · 一直空白多半是它拒绝被嵌，用「在系统浏览器打开」');
+    UIPrefs.set({ browserLast: url });
+    paintChrome();
   }
 
   function openURL(raw) {
@@ -5880,31 +6312,35 @@ const BrowserPane = (() => {
       setStatus('这个地址打不开：只接受 http / https。', true);
       return false;
     }
+    const t = active || newTab();
     if (url !== current()) {
-      hist.splice(hi + 1);        // 从中间地址再打开时，后面的"未来"作废——和浏览器一样
-      hist.push(url);
-      hi = hist.length - 1;
+      t.hist.splice(t.hi + 1);    // 从中间地址再打开时，后面的"未来"作废——和浏览器一样
+      t.hist.push(url);
+      t.hi = t.hist.length - 1;
     }
     show(url);
     return true;
   }
 
   function step(delta) {
-    const next = hi + delta;
-    if (next < 0 || next >= hist.length) return;
-    hi = next;
-    show(hist[hi]);
+    const t = active;
+    if (!t) return;
+    const next = t.hi + delta;
+    if (next < 0 || next >= t.hist.length) return;
+    t.hi = next;
+    show(t.hist[t.hi]);
   }
 
   // 原地重载跨源会抛，所以换节点：clone 带齐 sandbox / referrerpolicy，
   // 但要先摘掉 src，否则插进去就按旧地址自己加载一遍。
   function reload() {
     const url = current();
-    if (!url) return;
-    const fresh = frame.cloneNode();
+    if (!url || !active) return;
+    const old = activeFrame();
+    const fresh = old.cloneNode();
     fresh.removeAttribute('src');
-    frame.replaceWith(fresh);
-    frame = fresh;
+    old.replaceWith(fresh);
+    active.frame = fresh;
     show(url);
   }
 
@@ -5930,11 +6366,12 @@ const BrowserPane = (() => {
     if (!pane.hidden) return;
     opener = document.activeElement;
     pane.hidden = false;
-    // 同一会话里再打开回来，应该还是刚才那一页（close 只摘 src，不动地址栈）。
-    // 新会话则不自动加载——只给「上次看的」那颗芯片，本机服务可能已经停了。
-    if (current()) show(current());
-    paintQuick();
-    paintNav();
+    // 第一次打开给一个空标签（只有「上次看的」那颗芯片，不自动加载——本机服务可能已经停了）；
+    // 再次打开则回到上次那一页（close 只清 src，不动地址栈与标签）
+    if (!tabs.length) newTab();
+    else if (current() && active.blanked) show(current());
+    paintChrome();
+    Dock.refresh();
     urlIn.focus();
     urlIn.select();
   }
@@ -5942,12 +6379,17 @@ const BrowserPane = (() => {
   function close() {
     if (pane.hidden) return;
     pane.hidden = true;
-    frame.src = 'about:blank';   // 关了就断掉里面的请求，别让它继续在后台跑
-    frame.hidden = true;
+    // 所有标签的 iframe 都摘掉 src：关了就断掉里面的请求，别让它们继续在后台跑。
+    // 地址栈与标签列表留着，下次打开还是这些页
+    tabs.forEach((t) => {
+      if (t.frame) { t.frame.src = 'about:blank'; t.frame.hidden = true; }
+      t.blanked = true;
+    });
     empty.hidden = false;
     setStatus('');
     if (opener && document.contains(opener)) opener.focus();
     opener = null;
+    Dock.refresh();
   }
 
   function toggle() { if (pane.hidden) open(); else close(); }
@@ -5956,7 +6398,8 @@ const BrowserPane = (() => {
   backBtn.addEventListener('click', () => step(-1));
   fwdBtn.addEventListener('click', () => step(1));
   $('#bp-reload').addEventListener('click', reload);
-  $('#bp-close').addEventListener('click', close);
+  // 关闭键已上移到坞的头部（#dock-close）：面板坞里 ✕ 应该关掉"当前这一页"，不只关浏览器
+
   $('#bp-external').addEventListener('click', () => {
     const url = current();
     if (!url) { setStatus('还没有地址，先打开一个再谈外部浏览器。', true); return; }
@@ -5990,7 +6433,139 @@ const BrowserPane = (() => {
     close();
   }, { capture: true });
 
-  return { toggle, open, close, isOpen: () => !pane.hidden, normalizeURL };
+  return { toggle, open, close, newTab, closeTab, isOpen: () => !pane.hidden, normalizeURL };
+})();
+
+/* ============================================================
+ * 审阅面板（批次 A1）：先用已有的改动清单，行内 diff 与文件清单在 A3 再铺开。
+ * ============================================================ */
+const ReviewPane = (() => {
+  const box = $('#dock-review');
+  if (!box) return { open() {}, close() {}, isOpen: () => false };
+  async function open() {
+    box.hidden = false;
+    box.innerHTML = '<div class="skeleton" style="height:64px;margin:10px 12px"></div>';
+    let latest = null;
+    try {
+      const { goals } = await api('GET', '/api/goals');
+      const list = goals || [];
+      // /api/goals 按时间**倒序**回（新的在前，见 handleGoalList），所以第一条才是最新一轮。
+      latest = list[0] || null;
+    } catch { /* 拉不到就按空态画，不编东西出来 */ }
+    box.innerHTML = '';
+    box.appendChild(el('div', 'review-head', latest ? '最近一轮改动' : '还没有可审阅的改动'));
+    const slot = el('div', 'review-slot');
+    box.appendChild(slot);
+    if (!latest) {
+      slot.appendChild(el('p', 'field-hint', '跑一次任务之后，这里会列出它动了哪些文件。'));
+      return;
+    }
+    renderChangesInto(slot, latest.task_id, latest.result && latest.result.changes);
+  }
+  function close() { box.hidden = true; }
+  return { open, close, isOpen: () => !box.hidden };
+})();
+
+const Dock = (() => {
+  const dock = $('#dock');
+  if (!dock) return { open() {}, close() {}, refresh() {}, isOpen: () => false };
+  const tabs = [...dock.querySelectorAll('.dock-tab')];
+  const dockBody = dock.querySelector('.dock-body');
+  const panes = { browser: $('#browser-pane'), review: $('#dock-review') };
+  let active = UIPrefs.get().dockTab === 'review' ? 'review' : 'browser';
+
+  function paint() {
+    tabs.forEach((b) => {
+      const on = b.dataset.dtab === active;
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+    });
+    Object.entries(panes).forEach(([k, p]) => {
+      const wrap = p && p.closest('.dock-pane');
+      if (wrap) wrap.hidden = k !== active;
+    });
+    UIPrefs.set({ dockTab: active });
+  }
+  // 只对齐可见性，不主动开面板：BrowserPane 自己在开合，这里跟着它走
+  function refresh() {
+    const anyOpen = BrowserPane.isOpen() || ReviewPane.isOpen();
+    dock.hidden = !anyOpen;
+    if (!anyOpen) return;
+    if (active === 'review' && !ReviewPane.isOpen()) active = 'browser';
+    else if (active === 'browser' && !BrowserPane.isOpen()) active = 'review';
+    paint();
+  }
+  function show(tab) {
+    active = tab;
+    Popovers.closeAll(); // 坞一开，输入框那些弹层先收掉，别叠在一起
+    if (tab === 'review') ReviewPane.open(); else BrowserPane.open();
+    refresh();
+  }
+  function close() { // 头部 ✕：收掉整个坞（两页都关，不留一个空壳）
+    BrowserPane.close();
+    ReviewPane.close();
+    refresh();
+  }
+
+  tabs.forEach((b) => b.addEventListener('click', () => show(b.dataset.dtab)));
+  $('#dock-close').addEventListener('click', close);
+
+  // 新标签：浏览器面板里开一个新标签（浏览器没开就先开起来）
+  $('#dock-new').addEventListener('click', () => { BrowserPane.newTab(); });
+
+  // 拆分：坞内左右并排显示两栏（浏览器 + 审阅）。再点一次合回去。
+  const splitBtn = $('#dock-split');
+  splitBtn.addEventListener('click', () => {
+    const on = !dockBody.classList.contains('is-split');
+    dockBody.classList.toggle('is-split', on);
+    splitBtn.setAttribute('aria-pressed', String(on));
+    splitBtn.title = on ? '取消拆分' : '拆分面板';
+  });
+
+  const maxBtn = $('#dock-max');
+  maxBtn.addEventListener('click', () => {
+    const on = !dock.classList.contains('is-max');
+    dock.classList.toggle('is-max', on);
+    maxBtn.setAttribute('aria-pressed', String(on));
+    maxBtn.title = on ? '还原面板宽度' : '最大化面板';
+  });
+
+  // 拖左缘调宽：宽度记在本机，下次开还是这个宽度
+  const handle = $('#dock-resize');
+  const savedW = Number(UIPrefs.get().dockW);
+  if (savedW >= 320) dock.style.width = savedW + 'px';
+  let drag = null;
+  handle.addEventListener('pointerdown', (e) => {
+    if (dock.classList.contains('is-max')) return;
+    const r = dock.getBoundingClientRect();
+    drag = { x: e.clientX, w: r.width };
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const w = Math.max(320, Math.min(drag.w - (e.clientX - drag.x), window.innerWidth - 260));
+    dock.style.width = Math.round(w) + 'px';
+  });
+  const endDrag = (e) => {
+    if (!drag) return;
+    drag = null;
+    try { handle.releasePointerCapture(e.pointerId); } catch { /* 已经释放 */ }
+    UIPrefs.set({ dockW: Math.round(dock.getBoundingClientRect().width) });
+  };
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+
+  // Esc 关审阅页；浏览器页的 Esc 由 BrowserPane 自己管（它还要先看有没有模态开着）
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || dock.hidden || active !== 'review') return;
+    const modalOpen = [...document.querySelectorAll('[aria-modal="true"]')]
+      .some((n) => n.getClientRects().length > 0);
+    if (modalOpen) return;
+    close();
+  }, { capture: true });
+
+  return { open: show, close, refresh, isOpen: () => !dock.hidden };
 })();
 
 /* ---------- 初始化 ---------- */
@@ -6403,7 +6978,8 @@ function startSiteFromTemplate(t) {
 const SiteTemplates = (() => {
   let cat = SITE_CATS[0].id;
   function paint(box) {
-    if (UIPrefs.get().siteTplHidden) { box.hidden = true; box.innerHTML = ''; return; }
+    // 站点模板仅站点模式下出现；setSiteMode 控制显隐
+    if (!siteMode) { box.hidden = true; return; }
     box.hidden = false;
     box.innerHTML = `<div class="site-tpl-head">
         <div class="site-tpl-tabs" role="tablist" aria-label="模板分类">${SITE_CATS.map((c) =>
@@ -6458,9 +7034,7 @@ const SiteTemplates = (() => {
       mark(cat); sync();
     });
     box.querySelector('[data-close]').addEventListener('click', () => {
-      UIPrefs.set({ siteTplHidden: true });
-      box.hidden = true;
-      box.innerHTML = '';
+      setSiteMode(false);
       toast('已收起站点模板，可在「站点」页重新打开', 'success', 2600);
     });
   }
@@ -6507,8 +7081,21 @@ async function loadSites() {
       });
     } catch { skipped++; }
   }
+  // 只列 Gleam 自己生成的。「是不是这款软件做的」不能靠目录名猜：拿任务归档里的
+  // 改动清单当凭据——那个 index.html 真被某次任务写过，才算数。
+  let owned = null;
+  try {
+    const { goals } = await api('GET', '/api/goals');
+    owned = new Set();
+    (goals || []).forEach((g) => {
+      (((g.result || {}).changes) || []).forEach((c) => { if (c && c.path) owned.add(normPath(c.path)); });
+    });
+  } catch { /* 归档拉不到就不过滤：宁可多列，也不凭空把列表清空 */ }
+  const mine = owned ? found.filter((f) => owned.has(normPath(f.file))) : found;
+  const notMine = found.length - mine.length;
+
   // 标题与预览都来自文件本身；最多读 24 个，避免大仓库里一口气读太多
-  const sites = found.slice(0, 24);
+  const sites = mine.slice(0, 24);
   await Promise.all(sites.map(async (s) => {
     try {
       const r = await api('POST', '/api/tools/call', { name: 'file.read', args: { path: s.file } });
@@ -6518,15 +7105,19 @@ async function loadSites() {
       s.title = m ? m[1].trim() : '';
     } catch { s.html = ''; }
   }));
-  if (skipped) {
+  const bits = [];
+  if (skipped) bits.push(`有 ${skipped} 个空间不在当前工作区范围内，切到那个空间再刷新就能扫到`);
+  if (notMine) bits.push(`${notMine} 个 index.html 不是 Gleam 生成的，已略过`);
+  if (mine.length > sites.length) bits.push(`共 ${mine.length} 个，这里先列前 ${sites.length} 个`);
+  if (bits.length) {
     note.hidden = false;
-    note.textContent = `有 ${skipped} 个空间不在当前工作区范围内，切换到那个空间后再刷新就能扫到。`;
-  } else if (found.length > sites.length) {
-    note.hidden = false;
-    note.textContent = `共找到 ${found.length} 个，这里先列出前 ${sites.length} 个。`;
+    note.textContent = bits.join('；') + '。';
   }
   renderSites(body, sites);
 }
+
+// 路径统一成小写正斜杠再比：任务归档与 file.search 给的斜杠方向、大小写都不一定一致
+function normPath(p) { return String(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(); }
 
 function renderSites(body, sites) {
   body.innerHTML = '';
@@ -6682,9 +7273,11 @@ const ShellLayout = (() => {
         if (day > today) { cells.push('<i class="heat-cell" data-future></i>'); continue; }
         const n = data.get(dayKey(day)) || 0;
         total += n;
-        cells.push(`<i class="heat-cell" data-l="${level(n, max)}" title="${day.getMonth() + 1}/${day.getDate()} · ${n}"></i>`);
+        // 日期与次数挂到 data-* 上，交给下面的卡片提示；原生 title 太慢也太丑
+        cells.push(`<i class="heat-cell" data-l="${level(n, max)}" data-ts="${day.getTime()}" data-n="${n}"></i>`);
       }
     }
+    hideHeatTip();
     card.innerHTML = `<div class="activity-tabs" role="tablist">
         <button type="button" role="tab" data-act="convo" aria-selected="${tab === 'convo'}">会话</button>
         <button type="button" role="tab" data-act="task" aria-selected="${tab === 'task'}">任务</button>
@@ -6692,6 +7285,36 @@ const ShellLayout = (() => {
       <div class="heat-grid" aria-label="过去一年的本机活动，共 ${total} 次">${cells.join('')}</div>
       <div class="heat-months" aria-hidden="true">${months.join('')}</div>`;
     card.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.act; render(card); }));
+    bindHeatTip(card.querySelector('.heat-grid'), () => tab);
+  }
+
+  // 悬停格子时弹一张日期卡片：12月4日周四 / 单日活跃任务 / N 个任务
+  let heatTip = null;
+  function hideHeatTip() { if (heatTip) heatTip.hidden = true; }
+  function bindHeatTip(grid, tabOf) {
+    if (!grid) return;
+    if (!heatTip) { heatTip = el('div', 'heat-tip'); heatTip.hidden = true; document.body.appendChild(heatTip); }
+    grid.addEventListener('mouseover', (e) => {
+      const cell = e.target.closest('.heat-cell');
+      if (!cell || cell.hasAttribute('data-future') || !cell.dataset.ts) return;
+      const d = new Date(Number(cell.dataset.ts));
+      const n = Number(cell.dataset.n) || 0;
+      const wd = '日一二三四五六'[d.getDay()];
+      const noun = tabOf() === 'task' ? '任务' : '会话';
+      heatTip.innerHTML = `<div class="heat-tip-head"><span class="heat-tip-date">${d.getMonth() + 1}月${d.getDate()}日周${wd}</span>` +
+        `<span class="heat-tip-count">${n} 个${noun}</span></div>` +
+        `<div class="heat-tip-sub">单日活跃${noun}</div>`;
+      heatTip.hidden = false;
+      const r = cell.getBoundingClientRect();
+      const tw = heatTip.offsetWidth, th = heatTip.offsetHeight;
+      const left = Math.max(8, Math.min(r.left + r.width / 2 - tw / 2, window.innerWidth - tw - 8));
+      let top = r.top - th - 8;
+      if (top < 8) top = r.bottom + 8;
+      heatTip.style.left = Math.round(left) + 'px';
+      heatTip.style.top = Math.round(top) + 'px';
+    });
+    grid.addEventListener('mouseleave', hideHeatTip);
+    grid.addEventListener('mouseout', (e) => { if (!e.relatedTarget || !e.relatedTarget.closest('.heat-grid')) hideHeatTip(); });
   }
   async function paintActivity() {
     const card = document.querySelector('#goals-empty .activity-card');
@@ -6710,7 +7333,8 @@ const ShellLayout = (() => {
     view.classList.toggle('is-home', home);
     if (home && empty.querySelector('.activity-card') && !empty.querySelector('.activity-card').childElementCount) paintActivity();
     const tpl = empty && empty.querySelector('.site-tpl');
-    if (home && tpl && !tpl.childElementCount) SiteTemplates.paint(tpl);
+    if (home && tpl && siteMode) { if (!tpl.childElementCount) SiteTemplates.paint(tpl); else tpl.hidden = false; }
+    else if (tpl) tpl.hidden = true;
   }
   new MutationObserver(syncHome).observe(feed, { childList: true });
   syncHome();
@@ -6732,66 +7356,101 @@ const ComposerControls = (() => {
     plan_first: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 5.8v5.4c0 4.4 3 7.9 7 9.3 4-1.4 7-4.9 7-9.3V5.8z"/><path d="m9.3 12 1.9 1.9 3.6-3.7"/></svg>',
     chat: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H8l-4 3v-4.6A7.5 7.5 0 1 1 20 11.5z"/></svg>',
   };
-  const LABEL = { auto: '自动执行', plan_first: '执行前询问', chat: '仅对话' };
-  const pressed = (sel) => {
-    const b = document.querySelector(sel + ' button[aria-pressed="true"]');
-    return b ? (b.dataset.perm || b.dataset.task) : '';
+  const LABEL = {
+    auto: '自动审批',
+    full_access: '完全访问',
+    plan_first: '询问审批',
+    chat: '仅对话',
   };
   function paint() {
-    const task = pressed('#task-seg') || 'work';
-    const perm = pressed('#perm-seg') || 'auto';
-    const key = task === 'chat' ? 'chat' : (perm === 'plan_first' ? 'plan_first' : 'auto');
-    permLabel.textContent = LABEL[key];
-    permIcon.innerHTML = ICON[key];
+    const taskBtn = document.querySelector('#task-seg button[aria-pressed="true"]');
+    const task = taskBtn ? (taskBtn.dataset.task || 'work') : 'work';
+    const permLabelBtn = document.querySelector('#perm-list button[aria-checked="true"]');
+    const perm = permLabelBtn ? (permLabelBtn.dataset.permLabel || 'auto') : currentPermLabel;
+    const key = task === 'chat' ? 'chat' : perm;
+    permLabel.textContent = LABEL[key] || LABEL.auto;
+    permIcon.innerHTML = ICON[key === 'plan_first' ? 'plan_first' : 'auto'];
     permBtn.dataset.mode = key;
-    permBtn.title = key === 'auto' ? '自动执行：仅高风险操作才征求批准（点击切换）'
-      : key === 'plan_first' ? '执行前先给出计划，征求你的批准（点击切换）'
-        : '只聊天，不规划执行（点击切换）';
+    permBtn.title = key === 'plan_first' ? '执行前始终询问（点击切换）'
+      : key === 'full_access' ? '完全访问：高风险操作仍会询问（点击切换）'
+        : '自动审批：仅高风险操作才征求批准（点击切换）';
     const code = task === 'code';
     toggle.querySelectorAll('button[data-mode]').forEach((b) => {
       b.setAttribute('aria-checked', String((b.dataset.mode === 'code') === code));
     });
+    updateModePill();
+  }
+  function updateModePill() {
+    const pill = toggle.querySelector('.mode-toggle-pill');
+    const active = toggle.querySelector('button[aria-checked="true"]');
+    if (!pill || !active) return;
+    const rect = active.getBoundingClientRect();
+    const parent = toggle.getBoundingClientRect();
+    pill.style.left = (rect.left - parent.left) + 'px';
+    pill.style.width = rect.width + 'px';
   }
   const mo = new MutationObserver(paint);
-  ['#task-seg', '#perm-seg'].forEach((sel) => {
+  ['#task-seg', '#perm-list'].forEach((sel) => {
     const n = $(sel);
-    if (n) mo.observe(n, { subtree: true, attributes: true, attributeFilter: ['aria-pressed'] });
+    if (n) mo.observe(n, { subtree: true, attributes: true, attributeFilter: ['aria-pressed', 'aria-checked'] });
   });
   paint();
 
   const setOpen = (open) => {
-    permPop.hidden = !open;
+    if (open) {
+      Popovers.closeOthers('perm');
+      anchorPopover(permPop, permBtn);
+    } else {
+      permPop.hidden = true;
+    }
     permBtn.setAttribute('aria-expanded', String(open));
   };
-  permBtn.addEventListener('click', () => {
-    const open = permPop.hidden;
-    // 让其它输入框弹层先按自己的规矩收起（它们监听 document 点击），再开这一个
-    setTimeout(() => setOpen(open), 0);
-  });
+  Popovers.register('perm', () => setOpen(false));
+  permBtn.addEventListener('click', () => setOpen(permPop.hidden));
   document.addEventListener('click', (e) => {
     if (!permPop.hidden && !e.target.closest('#cp-perm-pop') && !e.target.closest('#cp-perm')) setOpen(false);
-  });
-  ['#cp-model', '#cp-context', '#plus-btn'].forEach((sel) => {
-    const n = $(sel);
-    if (n) n.addEventListener('click', () => setOpen(false), true);
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !permPop.hidden) setOpen(false); });
 
   toggle.addEventListener('click', (e) => {
     const b = e.target.closest('button[data-mode]');
     if (!b) return;
-    const cur = pressed('#task-seg') || 'work';
+    // 注意别用 segValue：它读的是 data-val，而 #task-seg 的按钮用的是 data-task，
+    // 拿回来永远是空串 → 兜底成 'work' → 从「编程」切回「通用」时判定永远不成立。
+    const taskBtn = document.querySelector('#task-seg button[aria-pressed="true"]');
+    const cur = taskBtn ? (taskBtn.dataset.task || 'work') : 'work';
     const want = b.dataset.mode;
     if (want === 'code' && cur !== 'code') document.querySelector('#task-seg button[data-task="code"]').click();
     if (want === 'work' && cur === 'code') document.querySelector('#task-seg button[data-task="work"]').click();
   });
 
   const attach = $('#cp-attach');
-  if (attach) {
+  const attachMenu = $('#attach-menu');
+  if (attach && attachMenu) {
+    const setAttachOpen = (open) => {
+      if (open) {
+        Popovers.closeOthers('attach');
+        anchorPopover(attachMenu, attach);
+      } else {
+        attachMenu.hidden = true;
+      }
+      attach.setAttribute('aria-expanded', String(open));
+    };
+    Popovers.register('attach', () => setAttachOpen(false));
     attach.addEventListener('click', (e) => {
       e.stopPropagation();
-      const item = document.querySelector('#plus-menu button[data-plus="file"]');
-      if (item) item.click();
+      setAttachOpen(attachMenu.hidden);
+    });
+    attachMenu.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-attach]');
+      if (!item) return;
+      const kind = item.dataset.attach;
+      setAttachOpen(false);
+      if (kind === 'file') pickSystemFile();
+      else if (kind === 'folder') pickSystemFolder();
+    });
+    document.addEventListener('click', (e) => {
+      if (!attachMenu.hidden && !e.target.closest('#attach-menu') && !e.target.closest('#cp-attach')) setAttachOpen(false);
     });
   }
   return { paint };
@@ -6810,7 +7469,7 @@ const ComposerControls = (() => {
   loadRoles();
   loadContext(); // 输入区的水位条：首屏就得有数，否则那一格永远停在「—」
   loadCues();    // 候补目标同理：它只在有话说时露出来，首屏不拉就没人知道它存在
-  try { const s = await api('GET', '/api/settings'); if (s.safety && s.safety.mode) _doSetPerm(s.safety.mode, false); syncRuntimeState(s); } catch {}
+  try { const s = await api('GET', '/api/settings'); if (s.safety && s.safety.mode) _doSetPerm(s.safety.mode, s.safety.mode, false); syncRuntimeState(s); } catch {}
   // 现场栏的「定时任务」不等用户打开定时任务视图才有数：这一列的价值就是常驻
   api('GET', '/api/schedules').then((r) => LiveRail.schedules((r.jobs || []).length)).catch(() => {});
   try {

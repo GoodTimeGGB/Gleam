@@ -3,7 +3,6 @@ package webui
 import (
 	"bufio"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -45,7 +44,7 @@ func TestRedactProxy(t *testing.T) {
 func TestGoalDeleteRemovesArchive(t *testing.T) {
 	s, dataDir := newArchiveFixture(t)
 	writeArchive(t, dataDir, "t-del", types.GoalResult{TaskID: "t-del", Goal: "x", Status: types.GoalSuccess, StartedAt: time.Now()})
-	srv := httptest.NewServer(s.Handler())
+	srv := newTokenTestServer(s) // 守卫要口令：走公共测试入口补上，别裸用 s.Handler()
 	defer srv.Close()
 	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/goals/t-del", nil)
 	res, err := http.DefaultClient.Do(req)

@@ -454,11 +454,12 @@ func (a *Agent) BuildPlanner(req types.GoalRequest) *Planner {
 	}
 	pl := &Planner{
 		LLM: a.TierLLM(req.Role), Reg: a.Reg,
-		MaxSteps: a.Cfg.Agent.MaxSteps,
-		Style:    a.Cfg.Persona.Style,
-		TaskMode: string(normalizeTaskMode(req.TaskMode)),
-		Role:     req.Role,
-		TaskID:   taskID,
+		MaxSteps:   a.Cfg.Agent.MaxSteps,
+		Style:      a.Cfg.Persona.Style,
+		TaskMode:   string(normalizeTaskMode(req.TaskMode)),
+		CommitHint: a.Cfg.Git.CommitInstructions,
+		Role:       req.Role,
+		TaskID:     taskID,
 		// 生效档位：规则表据此决定"要不要给这一档换一版规则"（见 rules.go）。
 		// 未配档位时为空，规则一律落到通用版——保守优先，能力未知就不动规则。
 		Tier: a.EffectiveTier(req.Role),
@@ -583,6 +584,21 @@ func (a *Agent) checkBudget(taskID, reason string) bool {
 	}
 	a.grantBudget(taskID)
 	return true
+}
+
+// confirmDeepReview 深度扫描否决后交用户拍板：批准 = 我知道风险，按原计划继续。
+// 没人可问时**放行**：深度扫描是"多一道人工确认"，不是新的硬闸——问不到人就把任务
+// 卡死在一个用户看不见的原因上，比多跑一次更糟。
+func (a *Agent) confirmDeepReview(taskID, reason string) bool {
+	if a == nil || a.Notifier == nil {
+		return true
+	}
+	return a.Notifier.OnApproval(types.ApprovalRequest{
+		TaskID: taskID,
+		Plan:   []string{"按原计划继续执行"},
+		Risk:   "medium",
+		Reason: "深度扫描觉得这段计划有问题：" + reason + "。仍要继续吗？",
+	}).Approved
 }
 
 // reviewer 构造动作审核器：未开启审核或未配辅助模型时返回 nil（不拦截）。
@@ -962,6 +978,18 @@ func (a *Agent) runGoalLoop(ctx context.Context, req types.GoalRequest, goal, mo
 			// 审核模型只在真配了辅助模型时启用：用主模型做快筛等于多花一份钱
 			Reviewer: a.reviewer(),
 		}
+		// 深度扫描：执行前把整段计划交给主模型审一遍。否决就交用户拍板——批了继续，不批就停在这。
+		// 卡在 Execute 之前是有意的：它审的正是"接下来要做什么"，一旦开跑就已经在动了。
+		if a.Cfg.Safety.DeepReview {
+			if ok, reason := a.deepReviewPlan(ctx, taskID, goal, &plan); !ok && !a.confirmDeepReview(taskID, reason) {
+				res := &types.GoalResult{
+					Goal: goal, Status: types.GoalFailed, Score: 0,
+					Error: "深度扫描未通过：" + reason,
+				}
+				a.finalize(taskID, res, &plan, req.Role)
+				return res
+			}
+		}
 		exec := executor.Execute(ctx, plan, taskID, mode, preApproved)
 		if ctx.Err() != nil && exec.Succeeded == 0 {
 			res := &types.GoalResult{Goal: goal, Status: types.GoalCancelled, Score: 0, Error: "任务已取消", Steps: exec.Steps, ExecutedPlan: &exec.ExecutedPlan}
@@ -1171,8 +1199,8 @@ func (a *Agent) finalize(taskID string, result *types.GoalResult, plan *types.Pl
 	// 长期记忆沉淀任务记录（尽力而为）
 	goal := result.Goal
 	if goal != "" && a.Mem != nil && a.Mem.Long != nil {
-		_, err := a.Mem.Remember(fmt.Sprintf("任务记录[%s] 目标：%s 结果：%s（完成度 %d）",
-			result.Status, goal, types.Shorten(result.Summary, 200), result.Score), []string{"task"})
+		_, err := a.Mem.RememberScoped(fmt.Sprintf("任务记录[%s] 目标：%s 结果：%s（完成度 %d）",
+			result.Status, goal, types.Shorten(result.Summary, 200), result.Score), "task", a.MemoryScope(), []string{"task"})
 		if err == nil {
 			_ = a.Mem.Long.Flush()
 		}

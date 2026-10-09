@@ -24,4 +24,8 @@ contextBridge.exposeInMainWorld('gleamDesktop', {
   openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('desktop:openExternal', url),
   capture: (): Promise<string> => ipcRenderer.invoke('desktop:capture'),
   newWindow: (): Promise<void> => ipcRenderer.invoke('desktop:newWindow'),
+  showOpenDialog: (options: Electron.OpenDialogOptions): Promise<string[]> => ipcRenderer.invoke('desktop:showOpenDialog', options),
+  /** 全局唤起快捷键：get() 读当前；set('') 取消。返回 { ok, accelerator, error? } */
+  globalShortcut: (action: 'get' | 'set', accelerator?: string): Promise<{ ok: boolean; accelerator: string; error?: string }> =>
+    ipcRenderer.invoke('desktop:globalShortcut', action, accelerator),
 });

@@ -2,53 +2,11 @@ package webui
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 )
 
-// readStatic 读取内嵌的前端静态资源。
-func readStatic(t *testing.T, name string) string {
-	t.Helper()
-	b, err := staticFS.ReadFile(name)
-	if err != nil {
-		t.Fatalf("读取内嵌静态资源 %s: %v", name, err)
-	}
-	return string(b)
-}
-
-// TestReadinessFrontend_Wired 前端接线必须完整。
-// 路由通了但界面没有入口，用户就看不到这份报告——
-// "后端好了前端漏接"是最容易悄悄上线的一类缺陷。
-func TestReadinessFrontend_Wired(t *testing.T) {
-	html := readStatic(t, "static/index.html")
-	js := readStatic(t, "static/app.js")
-	css := readStatic(t, "static/style.css")
-
-	for _, want := range []string{
-		`data-view="readiness"`,
-		`id="view-readiness"`,
-		`id="readiness-items"`,
-		`id="ready-verdict"`,
-		`id="ready-refresh"`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("index.html 缺少 %s", want)
-		}
-	}
-	if !strings.Contains(js, "readiness: loadReadiness") {
-		t.Error("app.js 未把 readiness 注册进视图加载表，点导航不会触发加载")
-	}
-	for _, want := range []string{"async function loadReadiness", "function renderReadiness", "/api/readiness"} {
-		if !strings.Contains(js, want) {
-			t.Errorf("app.js 缺少 %s", want)
-		}
-	}
-	for _, want := range []string{".readiness-list", ".readiness-item--fail", ".readiness-evidence", ".readiness-fix"} {
-		if !strings.Contains(css, want) {
-			t.Errorf("style.css 缺少 %s", want)
-		}
-	}
-}
+// 注：前端「就绪体检」视图已按产品决定移除（诊断仍在 /api/readiness 后端路由上），
+// 因此这里不再断言界面接线，只保留后端报告本身的测试。
 
 // TestReadinessRoute_ReturnsNineItems 路由返回九个坑的完整体检报告。
 func TestReadinessRoute_ReturnsNineItems(t *testing.T) {

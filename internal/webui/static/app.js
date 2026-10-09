@@ -282,12 +282,18 @@ $('#task-seg').addEventListener('click', (e) => {
   // 对话模式与工作区/权限模式无关：隐藏以聚焦
   $('#ws-chip').hidden = currentTask === 'chat';
   $('#perm-seg').hidden = currentTask === 'chat';
-  goalInput.placeholder = currentTask === 'chat'
+  goalInput.placeholder = composerPlaceholder();
+});
+
+// 输入框占位：会话里统一写「继续当前会话…」，首页按任务档位给例子
+function composerPlaceholder() {
+  if (typeof viewingConvo !== 'undefined' && viewingConvo) return '继续当前会话…';
+  return currentTask === 'chat'
     ? '随便聊点什么…'
     : currentTask === 'code'
       ? '描述要改的代码或要修的问题，例如：修复 smoke.sh 里的编码问题'
-      : '例如：整理当前目录的图片并按日期归档';
-});
+      : '一切从这里开始… 描述任务，或输入 @ 引用';
+}
 
 const goalInput = $('#goal-input');
 goalInput.addEventListener('keydown', (e) => {
@@ -3161,8 +3167,21 @@ const ComposerMeta = (() => {
 
   function paintModelChip() {
     const m = liveModel || (llmCfg && llmCfg.model) || '';
-    modelName.textContent = m ? shorten(m, 18) : '未配模型';
-    modelName.title = m || '还没有可用模型：去设置里选择厂商并填写模型名';
+    const isMock = (llmCfg && llmCfg.provider === 'mock') || PROVIDER === 'mock';
+    modelName.textContent = isMock ? '演示模型' : (m ? shorten(m, 18) : '未配模型');
+    modelName.title = isMock ? '离线演示模型：不发起真实网络调用' : (m || '还没有可用模型：去设置里选择厂商并填写模型名');
+    // 小标签只写本机配置里真有的东西：mock 档，或当前模型恰好是某个档位的模型
+    const tagEl = $('#cp-model-tag');
+    if (tagEl) {
+      let tag = '';
+      if (isMock) tag = 'mock';
+      else if (llmCfg && llmCfg.tiers && m) {
+        const k = Object.keys(llmCfg.tiers).find((key) => llmCfg.tiers[key] === m);
+        if (k) tag = TIER_CN[k] || k;
+      }
+      tagEl.textContent = tag;
+      tagEl.hidden = !tag;
+    }
     modelCur.textContent = m || '未配置';
     const bits = [];
     if (llmCfg && llmCfg.provider) {
@@ -3248,6 +3267,7 @@ const ComposerMeta = (() => {
     if (!ctx || typeof ctx.fill_pct !== 'number') {
       // 字段缺失就是接线断了。宁可空着，也不在前端拿 turns/cap 自己除一个凑数。
       pctEl.textContent = '—';
+      ctxBtn.dataset.ready = 'false';
       meterFill.style.width = '0%';
       delete meterFill.dataset.level;
       badge.hidden = true;
@@ -3255,6 +3275,7 @@ const ComposerMeta = (() => {
       return;
     }
     const pct = ctx.fill_pct;
+    ctxBtn.dataset.ready = 'true';
     meterFill.style.width = pct + '%';
     meterFill.dataset.level = pct >= 90 ? 'high' : pct >= 60 ? 'warn' : 'fresh';
     pctEl.textContent = pct + '%';
@@ -4058,6 +4079,7 @@ function setThreadMode(on) {
   viewingConvo = on;
   const sec = $('#view-goals');
   sec.classList.toggle('thread-mode', on);
+  goalInput.placeholder = composerPlaceholder();
   $('#goal-filters').parentElement.style.display = on ? 'none' : '';
   document.querySelector('.command-deck').style.display = on ? 'none' : '';
   document.querySelector('.quick-launch').style.display = on ? 'none' : '';
@@ -4067,7 +4089,7 @@ function setThreadMode(on) {
 }
 
 // 首页 / 空任务的插图位：Gleam 自己的折线标记，与 index.html 里的静态版保持一致
-const HERO_ART = `<div class="hero-art" aria-hidden="true"><svg viewBox="0 0 96 96" width="96" height="96" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="18" width="60" height="60" rx="18" stroke-width="1.6" opacity=".35"/><path d="M55 32 39 48l16 16" stroke-width="4"/><path d="M70 16v6M67 19h6M24 74v4M22 76h4" stroke-width="1.6" opacity=".55"/></svg></div>`;
+const HERO_ART = `<div class="hero-art" aria-hidden="true"><svg viewBox="0 0 96 96" width="96" height="96" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="18" width="60" height="60" rx="18" stroke-width="1.6" opacity=".35"/><g stroke-width="3"><circle cx="48" cy="48" r="7"/><path d="M48 30v6M48 60v6M30 48h6M60 48h6M35.3 35.3l4.2 4.2M56.5 56.5l4.2 4.2M35.3 60.7l4.2-4.2M56.5 39.5l4.2-4.2"/></g></svg></div>`;
 
 function resetFeedToEmpty(title, desc, opts = {}) {
   const feed = $('#goal-feed');
@@ -4823,7 +4845,7 @@ const I18N_EN = {
   '本周完成': 'Done this week', '条记忆': 'memories', '整理工作区': 'Tidy workspace', '项目复盘': 'Project review', '快速研究': 'Quick research',
   '文件归档 · 生成索引': 'Archive files · build index', '进度分析 · 风险提醒': 'Progress · risks', '阅读文档 · 输出简报': 'Read docs · brief',
   '从一个小目标开始': 'Start with a small goal', '可以直接开口说了': 'Go ahead and say it',
-  '模式': 'Mode', '权限': 'Access', '对话': 'Chat', '工作': 'Work', '编程': 'Code', '批准': 'Approve', '全自动': 'Auto',
+  '模式': 'Mode', '权限': 'Access', '对话': 'Chat', '工作': 'Work', '编程': 'Code', '批准': 'Approve', '全自动': 'Auto', '执行前询问': 'Ask first', '自动执行': 'Auto-run', '仅对话': 'Chat only', '通用': 'General', '执行权限': 'Access', '任务档位': 'Task mode', '专家角色': 'Expert role', '演示模型': 'Demo model', '本机': 'Local', '继续当前会话…': 'Continue this chat…', '执行方式': 'Run mode', '工作模式': 'Work mode', '添加文件': 'Add file',
   'Enter 发送 · Shift+Enter 换行': 'Enter to send · Shift+Enter for newline',
   '一切从这里开始… 描述任务，或输入 @ 引用': 'Start here… describe a task, or type @ to reference',
   '添加文件': 'Add file', '添加文件夹': 'Add folder', '添加目标': 'Add goal', '计划模式': 'Plan mode', '添加插件': 'Add plugin', '@ 引用': '@ mention', '浏览器预览': 'Browser preview',
@@ -6272,6 +6294,86 @@ const ShellLayout = (() => {
   new MutationObserver(syncHome).observe(feed, { childList: true });
   syncHome();
   return { paintActivity, syncHome };
+})();
+
+/* ---------- 输入框工具条：执行方式下拉 + 侧栏模式切换 + 附件 ----------
+ * 下拉和侧栏开关都不存状态：真实状态仍在 #perm-seg / #task-seg 的 aria-pressed 上，
+ * 这里只读它们来画按钮，改动也一律转成对那两组按钮的点击（同一条保存路径）。 */
+const ComposerControls = (() => {
+  const permBtn = $('#cp-perm');
+  const permPop = $('#cp-perm-pop');
+  const permLabel = $('#cp-perm-label');
+  const permIcon = $('#cp-perm-icon');
+  const toggle = $('#mode-toggle');
+  if (!permBtn || !permPop || !toggle) return {};
+  const ICON = {
+    auto: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.8v6.4l5-3.2z"/></svg>',
+    plan_first: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 5.8v5.4c0 4.4 3 7.9 7 9.3 4-1.4 7-4.9 7-9.3V5.8z"/><path d="m9.3 12 1.9 1.9 3.6-3.7"/></svg>',
+    chat: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H8l-4 3v-4.6A7.5 7.5 0 1 1 20 11.5z"/></svg>',
+  };
+  const LABEL = { auto: '自动执行', plan_first: '执行前询问', chat: '仅对话' };
+  const pressed = (sel) => {
+    const b = document.querySelector(sel + ' button[aria-pressed="true"]');
+    return b ? (b.dataset.perm || b.dataset.task) : '';
+  };
+  function paint() {
+    const task = pressed('#task-seg') || 'work';
+    const perm = pressed('#perm-seg') || 'auto';
+    const key = task === 'chat' ? 'chat' : (perm === 'plan_first' ? 'plan_first' : 'auto');
+    permLabel.textContent = LABEL[key];
+    permIcon.innerHTML = ICON[key];
+    permBtn.dataset.mode = key;
+    permBtn.title = key === 'auto' ? '自动执行：仅高风险操作才征求批准（点击切换）'
+      : key === 'plan_first' ? '执行前先给出计划，征求你的批准（点击切换）'
+        : '只聊天，不规划执行（点击切换）';
+    const code = task === 'code';
+    toggle.querySelectorAll('button[data-mode]').forEach((b) => {
+      b.setAttribute('aria-checked', String((b.dataset.mode === 'code') === code));
+    });
+  }
+  const mo = new MutationObserver(paint);
+  ['#task-seg', '#perm-seg'].forEach((sel) => {
+    const n = $(sel);
+    if (n) mo.observe(n, { subtree: true, attributes: true, attributeFilter: ['aria-pressed'] });
+  });
+  paint();
+
+  const setOpen = (open) => {
+    permPop.hidden = !open;
+    permBtn.setAttribute('aria-expanded', String(open));
+  };
+  permBtn.addEventListener('click', () => {
+    const open = permPop.hidden;
+    // 让其它输入框弹层先按自己的规矩收起（它们监听 document 点击），再开这一个
+    setTimeout(() => setOpen(open), 0);
+  });
+  document.addEventListener('click', (e) => {
+    if (!permPop.hidden && !e.target.closest('#cp-perm-pop') && !e.target.closest('#cp-perm')) setOpen(false);
+  });
+  ['#cp-model', '#cp-context', '#plus-btn'].forEach((sel) => {
+    const n = $(sel);
+    if (n) n.addEventListener('click', () => setOpen(false), true);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !permPop.hidden) setOpen(false); });
+
+  toggle.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-mode]');
+    if (!b) return;
+    const cur = pressed('#task-seg') || 'work';
+    const want = b.dataset.mode;
+    if (want === 'code' && cur !== 'code') document.querySelector('#task-seg button[data-task="code"]').click();
+    if (want === 'work' && cur === 'code') document.querySelector('#task-seg button[data-task="work"]').click();
+  });
+
+  const attach = $('#cp-attach');
+  if (attach) {
+    attach.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = document.querySelector('#plus-menu button[data-plus="file"]');
+      if (item) item.click();
+    });
+  }
+  return { paint };
 })();
 
 /* ---------- 启动（必须是本文件的最后一段，判据见 scripts/check-app-startup.py） ---------- */

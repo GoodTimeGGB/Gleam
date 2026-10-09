@@ -3935,3 +3935,158 @@ html[data-theme] .sidebar .sidebar-top .convo-new:hover { background: var(--hove
 #view-goals:not(.is-home):not(.thread-mode) > .composer { position: sticky; bottom: 40px; z-index: 4; }
 #view-goals:not(.is-home):not(.thread-mode) > .composer-foot { position: sticky; bottom: 10px; z-index: 4; background: var(--panel); border-radius: 6px; }
 #view-goals:not(.is-home) .chat-header .workbench-bar { margin-top: 4px; }
+
+/* ===================================================================
+ * v6：输入框 / 侧栏模式开关 精修（按 981×213 输入框特写与会话内输入框量出）
+ * 卡片 768×120、圆角 16；上 77 文本区，下 41 工具条（首页虚线、会话内实线）；
+ * 工具条按钮 28px，左右内边距 6；卡片外一行 22px 页脚，上距 10。
+ * =================================================================== */
+html[data-theme] .composer, html[data-theme] .card--glass.composer {
+  position: relative; min-height: 120px; border-radius: 16px;
+  border: 1px solid var(--surface-line); background: var(--surface); box-shadow: none;
+}
+html[data-theme] .composer:focus-within { border-color: rgba(var(--accent-rgb) / 0.45); box-shadow: none; }
+/* 顶部居中的小把手：94×6，压在上边框上 */
+.composer::before {
+  content: ""; position: absolute; left: 50%; top: -3px; width: 94px; height: 6px; margin-left: -47px;
+  box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--surface-line) 70%, var(--surface));
+  border-radius: 4px; background: var(--surface); pointer-events: none;
+}
+#view-goals.thread-mode .composer::before { display: none; }
+/* 聚焦只给整张卡描边：文本框自身不画框、不画底、不画环 */
+html[data-theme] .composer .composer-input,
+html[data-theme] .composer .composer-input:focus,
+html[data-theme] .composer .composer-input:focus-visible {
+  outline: none; box-shadow: none; border: none; background: transparent; border-radius: 0;
+}
+html[data-theme] .composer .composer-input {
+  flex: 1; min-height: 76px; margin: 0; padding: 15px 13px 6px;
+  font-size: 14px; line-height: 20px; color: var(--color-fg);
+}
+.composer .composer-input::placeholder { color: var(--color-fg-faint); opacity: 1; }
+html[data-theme] .composer .composer-bar {
+  height: 41px; box-sizing: border-box; margin: 0; padding: 0 6px; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap;
+  border-top: 1px dashed color-mix(in srgb, var(--surface-line) 55%, var(--surface));
+  background: none;
+}
+#view-goals.thread-mode .composer .composer-bar { border-top-style: solid; }
+.composer .composer-left { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: visible; }
+.composer .composer-right { display: flex; align-items: center; gap: 9px; min-width: 0; }
+html[data-theme] .composer #plus-btn {
+  width: 28px; height: 28px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--surface-line); background: var(--surface); color: var(--color-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.composer #plus-btn svg { width: 16px; height: 16px; }
+html[data-theme] .composer #plus-btn:hover { background: var(--hover); }
+.cp-icon-btn {
+  width: 28px; height: 28px; padding: 0; display: grid; place-items: center; flex: none;
+  border: none; border-radius: 8px; background: transparent; color: var(--color-fg); cursor: pointer;
+}
+.cp-icon-btn:hover { background: var(--hover); }
+html[data-theme] .composer .composer-meta-btn {
+  height: 28px; min-height: 28px; padding: 0 8px; gap: 6px; border-radius: 8px;
+  border: 1px solid transparent; background: transparent;
+  font-size: 13px; line-height: 18px; color: var(--color-fg-muted);
+}
+html[data-theme] .composer .composer-meta-btn:hover { background: var(--hover); color: var(--color-fg); }
+html[data-theme] .composer .composer-meta-btn[aria-expanded="true"] { background: var(--hover); color: var(--color-fg); border-color: transparent; }
+.composer .cp-perm { margin-left: 3px; }
+.cp-perm-icon { display: inline-grid; place-items: center; width: 14px; height: 14px; }
+.cp-perm[data-mode="plan_first"] .cp-perm-icon { color: var(--color-accent); }
+.composer #cp-model .cp-model-icon { color: var(--color-accent); }
+#cp-model-name { max-width: 18ch; color: var(--color-fg); }
+.cp-model-tag { font-size: 12px; color: var(--color-fg-faint); }
+.cp-model-tag[hidden] { display: none; }
+.composer .cp-caret { opacity: 0.75; }
+html[data-theme] .composer .send-btn {
+  width: 28px; height: 28px; min-width: 28px; padding: 0; border-radius: 8px; border: none;
+  display: grid; place-items: center; box-shadow: none;
+  background: var(--color-accent); color: var(--color-on-accent);
+}
+html[data-theme] .composer .send-btn svg { width: 15px; height: 15px; }
+html[data-theme] #view-goals.thread-mode .composer .send-btn { border-radius: 50%; }
+/* 执行方式下拉：贴在卡片左上方 */
+.composer .cp-perm-pop { left: 6px; right: auto; width: 280px; }
+.cp-perm-pop .segmented { display: flex; width: auto; margin: 0 6px 8px; }
+.cp-perm-pop .segmented button { flex: 1; justify-content: center; }
+.cp-perm-pop .segmented[hidden] { display: none; }
+.cp-perm-pop .role-select { display: block; width: calc(100% - 12px); margin: 0 6px 6px; }
+/* 页脚行：卡片外，文件夹 · 本机 · 上下文水位 */
+.view-chat > .composer-foot-row {
+  width: calc(100% - 32px); max-width: var(--home-w); margin: 10px auto 0; box-sizing: border-box;
+  height: 22px; padding: 0 0 0 5px; display: flex; align-items: center; gap: 13px; flex: none;
+}
+html[data-theme] .composer-foot-row .composer-foot {
+  width: auto; max-width: 50%; margin: 0; padding: 0; height: 22px; gap: 8px;
+  font-size: 13px; color: var(--color-fg-muted); overflow: hidden;
+}
+.composer-foot-row .composer-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foot-chip { display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--color-fg-muted); white-space: nowrap; }
+#view-goals.thread-mode .foot-local { display: inline-flex; }
+.foot-spacer { flex: 1; }
+/* 水位：只在会话里、且后端给了真实 fill_pct 时出现 */
+html[data-theme] .composer-foot-row #cp-context { display: none; height: 22px; min-height: 22px; padding: 0 2px; gap: 6px; background: none; border: none; font-size: 12px; color: var(--color-fg-muted); }
+html[data-theme] #view-goals.thread-mode .composer-foot-row #cp-context[data-ready="true"] { display: inline-flex; }
+.composer-foot-row .cp-meter {
+  width: 48px; height: 4px; border-radius: 0; background: var(--line);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 6px);
+  mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 6px);
+}
+.composer-foot-row .cp-meter-fill { border-radius: 0; }
+.composer-foot-row #cp-context-pct { font-family: inherit; }
+.composer #cp-context-pop { right: 6px; }
+#view-goals:not(.is-home):not(.thread-mode) > .composer-foot-row { position: sticky; bottom: 10px; z-index: 4; background: var(--panel); border-radius: 6px; }
+
+/* 侧栏顶：编程 / 通用 两段开关（替代品牌胶囊；品牌移到顶栏） */
+.sidebar .sidebar-head { padding: 0 12px; height: 32px; display: flex; align-items: center; }
+.mode-toggle {
+  display: inline-flex; align-items: center; height: 24px; padding: 0; box-sizing: border-box;
+  border-radius: 12px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--hover) 70%, transparent);
+  -webkit-app-region: no-drag; app-region: no-drag;
+}
+.mode-toggle button {
+  height: 24px; margin: -1px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 9px; border-radius: 12px; border: 1px solid transparent; background: transparent;
+  font: inherit; font-size: 12px; line-height: 16px; color: var(--color-fg-muted); cursor: pointer;
+}
+.mode-toggle button[aria-checked="false"] { width: 30px; padding: 0; }
+.mode-toggle button[aria-checked="false"] .mode-label { display: none; }
+.mode-toggle button[aria-checked="false"]:hover { color: var(--color-fg); }
+.mode-toggle button[aria-checked="true"] {
+  border-color: rgba(var(--accent-rgb) / 0.38); background: rgba(var(--accent-rgb) / 0.08);
+  color: var(--color-accent); font-weight: 500;
+}
+.mode-toggle svg { flex: none; }
+.topbar-brand {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: 6px;
+  font-size: 13px; font-weight: 600; color: var(--color-fg);
+}
+.topbar-brand svg { color: var(--color-accent); }
+
+/* 顶栏右侧只留工作区胶囊和现场栏开关 */
+#new-chat-btn[hidden] { display: none !important; }
+
+/* Toast：移到右下角，不再压住顶栏 */
+.toast-region { top: auto; bottom: 16px; right: 16px; }
+
+/* 用户气泡：浅色淡染，而不是实心深色 */
+html[data-theme] .msg--user .msg-body {
+  background: rgba(var(--accent-rgb) / 0.10); color: var(--color-fg);
+  border: 1px solid rgba(var(--accent-rgb) / 0.16); box-shadow: none;
+}
+/* v6 微调：按首轮叠图回量 */
+.view-chat > .composer-foot-row { margin-top: 8px; padding-left: 4px; }
+html[data-theme] .composer-foot-row .composer-foot { gap: 7px; }
+html[data-theme] .composer .composer-input { min-height: 75px; font-size: 13px; }
+html[data-theme] .composer .composer-bar { height: 42px; }
+.composer .composer-input::placeholder { color: color-mix(in srgb, var(--color-fg-faint) 72%, var(--surface)); }
+html[data-theme] .composer #plus-btn { min-width: 28px; max-width: 28px; flex: none; margin: 0; }
+.composer:focus-within::before { border-color: rgba(var(--accent-rgb) / 0.45); }
+.mode-toggle button { font-size: 11px; gap: 7px; padding: 0 7px 0 9px; }
+.mode-toggle button[aria-checked="false"] { width: 28px; }
+.mode-toggle button[aria-checked="true"] { border-color: rgba(var(--accent-rgb) / 0.30); color: color-mix(in srgb, var(--color-accent) 82%, var(--color-fg)); }
+html[data-theme] .composer .composer-meta-btn.cp-perm { color: var(--color-fg); }
+html[data-rail="folded"] .app > .rail { display: none !important; }

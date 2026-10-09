@@ -1,6 +1,6 @@
 # Gleam（微光）
 
-Read this in other languages: [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
+Read this in other languages: [English](README.en.md) · [简体中文](README.md) · [日本語](README.ja.md)
 
 **ローカルファーストなデスクトップ AI エージェント——仕事を見据え、あなたに寄り添う。**
 
@@ -194,6 +194,7 @@ Windows 向け: `scripts/install.ps1`。
 | `~/.gleam/schedules.json` | スケジューラ状態 |
 | `~/.gleam/audit.jsonl` | 安全 / 送信監査 |
 | `~/.gleam/browser-profile/` | デスクトップ埋め込みブラウザプロファイル |
+| `~/.gleam/webui.token` | 起動ごとに生成される Web UI API トークン（0600）。すべての Web UI API リクエストは `X-Gleam-Token` ヘッダーで送る必要があり、アプリ内 UI は自動で付与します。`GLEAM_WEBUI_TOKEN` で事前指定可 |
 
 API キーは YAML に書かず、環境変数 `GLEAM_API_KEY` で渡すことを推奨します。
 

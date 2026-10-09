@@ -79,7 +79,7 @@ func newFixture(t *testing.T, scripts []llm.Scripted) *fixture {
 		a.Convos = convo
 	}
 	srv := NewServer(a)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	t.Cleanup(ts.Close)
 
 	return &fixture{t: t, ts: ts, agent: a, srv: srv, ws: ws, mock: m, dataDir: dataDir}

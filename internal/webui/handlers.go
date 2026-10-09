@@ -25,19 +25,26 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-// Handler 返回完整的 HTTP 路由（含内嵌静态前端）。
+// Handler 返回完整的 HTTP 路由（含内嵌静态前端），外面包着本机 API 守卫（guard.go）。
+// 宿主只应该用这个入口：守卫不是可选项。
 func (s *Server) Handler() http.Handler {
+	return s.guard(s.routes())
+}
+
+// routes 未加守卫的路由表。只在本包内组装 Handler 时使用。
+func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// 静态前端
 	sub, _ := fs.Sub(staticFS, "static")
 	fileServer := http.FileServer(http.FS(sub))
+	// 首页不走 FileServer：要在 <head> 里注入本次启动的 API 口令（见 guard.go serveIndex）。
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		fileServer.ServeHTTP(w, r)
+		s.serveIndex(w, r)
 	})
 	mux.Handle("GET /assets/", noCache(http.StripPrefix("/assets/", fileServer)))
 
@@ -109,6 +116,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings", s.handleSettingsSave)
 	mux.HandleFunc("POST /api/llm/test", s.handleLLMTest)
 	mux.HandleFunc("POST /api/llm/models", s.handleLLMModels)
+	mux.HandleFunc("GET /api/ssh/hosts", s.handleSSHHosts)
+	mux.HandleFunc("DELETE /api/goals/{id}", s.handleGoalDelete)
+	mux.HandleFunc("GET /api/network", s.handleNetworkInfo)
 	mux.HandleFunc("GET /api/context", s.handleContextGet)
 	mux.HandleFunc("POST /api/context/compress", s.handleContextCompress)
 	mux.HandleFunc("POST /api/context/clear", s.handleContextClear)

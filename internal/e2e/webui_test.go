@@ -52,6 +52,8 @@ func TestE2E_WebUI(t *testing.T) {
 
 	cmd := exec.Command(bin, "webui", "--mock-llm", "--mock-script", script, "--workspace", ws,
 		"--data-dir", dataDir, "--addr", fmt.Sprintf("127.0.0.1:%d", port))
+	// 清掉可能从外部继承的预置口令：这里要测「随机口令 + 口令文件」这条默认路径。
+	cmd.Env = append(os.Environ(), "GLEAM_WEBUI_TOKEN=")
 	stderr := &strings.Builder{}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
@@ -77,6 +79,18 @@ func TestE2E_WebUI(t *testing.T) {
 	if !ready {
 		t.Fatalf("Web UI 未就绪: %s", stderr.String())
 	}
+
+	// /api 要口令：没带的请求必须被拒；脚本与 CLI 的拿法是读数据目录里的口令文件。
+	if resp, err := client.Get(base + "/api/info"); err != nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("无口令 GET /api/info 应为 401: %v %v", err, resp)
+	} else {
+		resp.Body.Close()
+	}
+	raw, err := os.ReadFile(filepath.Join(dataDir, "webui.token"))
+	if err != nil {
+		t.Fatalf("读口令文件失败: %v", err)
+	}
+	client.Transport = tokenTransport{token: strings.TrimSpace(string(raw))}
 
 	call := func(method, path string, body any) map[string]any {
 		var rd *strings.Reader
@@ -168,4 +182,13 @@ func waitDone(t *testing.T, client *http.Client, base, taskID, want string, time
 	}
 	t.Fatalf("等待任务 %s 状态 %s 超时", taskID, want)
 	return nil
+}
+
+// tokenTransport 给每个请求补上本次启动的 API 口令（与脚本读口令文件后的做法一致）。
+type tokenTransport struct{ token string }
+
+func (t tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("X-Gleam-Token", t.token)
+	return http.DefaultTransport.RoundTrip(r)
 }

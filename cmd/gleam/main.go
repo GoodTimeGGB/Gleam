@@ -74,6 +74,9 @@ func main() {
 		err = cmdServe(args)
 	case "webui":
 		err = cmdWebUI(args)
+	case "desktop-sidecar":
+		// 隐藏子命令：给 Electron 桌面壳用，不列进 help
+		err = cmdDesktopSidecar(args)
 	case "goal":
 		err = cmdGoal(args)
 	case "tools":

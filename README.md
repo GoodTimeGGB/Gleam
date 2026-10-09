@@ -1,8 +1,8 @@
-# Gleam (微光)
+# Gleam（微光）
 
-Read this in other languages: [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
+其他语言：[简体中文](README.md) · [English](README.en.md) · [日本語](README.ja.md)
 
-**A local-first desktop AI agent — eyes on the work, mind on you.**
+**本地优先的桌面 AI 智能体——眼里有活，心里有你。**
 
 <p align="center">
   <a href="https://github.com/gleam-ai/Gleam/releases"><img src="https://img.shields.io/github/v/release/gleam-ai/Gleam?label=version&color=blue" alt="Release"></a>
@@ -13,29 +13,29 @@ Read this in other languages: [English](README.md) · [简体中文](README.zh-C
 </p>
 
 <p align="center">
-  You decide. Gleam executes.
+  你负责做决定，具体执行交给我。
 </p>
 
-Gleam is neither a chat box nor a dumb task runner. It is a **desktop agent with memory, judgment, and the ability to drive work forward**. Built from scratch in Go with **zero third-party Go dependencies**, it ships as a single binary of about **10 MB**.
+Gleam 不是聊天机器人，也不是任务执行器，而是一个**有记忆、有判断、能主动推进工作**的桌面智能体。基于 Go 从零自研，**零第三方 Go 依赖**，单文件二进制约 **10MB**。
 
-**Local-first** means conversations, memory, task state, and audit logs stay on your machine by default. It does **not** mean an offline LLM: when you connect a real model, Gleam calls the API endpoints you configure. Mock mode can run without network. See [Local-first honesty](#local-first-honesty) below.
+**本地优先**指对话、记忆、任务状态与审计默认落在本机。这**不等于**离线大模型：接入真实 LLM 时仍会向你配置的厂商 API 出网；Mock 模式可不联网体验。详见下方[关于「本地优先」](#关于本地优先)。
 
 ---
 
-## Preview
+## 预览
 
 <p align="center">
-  <img src="artifacts/gleam-desktop-01.png" alt="Gleam desktop" width="90%">
+  <img src="artifacts/gleam-desktop-01.png" alt="Gleam 桌面端" width="90%">
 </p>
 
 <p align="center">
-  <img src="artifacts/settings-tab-llm-2026-09-09T06-00-49-346Z.png" alt="Model settings" width="45%">
-  <img src="artifacts/settings-tab-engine-2026-09-09T06-01-00-565Z.png" alt="Engine settings" width="45%">
+  <img src="artifacts/settings-tab-llm-2026-09-09T06-00-49-346Z.png" alt="模型设置" width="45%">
+  <img src="artifacts/settings-tab-engine-2026-09-09T06-01-00-565Z.png" alt="引擎设置" width="45%">
 </p>
 
 ---
 
-## Star history
+## Star 趋势
 
 <p align="center">
   <a href="https://star-history.com/#gleam-ai/Gleam&Date">
@@ -45,194 +45,217 @@ Gleam is neither a chat box nor a dumb task runner. It is a **desktop agent with
 
 ---
 
-## Product overview
+## 产品概览
 
-| Topic | Detail |
+| 主题 | 说明 |
 | :--- | :--- |
-| **What it is** | Local-first desktop AI agent for file organization, task planning, scheduled work, and tool-driven automation |
-| **What it is not** | A hosted SaaS chat product, a cloud RAG platform, or a fully offline LLM |
-| **Binary** | Single file ~10 MB, pure Go (no cgo), cross-compiled for multiple platforms |
-| **Extensibility** | 23 built-in tools + MCP servers for hot-plugged external tools |
-| **Interfaces** | Desktop app, CLI (`goal` / `doctor` / …), Web UI, JSON-RPC over stdio (editor plugins) |
+| **是什么** | 本地优先的桌面 AI 智能体：文件整理、任务规划、定时执行与工具驱动自动化 |
+| **不是什么** | 托管 SaaS 聊天产品、云端 RAG 平台，或「完全离线大模型」 |
+| **二进制** | 单文件 ~10MB，纯 Go（无 cgo），多平台交叉编译 |
+| **扩展** | 内置 23 种工具 + MCP 热插拔外部工具 |
+| **接入面** | 桌面端、CLI（`goal` / `doctor` 等）、Web UI、JSON-RPC over stdio（编辑器插件） |
 
 ---
 
-## Features
+## 核心功能
 
-### Autonomous task engine
+### 自主任务引擎
 
-Plan → Execute → Reflect loop with DAG-aware concurrent steps, 0–100 completion scoring, and automatic re-planning when scores stay low.
+Plan → Execute → Reflect 三阶段循环，DAG 依赖并发执行，0–100 完成度评分，低分自动重规划。
 
-### Three task modes
+### 三种任务模式
 
-| Mode | Use when |
+| 模式 | 场景 |
 | :--- | :--- |
-| **Chat** | Fast Q&A straight to the LLM (no plan/execute loop) |
-| **Work** | Full Plan-Execute-Reflect pipeline |
-| **Code** | Minimal diffs plus build verification |
+| **对话** | 直连 LLM 快速问答，不经规划/执行 |
+| **工作** | 全流程 Plan-Execute-Reflect |
+| **编程** | 最小 diff + 构建验证 |
 
-### Three-layer memory
+### 三层记忆
 
-- **Short-term:** recent conversation buffer (default ~20 turns)
-- **Working:** task results on disk, reusable across sessions
-- **Long-term:** in-house lexical index (Chinese bigrams + FNV + cosine), JSON persistence, no third-party vector DB
+- **短期**：最近约 20 轮对话缓冲
+- **工作**：任务结果落盘，跨会话可用
+- **长期**：自研词法索引（中文双字组 + FNV + 余弦），JSON 持久化，无第三方向量库
 
-### Safety gating
+### 安全门控
 
-Modes `auto` / `plan_first` / `interactive`. Per-tool permissions (read-only / need approval / full access). High-risk actions show a plan and wait for confirmation. Full audit trail on disk.
+三种安全模式（`auto` / `plan_first` / `interactive`），每个工具可独立设置只读放行 / 需批准 / 完全访问，高风险操作执行前展示计划请求确认，全量审计落盘。
 
-### Model providers
+### 模型接入
 
-Presets for nine vendor entry points (Zhipu GLM, DeepSeek, Kimi, Tongyi, Volcengine Ark, MiniMax, OpenAI, Anthropic, OpenRouter). Supports token / coding / agent package styles where applicable.
+9 家厂商官方入口预设（智谱 GLM / DeepSeek / Kimi / 通义 / 火山方舟 / MiniMax / OpenAI / Anthropic / OpenRouter），支持 Token 按量 / Coding 编程 / Agent 智能体等套餐形态一键切换。
 
-### Skills, personas, and more
+### 技能、角色与更多
 
-- **Skills:** execute → harden → reuse, YAML-versioned, success-rate tracking
-- **Personas:** seven scene templates (general, analyst, creator, engineer, PM, researcher, ops)
-- Context compaction, goal mode with live progress, MCP + skill marketplace hooks
-- GEO post-creation citation checks, growth log, cost dashboard, task budgets, loop detection
-- Change list + pre-write restore; egress logging (hostname + bytes only, never payload content)
+- **技能系统**：执行 → 固化 → 一键复用，YAML 版本化，成功率统计
+- **专家角色**：7 个预置场景模板（通用 / 数据分析师 / 内容创作者 / 开发工程师 / 项目经理 / 研究员 / 运维专家）
+- 上下文自动压缩、目标模式实时进度、MCP + 技能市场入口
+- GEO 生成式引擎优化评估、成长日志、消耗看板、任务预算熔断、防打转检测
+- 改动清单与写前还原；出网留痕（只记主机名与字节量，绝不记内容）
 
 ---
 
-## Architecture (brief)
+## 架构（简述）
 
 ```
-cmd/gleam/              Entry points (app / serve / goal / webui / eval / doctor …)
+cmd/gleam/              主入口（app / serve / goal / webui / eval / doctor ...）
 internal/
-  agent/                Autonomous engine: planner → executor → reflector
+  agent/                自主任务引擎：planner → executor → reflector
   harness/
-    registry/           Tool registry (hot register / replace / unregister)
-    memory/             Three-layer memory + context compaction
-    safety/             Safety gate + full audit log
-    scheduler/          Cron, interval, file watch, HTTP callbacks
-    skill/              Skill harden / version / reuse
-  tools/                File / shell / web / desktop / MCP client
-  llm/                  OpenAI Chat · OpenAI Responses · Anthropic Messages (SSE)
+    registry/           工具注册表（热注册/替换/注销）
+    memory/             三层记忆 + 上下文自动压缩
+    safety/             安全门控 + 全量审计落盘
+    scheduler/          Cron + 固定间隔 + 文件监听 + HTTP 回调
+    skill/              技能固化/版本化/复用
+  tools/                文件 / shell / web / 桌面集成 / MCP 客户端
+  llm/                  三协议客户端（OpenAI Chat / Responses / Anthropic）
   server/               JSON-RPC 2.0 over stdio
-  webui/                HTTP REST + SSE + embedded frontend
-  eval/                 Prompt and behavior regression evals
-pkg/types/              Cross-layer types
+  webui/                HTTP REST + SSE + 内嵌前端
+  eval/                 提示词与行为回归评测
+pkg/types/              跨层类型
 ```
 
-**Stack notes:** Go 1.22+ with `go.mod` limited to the standard library; JSON-RPC (stdio) and HTTP REST + SSE for Web UI; embedded SPA via `go:embed`; self-written YAML subset parser with hot-reload settings overlay.
+**技术栈要点：** Go 1.22+，`go.mod` 仅标准库；JSON-RPC（stdio）与 HTTP REST + SSE；`go:embed` 内嵌前端；自研 YAML 子集解析，设置覆盖层保存即热生效。
 
 ---
 
-## Platforms
+## 平台说明
 
-| Platform | Current shape |
+| 平台 | 当前形态 |
 | :--- | :--- |
-| **Windows** | Primary desktop experience: tray, single instance, embedded window (`gleam app` / Desktop package) |
-| **macOS / Linux** | Browser / service fallback today: `gleam app` opens the system browser when tray is unavailable; or run `gleam webui` for the service only |
+| **Windows** | 桌面端为主：托盘常驻、单实例、内嵌窗口（`gleam app` / Desktop 包） |
+| **macOS / Linux** | 暂以浏览器 / 服务模式为主：`gleam app` 在无托盘实现时回退为打开系统默认浏览器；也可用 `gleam webui` 只起服务 |
 
-Binaries are not code-signed or Apple-notarized yet. On first run, Windows SmartScreen or macOS Gatekeeper may warn — use “More info → Run anyway” or clear quarantine (`xattr`) as documented on the [website download section](http://gleam.wangjn.top/#download).
+二进制尚未做代码签名与 Apple 公证。首次运行可能被 Windows SmartScreen 或 macOS Gatekeeper 拦截——按官网[下载区](http://gleam.wangjn.top/#download)说明放行或清除隔离属性（`xattr`）。
 
 ---
 
-## Install and run
+## 1.1.1 新增
 
-### Download
+- **应用菜单栏**：文件 / 编辑 / 视图 / 帮助，悬停切换、键盘可操作；桌面端经 preload IPC 落到真实窗口动作，浏览器里自动隐藏做不到的项。
+- **终端面板**（Ctrl+J）：在当前工作区里逐条执行命令，每条命令都经过安全门控；**右侧栏**（Ctrl+Shift+B）：工作区文件、内置浏览器、终端入口。
+- **问题反馈**（Ctrl+Alt+F）：可附截图，先存本机，配置了远端才上送。
+- **可编辑快捷键**：搜索、录制、冲突检测、一键恢复默认。
+- **设置 v2**：整页分组导航（个人 / 集成 / 编程 / 归档管理 / 其他）；模型页可添加 / 编辑模型并做真实连通校验，密钥从不回显；
+  SSH 主机从 `~/.ssh/config` 只读取 Host 名称；已归档任务可删除；网络页做连接检测并显示代理来源。Gleam 还没有的能力标为「暂不支持」。
 
-Get platform binaries from [Releases](https://github.com/gleam-ai/Gleam/releases).
+---
 
-### Run
+## 安全：本地 API 口令
+
+- Web UI 只监听回环地址（默认 `127.0.0.1`），并校验 Host / Origin。
+- 每次启动生成一枚 API 口令，写入 `~/.gleam/webui.token`（权限 0600）。所有 `/api/*` 请求都要在 `X-Gleam-Token` 头里带上它；应用内界面会自动携带。
+- 脚本或 CI 调用（例如钩子 `POST /api/hooks/<名称>`）时读取该文件：
+  `curl -H "X-Gleam-Token: $(cat ~/.gleam/webui.token)" -X POST http://127.0.0.1:8787/api/hooks/日报`
+- 需要固定口令时可用环境变量 `GLEAM_WEBUI_TOKEN` 预置。不要把端口暴露到局域网或公网。
+- API Key 保存在本机凭证存储，只发往你配置的接入主机；界面只显示「已设置 / 未设置」。
+
+---
+
+## 安装与运行
+
+### 下载
+
+前往 [Releases](https://github.com/gleam-ai/Gleam/releases) 下载对应平台二进制。
+
+### 运行
 
 ```bash
-# Desktop (recommended on Windows)
+# 桌面端（Windows 推荐）
 ./gleam app
 
-# Offline-capable Mock model (no API key)
-./gleam goal "Create hello.txt in the current directory" --mock-llm
+# 离线体验（Mock 模型，不需要 API Key）
+./gleam goal "在当前目录创建 hello.txt 并写入内容" --mock-llm
 
-# Real model (network egress to your configured provider)
-export GLEAM_API_KEY=your_api_key
-./gleam goal "List Markdown files here and summarize" --mode auto
+# 接入真实模型（会向你配置的 API 出网）
+export GLEAM_API_KEY=你的APIKey
+./gleam goal "列出当前目录的 Markdown 文件并总结" --mode auto
 
-# Web UI only
+# 仅 Web UI
 ./gleam webui
 ```
 
-### Build from source
+### 从源码构建
 
 ```bash
 go build -trimpath -ldflags="-s -w" -o bin/gleam ./cmd/gleam
-bash scripts/build-desktop.sh   # multi-platform cross build
+bash scripts/build-desktop.sh   # 多平台交叉编译
 ```
 
-Windows install helper: `scripts/install.ps1`.
+Windows 安装辅助：`scripts/install.ps1`。
 
 ---
 
-## Tools and MCP
+## 工具与 MCP
 
-**23 built-in tools**, including:
+**内置 23 种工具**，包括：
 
-| Group | Tools |
+| 分组 | 工具 |
 | :--- | :--- |
-| File | `file.list` `file.read` `file.write` `file.mkdir` `file.move` `file.delete` `file.search` |
+| 文件 | `file.list` `file.read` `file.write` `file.mkdir` `file.move` `file.delete` `file.search` |
 | Shell | `shell.exec` |
 | Web | `web.fetch` |
-| Desktop | `desktop.clipboard.read` `desktop.clipboard.write` `desktop.screenshot` `desktop.notify` `desktop.snippets` |
-| Memory | `memory.save` `memory.search` `memory.delete` |
-| Schedule | `schedule.create` `schedule.list` `schedule.delete` |
-| Skills | `skill.list` `skill.run` |
-| Reply | `reply` |
+| 桌面 | `desktop.clipboard.read` `desktop.clipboard.write` `desktop.screenshot` `desktop.notify` `desktop.snippets` |
+| 记忆 | `memory.save` `memory.search` `memory.delete` |
+| 调度 | `schedule.create` `schedule.list` `schedule.delete` |
+| 技能 | `skill.list` `skill.run` |
+| 回复 | `reply` |
 
-**MCP:** configure external servers under `mcp:` in config (command + args + trust level). Tools register into the same registry at startup.
+**MCP：** 在配置的 `mcp:` 下声明外部服务器（command + args + trust）。启动时注册进同一工具表。
 
 ---
 
-## Configuration and data directories
+## 配置与数据目录
 
-| Path | Role |
+| 路径 | 作用 |
 | :--- | :--- |
-| `configs/config.yaml` | Example / shipped config (YAML subset, 2-space indent) |
-| `~/.gleam/` | Default **data directory** (`--data-dir` overrides) |
-| `~/.gleam/settings.yaml` | Local settings overlay (hot-applied on save) |
-| `~/.gleam/memory/` `tasks/` `skills/` | Long-term memory, task archives, skills |
-| `~/.gleam/schedules.json` | Scheduler state |
-| `~/.gleam/audit.jsonl` | Safety / egress audit log |
-| `~/.gleam/browser-profile/` | Embedded browser profile (desktop) |
+| `configs/config.yaml` | 示例 / 随仓库提供的配置（YAML 子集，2 空格缩进） |
+| `~/.gleam/` | 默认**数据目录**（可用 `--data-dir` 覆盖） |
+| `~/.gleam/settings.yaml` | 本机设置覆盖层（保存即热生效） |
+| `~/.gleam/memory/` `tasks/` `skills/` | 长期记忆、任务归档、技能 |
+| `~/.gleam/schedules.json` | 调度状态 |
+| `~/.gleam/audit.jsonl` | 安全 / 出网审计 |
+| `~/.gleam/browser-profile/` | 桌面端内嵌浏览器配置 |
+| `~/.gleam/webui.token` | 每次启动生成的 Web UI API 口令（0600）。所有 Web UI API 请求都要在 `X-Gleam-Token` 头里带上它，应用内界面会自动携带；可用 `GLEAM_WEBUI_TOKEN` 预置 |
 
-Prefer injecting secrets via `GLEAM_API_KEY` rather than committing keys into YAML.
-
----
-
-## Local-first honesty
-
-**Local-first ≠ offline LLM.**
-
-- Conversation history, memory, task state, skills, and audits default to **your machine**.
-- **Mock** (`--mock-llm` / `provider: mock`) can exercise the agent **without** calling a cloud model.
-- **Real models** still send prompts to the **API base URL you configure**; egress records hostname and byte counts only, never message content.
-- Optional cloud login / feedback paths also egress and are audited the same way.
-
-Details and deliberate non-goals: [docs/known-limits.md](docs/known-limits.md).
+API Key 建议用环境变量 `GLEAM_API_KEY` 注入，不要写入并提交 YAML。
 
 ---
 
-## Documentation
+## 关于「本地优先」
 
-| Doc | Purpose |
+**本地优先 ≠ 离线大模型。**
+
+- 对话、记忆、任务状态、技能与审计默认留在**本机**。
+- **Mock**（`--mock-llm` / `provider: mock`）可不调用云端模型即可体验智能体流程。
+- **真实模型**仍会向你配置的 **API** 发送提示词；出网只记主机名与字节量，不记内容。
+- 可选的云端登录 / 反馈路径同样出网，并纳入同一套审计。
+
+已知限制与刻意不做见 [docs/known-limits.md](docs/known-limits.md)。
+
+---
+
+## 文档
+
+| 文档 | 说明 |
 | :--- | :--- |
-| [Known limits & won't-do](docs/known-limits.md) | **Single public source** for limits, rejected designs, and deliberate non-goals |
-| [Contributing](CONTRIBUTING.md) | Local dev, commit rules, org-wide contribution entry |
-| [Security](SECURITY.md) | Vulnerability reporting and local-first security boundary |
-| [CHANGELOG](pack/CHANGELOG.md) | Release history |
+| [已知限制与刻意不做](docs/known-limits.md) | **唯一公开口径**：已知限制 / 被否决方案 / 刻意不做 |
+| [贡献指南](CONTRIBUTING.md) | 本地开发、提交约定、组织级规范入口 |
+| [安全策略](SECURITY.md) | 漏洞报告与本地优先安全边界 |
+| [CHANGELOG](pack/CHANGELOG.md) | 历次变更记录 |
 
 ---
 
-## Contributing and security
+## 贡献与安全
 
-- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR (Conventional Commits, signed commits, DCO-style sign-off).
-- Report vulnerabilities per [SECURITY.md](SECURITY.md). Do not file security issues as public GitHub issues when a private channel is required.
-- Org-wide policies live under [gleam-ai/.github](https://github.com/gleam-ai/.github).
+- 提 PR 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)（Conventional Commits、签名提交、DCO 风格 sign-off）。
+- 漏洞请按 [SECURITY.md](SECURITY.md) 报告；需要私密渠道时不要用公开 Issue。
+- 组织级规范见 [gleam-ai/.github](https://github.com/gleam-ai/.github)。
 
 ---
 
-## License
+## 许可
 
 [MIT License](LICENSE)
 
-> Gleam is not chasing “AI that acts more human.” It aims to be a **more reliable coworker**.
+> Gleam 不做「更像人的 AI」，而是做「更可靠的同事」。

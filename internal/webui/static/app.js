@@ -3,6 +3,41 @@
  * 遵循 ui-ux-pro-max：实时遥测标注、操作全程有反馈、无障碍（aria-live / focus 管理）。 */
 'use strict';
 
+/* ---------- 本机 API 口令 ----------
+ * 服务端每次启动生成一个口令，注入首页的 <meta name="gleam-token">（见 internal/webui/guard.go）。
+ * 所有同源 /api/ 请求都要带上它：fetch 走请求头；EventSource 与 <img> 设不了请求头，走查询参数
+ * （服务端只对 GET 认查询参数）。这里包一层全局 fetch / EventSource，而不是逐个调用点去改：
+ * 漏掉一处就是一个静默 401，而新加的调用点不会记得这件事。 */
+const GLEAM_TOKEN = (document.querySelector('meta[name="gleam-token"]') || {}).content || '';
+const isOwnAPI = (u) => {
+  try { const x = new URL(u, location.href); return x.origin === location.origin && x.pathname.startsWith('/api/'); }
+  catch { return false; }
+};
+const withToken = (u) => {
+  if (!GLEAM_TOKEN || !isOwnAPI(u)) return u;
+  const x = new URL(u, location.href);
+  x.searchParams.set('token', GLEAM_TOKEN);
+  return x.pathname + x.search;
+};
+(function installTokenTransport() {
+  if (!GLEAM_TOKEN) return;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+    if (!isOwnAPI(url)) return nativeFetch(input, init);
+    const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+    headers.set('X-Gleam-Token', GLEAM_TOKEN);
+    return nativeFetch(input, { ...init, headers });
+  };
+  const NativeEventSource = window.EventSource;
+  if (NativeEventSource) {
+    const Wrapped = function (url, cfg) { return new NativeEventSource(withToken(url), cfg); };
+    Wrapped.prototype = NativeEventSource.prototype;
+    Wrapped.CONNECTING = 0; Wrapped.OPEN = 1; Wrapped.CLOSED = 2;
+    window.EventSource = Wrapped;
+  }
+})();
+
 /* ---------- 图标（内联 SVG，禁止 emoji 当图标） ---------- */
 const ICONS = {
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
@@ -36,7 +71,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':
 async function api(method, url, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const resp = await fetch(url, opts);
+  let resp;
+  try {
+    resp = await fetch(url, opts);
+  } catch {
+    // 浏览器给的是 "Failed to fetch" 这类英文原文：换成用户看得懂的一句，原因只可能是本机服务没在答话
+    throw new Error('连不上本机的 Gleam 服务，请确认它仍在运行');
+  }
   let data = null;
   try { data = await resp.json(); } catch { /* 空响应 */ }
   if (!resp.ok) {
@@ -45,6 +86,21 @@ async function api(method, url, body) {
     throw e;
   }
   return data;
+}
+
+/* ---------- 列表加载失败：替换骨架屏，给原因和重试，而不是让骨架一直闪 ---------- */
+function loadError(wrap, err, retry) {
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const box = el('div', 'empty empty--error');
+  box.innerHTML = `${ICONS.alert || ''}<div class="empty-title">没能加载</div><p class="empty-desc">${esc(err && err.message ? err.message : String(err || ''))}</p>`;
+  if (retry) {
+    const b = el('button', 'btn btn-secondary btn-sm', '重试');
+    b.type = 'button';
+    b.addEventListener('click', retry);
+    box.appendChild(b);
+  }
+  wrap.appendChild(box);
 }
 
 /* ---------- Toast ---------- */
@@ -163,13 +219,14 @@ function promptModal(label, oldValue = '', title = '请输入') {
 }
 
 /* ---------- 导航 ---------- */
-const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: initMemoryOnce, schedules: loadSchedules, tools: loadTools, settings: loadSettings, market: loadMarket, growth: loadGrowth, geo: loadGEO, readiness: loadReadiness, feedback: loadFeedbackView };
+const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: initMemoryOnce, schedules: loadSchedules, tools: loadTools, settings: () => { loadSettingsProfile(); return loadSettings(); }, market: loadMarket, sites: loadSites, growth: loadGrowth, geo: loadGEO, readiness: loadReadiness, feedback: loadFeedbackView };
 
 function showView(name) {
   document.querySelectorAll('.nav-item[data-view]').forEach((b) => {
     b.toggleAttribute('aria-current', b.dataset.view === name);
   });
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+  document.documentElement.dataset.view = name;
   const view = $('#view-' + name);
   if (view) view.classList.add('active');
   (VIEW_LOADERS[name] || (() => {}))();
@@ -281,12 +338,18 @@ $('#task-seg').addEventListener('click', (e) => {
   // 对话模式与工作区/权限模式无关：隐藏以聚焦
   $('#ws-chip').hidden = currentTask === 'chat';
   $('#perm-seg').hidden = currentTask === 'chat';
-  goalInput.placeholder = currentTask === 'chat'
+  goalInput.placeholder = composerPlaceholder();
+});
+
+// 输入框占位：会话里统一写「继续当前会话…」，首页按任务档位给例子
+function composerPlaceholder() {
+  if (typeof viewingConvo !== 'undefined' && viewingConvo) return '继续当前会话…';
+  return currentTask === 'chat'
     ? '随便聊点什么…'
     : currentTask === 'code'
       ? '描述要改的代码或要修的问题，例如：修复 smoke.sh 里的编码问题'
-      : '例如：整理当前目录的图片并按日期归档';
-});
+      : '一切从这里开始… 描述任务，或输入 @ 引用';
+}
 
 const goalInput = $('#goal-input');
 goalInput.addEventListener('keydown', (e) => {
@@ -297,7 +360,12 @@ goalInput.addEventListener('keydown', (e) => {
     onMentionKey(e);
     return;
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitGoal(); }
+  // 发送键由「设置 → 快捷键 → 发送消息」决定：Enter（默认）或 Ctrl+Enter。
+  // Ctrl+Enter 模式下，单按 Enter 交还给 textarea 换行。
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const ctrlMode = typeof Keymap !== 'undefined' && Keymap.sendMode() === 'ctrlEnter';
+  if (ctrlMode && !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault(); submitGoal();
 });
 // 输入框自适应高度
 function autoResize() {
@@ -348,8 +416,9 @@ async function submitGoal() {
       return;
     }
     await ensureConvo();
+    const goalText = siteMode && !/index\.html/i.test(displayGoal) ? displayGoal + SITE_SUFFIX : displayGoal;
     const submitted = await api('POST', '/api/goals', {
-      goal: displayGoal,
+      goal: goalText,
       mode: currentMode,
       task_mode: currentTask, role: currentRole,
       conversation_id: currentConvo ? currentConvo.id : undefined,
@@ -397,11 +466,13 @@ plusMenu.addEventListener('click', (e) => {
   togglePlus(false);
   const act = item.dataset.plus;
   if (act === 'file') openFilePicker();
+  else if (act === 'folder') openWorkspaceDialog();
   else if (act === 'goal') openGoalPicker();
   else if (act === 'plan') setPerm(currentMode === 'plan_first' ? 'auto' : 'plan_first');
   else if (act === 'plugin') openPluginPicker();
   else if (act === 'mention') { goalInput.focus(); insertAtCursor('@'); }
   else if (act === 'browser') BrowserPane.toggle();
+  else if (act === 'site') { setSiteMode(!siteMode); goalInput.focus(); }
 });
 
 function insertAtCursor(text) {
@@ -419,8 +490,9 @@ const refsBox = $('#composer-refs');
 const REF_KIND_CN = { file: '文件', goal: '目标', skill: '技能', mcp: '插件', memory: '记忆' };
 
 function renderRefs() {
-  refsBox.hidden = refs.length === 0;
+  refsBox.hidden = refs.length === 0 && !siteMode;
   refsBox.innerHTML = '';
+  if (siteMode) refsBox.appendChild(siteChip());
   refs.forEach((r, i) => {
     const chip = el('span', 'ref-chip');
     chip.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${r.kind === 'file' ? '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M13 2v7h7"/>' : r.kind === 'skill' ? '<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/>' : '<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V18c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/>'}</svg><span class="ref-kind">${esc(REF_KIND_CN[r.kind] || r.kind)}</span><span class="ref-label" title="${esc(r.label)}">${esc(r.label)}</span>`;
@@ -441,7 +513,37 @@ function addRef(kind, label, refText) {
   renderRefs();
 }
 
-function clearRefs() { refs.length = 0; renderRefs(); }
+function clearRefs() { refs.length = 0; siteMode = false; paintSiteSub(); renderRefs(); }
+
+/* ---------- 站点模式：输入框里的「站点」芯片 ----------
+ * 它不是后端意义上的引用（引用类型白名单里没有站点），而是一句写进目标的产出约定：
+ * 网页放在当前工作区 sites/ 下、入口 index.html。「站点」页扫的正是这个约定，
+ * 所以芯片和页面是同一条闭环，而不是一个只在界面上亮一下的标签。 */
+let siteMode = false;
+const SITE_SUFFIX = '\n\n（站点：产出放在当前工作区 sites/ 下的一个新文件夹里，用简短的英文文件夹名，入口是 index.html；HTML 和 CSS 写在同一个文件里，不依赖外部资源，用浏览器直接打开就能看。）';
+function siteChip() {
+  const chip = el('span', 'ref-chip ref-chip--site');
+  chip.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg><span class="ref-label">站点</span>';
+  chip.title = '做出来的网页会放进工作区 sites/，并出现在「站点」页';
+  const x = el('button', 'ref-x');
+  x.type = 'button';
+  x.setAttribute('aria-label', '移除站点');
+  x.innerHTML = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  x.addEventListener('click', () => setSiteMode(false));
+  chip.appendChild(x);
+  return chip;
+}
+function setSiteMode(on) {
+  siteMode = !!on;
+  // 对话档只聊天、不动文件；要做网页至少得是「通用」档
+  if (siteMode && currentTask === 'chat') document.querySelector('#task-seg button[data-task="work"]')?.click();
+  paintSiteSub();
+  renderRefs();
+}
+function paintSiteSub() {
+  const sub = document.getElementById('plus-site-sub');
+  if (sub) sub.textContent = siteMode ? '已开启 · 再点一次取消' : '做一个能直接打开的网页';
+}
 
 function openGoalPicker() {
   Modal.open('引用一个历史目标', (box) => {
@@ -1131,7 +1233,7 @@ async function refreshTaskResult(taskID) {
   }
 }
 
-/* Qoder 式过程呈现（借鉴其公开交互形态，不是照抄）：
+/* 过程呈现（渐进披露）：
    旧版把每条进度都刷成「45% · …」长流水，噪声大。现在：
    - 阶段推进（规划/复盘/预算等）各占一句里程碑短句，同阶段连续事件原地更新；
    - 执行步骤明细收进折叠块，汇总句为「执行工具 N 次，其中 M 次失败」，结束后自动收起。 */
@@ -1322,6 +1424,8 @@ async function resolveApproval(id, approved, box, task) {
 // 挂在目标流顶部，批准/拒绝与任务内审批走同一裁决接口。
 function renderStandaloneApproval(ap) {
   if (!ap || !ap.id) return;
+  // 底部终端发起的 shell.exec：审批就地画在终端里，不跳去目标视图
+  if (typeof Terminal !== 'undefined' && Terminal.claimApproval(ap)) return;
   const feed = $('#goal-feed');
   if (feed.querySelector(`[data-approval-id="${ap.id}"]`)) return;
 
@@ -1711,7 +1815,7 @@ async function loadGoals() {
     const { goals } = await api('GET', '/api/goals');
     (goals || []).slice().reverse().forEach((info) => renderTaskCard(info, false));
     if (!goals || !goals.length) {
-      resetFeedToEmpty('还没有目标', '在上方写下你想让微光做成的一件事，它会把过程摊开给你看。');
+      resetFeedToEmpty('不止于对话，把事做完', '上下文留在本机，Gleam 帮你一步步推进', { home: true });
     }
   } catch { /* 首次为空 */ }
 }
@@ -1822,8 +1926,7 @@ async function loadSkills() {
     }
     skills.forEach((sk) => grid.appendChild(skillCard(sk)));
   } catch (err) {
-    grid.innerHTML = '';
-    toast(`加载技能失败：${err.message}`, 'error');
+    loadError(grid, err, loadSkills);
   }
 }
 
@@ -1994,14 +2097,14 @@ async function searchMemory() {
   const q = $('#memory-search').value.trim() || $('#memory-content').value.trim();
   const hits = $('#memory-hits');
   if (!q) {
-    hits.innerHTML = `<div class="empty">${ICONS.search}<div class="empty-title">搜索你的长期记忆</div><p class="empty-desc">输入关键词回车即可；下方也可以直接写入一条新记忆。</p></div>`;
+    hits.innerHTML = `<div class="empty empty--card">${ICONS.search}<div class="empty-title">搜索你的长期记忆</div><p class="empty-desc">在右上角输入关键词回车即可；上方也可以直接写入一条新记忆。</p></div>`;
     return;
   }
   try {
     const { hits: list } = await api('GET', `/api/memory?q=${encodeURIComponent(q)}&k=8`);
     hits.innerHTML = '';
     if (!list || !list.length) {
-      hits.innerHTML = `<div class="empty">${ICONS.search}<div class="empty-title">没有相关记忆</div><p class="empty-desc">换个关键词试试，或在下方写入这条你想让它记住的事。</p></div>`;
+      hits.innerHTML = `<div class="empty empty--card">${ICONS.search}<div class="empty-title">没有相关记忆</div><p class="empty-desc">换个关键词试试，或在上方写入这条你想让它记住的事。</p></div>`;
       return;
     }
     list.forEach((h) => {
@@ -2042,43 +2145,117 @@ async function loadSchedules() {
     LiveRail.schedules((jobs || []).length);
     list.innerHTML = '';
     if (!jobs || !jobs.length) {
-      list.innerHTML = `<div class="empty">${ICONS.spinner}<div class="empty-title">暂无定时任务</div><p class="empty-desc">创建一个任务，让 Gleam 按时自动执行目标。</p></div>`;
+      list.innerHTML = `<div class="empty empty--card"><div class="empty-hero" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div><div class="empty-title">暂无定时任务</div><p class="empty-desc">创建一个任务，让 Gleam 按时自动执行目标。</p></div>`;
+      setSchFormOpen(true);
       return;
     }
-    jobs.forEach((j) => {
-      const row = el('div', 'card row');
-      const main = el('div', 'row-main');
-      const freq = j.schedule_text || j.when_text || (j.interval_sec ? '每隔 ' + humanInterval(j.interval_sec) : '按计划执行');
-      main.innerHTML = `<div class="row-title">${esc(j.name)} <span class="badge badge--${j.enabled ? 'success' : 'cancelled'}">${j.enabled ? '启用' : '停用'}</span></div>
-        <div class="row-sub">${esc(freq)} · ${esc(j.goal)}${j.next_run ? ' · 下次 ' + esc(new Date(j.next_run).toLocaleString()) : ''}</div>`;
-      const actions = el('div', 'row-actions');
-      const toggle = el('button', 'btn btn-ghost btn-sm');
-      toggle.type = 'button';
-      toggle.textContent = j.enabled ? '暂停' : '恢复';
-      toggle.title = j.enabled ? '暂停后到点不再执行，随时可恢复' : '恢复按原计划执行';
-      toggle.setAttribute('aria-label', `${j.enabled ? '暂停' : '恢复'}定时任务 ${j.name}`);
-      toggle.addEventListener('click', async () => {
-        try { await api('POST', `/api/schedules/${encodeURIComponent(j.name)}/enabled`, { enabled: !j.enabled }); toast(j.enabled ? '任务已暂停' : '任务已恢复', 'success'); loadSchedules(); }
-        catch (err) { toast(err.message, 'error'); }
-      });
-      const del = el('button', 'btn btn-danger btn-sm');
-      del.innerHTML = ICONS.trash;
-      del.title = '删除定时任务';
-      del.setAttribute('aria-label', `删除定时任务 ${j.name}`);
-      del.addEventListener('click', async () => {
-        const ok = await confirmModal(`删除定时任务「${j.name}」？此操作不可恢复。`, '删除任务');
-        if (!ok) return;
-        try { await api('DELETE', `/api/schedules/${encodeURIComponent(j.name)}`); toast('已删除', 'success'); loadSchedules(); }
-        catch (err) { toast(err.message, 'error'); }
-      });
-      actions.appendChild(toggle);
-      actions.appendChild(del);
-      row.appendChild(main);
-      row.appendChild(actions);
-      list.appendChild(row);
-    });
-  } catch (err) { toast(err.message, 'error'); }
+    jobs.forEach((j, i) => { const c = scheduleCard(j); c.dataset.order = String(i); list.appendChild(c); });
+    applySchView();
+  } catch (err) { loadError(list, err, loadSchedules); }
 }
+
+
+// 定时任务卡片：开关 · 标题 + 状态 · 目标预览 · 时间胶囊 · 更多（删除）
+function scheduleCard(j) {
+  const card = el('article', 'auto-card' + (j.enabled ? '' : ' is-off'));
+  card.dataset.enabled = String(!!j.enabled);
+  card.dataset.name = j.name || '';
+  card.dataset.next = j.next_run && j.enabled ? String(new Date(j.next_run).getTime()) : '';
+  const head = el('div', 'auto-card-head');
+  const sw = el('button', 'switch');
+  sw.type = 'button';
+  sw.setAttribute('role', 'switch');
+  sw.setAttribute('aria-checked', String(!!j.enabled));
+  sw.setAttribute('aria-label', `${j.enabled ? '暂停' : '恢复'}定时任务 ${j.name}`);
+  sw.title = j.enabled ? '暂停后到点不再执行，随时可恢复' : '恢复按原计划执行';
+  sw.addEventListener('click', async () => {
+    sw.disabled = true;
+    try { await api('POST', `/api/schedules/${encodeURIComponent(j.name)}/enabled`, { enabled: !j.enabled }); toast(j.enabled ? '任务已暂停' : '任务已恢复', 'success'); loadSchedules(); }
+    catch (err) { toast(err.message, 'error'); sw.disabled = false; }
+  });
+  const more = el('button', 'icon-btn auto-card-more');
+  more.type = 'button';
+  more.title = '更多';
+  more.setAttribute('aria-label', `更多操作：${j.name}`);
+  more.setAttribute('aria-haspopup', 'menu');
+  more.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>';
+  const menu = el('div', 'pop-menu auto-card-menu');
+  menu.hidden = true;
+  menu.setAttribute('role', 'menu');
+  const del = el('button', 'menu-item menu-item--danger');
+  del.type = 'button';
+  del.setAttribute('role', 'menuitem');
+  del.innerHTML = ICONS.trash + '<span>删除</span>';
+  del.addEventListener('click', async () => {
+    menu.hidden = true;
+    const ok = await confirmModal(`删除定时任务「${j.name}」？此操作不可恢复。`, '删除任务');
+    if (!ok) return;
+    try { await api('DELETE', `/api/schedules/${encodeURIComponent(j.name)}`); toast('已删除', 'success'); loadSchedules(); }
+    catch (err) { toast(err.message, 'error'); }
+  });
+  menu.appendChild(del);
+  more.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.auto-card-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
+    menu.hidden = !menu.hidden;
+  });
+  head.appendChild(sw);
+  head.appendChild(more);
+  head.appendChild(menu);
+
+  const title = el('div', 'auto-card-title');
+  title.innerHTML = `<strong>${esc(j.name)}</strong><span class="auto-card-state">${j.enabled ? '已启用' : '已停用'}</span>`;
+  const goal = el('p', 'auto-card-goal', j.goal || '');
+  goal.title = j.goal || '';
+  const freq = j.schedule_text || j.when_text || (j.interval_sec ? '每隔 ' + humanInterval(j.interval_sec) : '按计划执行');
+  const foot = el('div', 'auto-card-foot');
+  foot.innerHTML = `<span class="pill"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>${esc(freq)}</span>`
+    + (j.next_run && j.enabled ? `<span class="auto-card-next">下次 ${esc(new Date(j.next_run).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span>` : '');
+  card.appendChild(head);
+  card.appendChild(title);
+  card.appendChild(goal);
+  card.appendChild(foot);
+  return card;
+}
+document.addEventListener('click', () => document.querySelectorAll('.auto-card-menu').forEach((m) => { m.hidden = true; }));
+
+// 定时任务列表的筛选（全部 / 已启用 / 已停用）与排序：只在前端重排已拉到的卡片
+let schFilter = 'all';
+function applySchView() {
+  const list = $('#schedules-list');
+  const cards = [...list.querySelectorAll(':scope > .auto-card')];
+  const by = $('#sch-sort').value;
+  cards.sort((a, b) => {
+    if (by === 'name') return a.dataset.name.localeCompare(b.dataset.name, 'zh-CN');
+    if (by === 'next') {
+      const x = Number(a.dataset.next) || Infinity; const y = Number(b.dataset.next) || Infinity;
+      if (x !== y) return x - y;
+    }
+    return Number(a.dataset.order) - Number(b.dataset.order);
+  });
+  cards.forEach((c) => {
+    c.hidden = schFilter !== 'all' && (c.dataset.enabled === 'true') !== (schFilter === 'on');
+    list.appendChild(c);
+  });
+}
+document.querySelectorAll('#sch-filter [data-sfilter]').forEach((b) => b.addEventListener('click', () => {
+  schFilter = b.dataset.sfilter;
+  document.querySelectorAll('#sch-filter [data-sfilter]').forEach((x) => {
+    x.classList.toggle('active', x === b);
+    x.setAttribute('aria-selected', String(x === b));
+  });
+  applySchView();
+}));
+$('#sch-sort').addEventListener('change', applySchView);
+
+function setSchFormOpen(open) {
+  const form = $('#sch-form');
+  const btn = $('#sch-new-toggle');
+  form.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) setTimeout(() => $('#sch-name').focus(), 0);
+}
+$('#sch-new-toggle').addEventListener('click', () => setSchFormOpen($('#sch-form').hidden));
 
 // 自然语言时间芯片：点击填充并高亮，手动编辑则取消高亮。
 const whenInput = $('#sch-when');
@@ -2136,7 +2313,7 @@ async function loadTools() {
     tools.forEach((t) => {
       const row = el('div', 'card row');
       const main = el('div', 'row-main');
-      main.innerHTML = `<div class="row-title"><code style="font-family: var(--font-mono); font-size: var(--fs-sm);">${esc(t.name)}</code>
+      main.innerHTML = `<div class="row-title"><code class="tool-name">${esc(t.name)}</code>
         <select class="input select-sm perm-select" data-tool="${esc(t.name)}" title="权限级别：只读自动放行 / 需我批准 / 完全访问（始终审批）">
           <option value="readonly">只读放行</option>
           <option value="user_approved">需我批准</option>
@@ -2167,7 +2344,7 @@ async function loadTools() {
         }
       });
     });
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { loadError(list, err, loadTools); }
 }
 
 // schemaSummary（L6，2026-09-23 QA）：JSON Schema 直 dump 对不写代码的人是天书，
@@ -2625,6 +2802,43 @@ document.querySelectorAll('.settings-tab').forEach((tab) => {
   });
 });
 
+// 设置搜索：按分区名与分区内的字段文字过滤左侧导航
+$('#settings-search').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  let any = false;
+  document.querySelectorAll('.settings-nav .settings-tab').forEach((tab) => {
+    const panel = document.querySelector(`.settings-panel[data-stab="${tab.dataset.stab}"]`);
+    const hay = (tab.textContent + ' ' + (panel ? panel.textContent : '')).toLowerCase();
+    const hit = !q || hay.includes(q);
+    tab.hidden = !hit;
+    any = any || hit;
+  });
+  document.querySelectorAll('.settings-nav .settings-group-label').forEach((lab) => {
+    let n = lab.nextElementSibling, vis = false;
+    while (n && n.classList.contains('settings-tab')) { if (!n.hidden) vis = true; n = n.nextElementSibling; }
+    lab.hidden = !vis;
+  });
+  $('#settings-search-empty').hidden = any;
+  if (q && any) {
+    const cur = document.querySelector('.settings-nav .settings-tab.active');
+    if (cur && cur.hidden) document.querySelector('.settings-nav .settings-tab:not([hidden])').click();
+  }
+});
+
+// 设置页顶部概况：只读 /api/growth 里已有的统计
+async function loadSettingsProfile() {
+  $('#sp-name').textContent = $('#me-name').textContent || '我的';
+  $('#sp-sub').textContent = $('#me-sub').textContent || '本地模式';
+  try {
+    const { stats } = await api('GET', '/api/growth');
+    if (!stats) return;
+    $('#sp-tasks').textContent = stats.total_tasks || 0;
+    $('#sp-skills').textContent = stats.total_skills || 0;
+    $('#sp-streak').textContent = stats.recent_streak || 0;
+    $('#sp-week').textContent = stats.week_tokens ? formatTokens(stats.week_tokens) : '—';
+  } catch { /* 统计拿不到就留「—」 */ }
+}
+
 /* ---------- 分模块保存 ---------- */
 function syncRuntimeState(s) {
   if (!s) return;
@@ -3048,8 +3262,21 @@ const ComposerMeta = (() => {
 
   function paintModelChip() {
     const m = liveModel || (llmCfg && llmCfg.model) || '';
-    modelName.textContent = m ? shorten(m, 18) : '未配模型';
-    modelName.title = m || '还没有可用模型：去设置里选择厂商并填写模型名';
+    const isMock = (llmCfg && llmCfg.provider === 'mock') || PROVIDER === 'mock';
+    modelName.textContent = isMock ? '演示模型' : (m ? shorten(m, 18) : '未配模型');
+    modelName.title = isMock ? '离线演示模型：不发起真实网络调用' : (m || '还没有可用模型：去设置里选择厂商并填写模型名');
+    // 小标签只写本机配置里真有的东西：mock 档，或当前模型恰好是某个档位的模型
+    const tagEl = $('#cp-model-tag');
+    if (tagEl) {
+      let tag = '';
+      if (isMock) tag = 'mock';
+      else if (llmCfg && llmCfg.tiers && m) {
+        const k = Object.keys(llmCfg.tiers).find((key) => llmCfg.tiers[key] === m);
+        if (k) tag = TIER_CN[k] || k;
+      }
+      tagEl.textContent = tag;
+      tagEl.hidden = !tag;
+    }
     modelCur.textContent = m || '未配置';
     const bits = [];
     if (llmCfg && llmCfg.provider) {
@@ -3135,6 +3362,7 @@ const ComposerMeta = (() => {
     if (!ctx || typeof ctx.fill_pct !== 'number') {
       // 字段缺失就是接线断了。宁可空着，也不在前端拿 turns/cap 自己除一个凑数。
       pctEl.textContent = '—';
+      ctxBtn.dataset.ready = 'false';
       meterFill.style.width = '0%';
       delete meterFill.dataset.level;
       badge.hidden = true;
@@ -3142,6 +3370,7 @@ const ComposerMeta = (() => {
       return;
     }
     const pct = ctx.fill_pct;
+    ctxBtn.dataset.ready = 'true';
     meterFill.style.width = pct + '%';
     meterFill.dataset.level = pct >= 90 ? 'high' : pct >= 60 ? 'warn' : 'fresh';
     pctEl.textContent = pct + '%';
@@ -3158,6 +3387,8 @@ const ComposerMeta = (() => {
     if (ctx.enabled) delete ctxRead.dataset.off;
     else ctxRead.dataset.off = 'true';
     const saved = ctx.est_tokens_saved > 0 ? ` · 累计已省约 ${ctx.est_tokens_saved} tokens` : '';
+    const bar = $('#cp-context-bar');
+    if (bar) { bar.style.width = Math.max(0, Math.min(100, ctx.fill_pct || 0)) + '%'; bar.dataset.level = ctx.fill_pct >= 90 ? 'high' : ctx.fill_pct >= 60 ? 'warn' : 'fresh'; }
     ctxRead.textContent = ctx.enabled
       ? `窗口 ${ctx.short_turns}/${ctx.short_cap} 轮 · 水位 ${ctx.fill_pct}% · 待压缩 ${ctx.overflow} 轮 · 摘要 ${ctx.summary_chars} 字${saved}`
       : `自动压缩已关闭：窗口 ${ctx.short_turns}/${ctx.short_cap} 轮，窗口外的对话不会被摘要接住`;
@@ -3265,7 +3496,7 @@ async function installGoGuided() {
             '<div><div class="row-title">需要手动安装 Go</div>' +
             '<div class="row-sub">自动安装需要管理员权限。请按以下步骤操作：</div></div></div>' +
             '<ol style="margin: 0 0 var(--space-3) var(--space-4); padding-left: var(--space-4); line-height: 2;">' +
-            '<li>在 Gleam 项目目录下运行安装脚本：<br><code style="font-family:var(--font-mono);font-size:var(--fs-xs);background:rgba(0,0,0,.3);padding:2px 6px;border-radius:4px;">powershell -ExecutionPolicy Bypass -File scripts/install.ps1</code></li>' +
+            '<li>在 Gleam 项目目录下运行安装脚本：<br><code class="inline-code">powershell -ExecutionPolicy Bypass -File scripts/install.ps1</code></li>' +
             '<li>或手动下载 Go：<br><a href="' + esc(res.download || 'https://go.dev/dl/') + '" target="_blank" style="color:var(--color-accent);">' + esc(res.download || 'https://go.dev/dl/') + '</a></li>' +
             '<li>安装完成后，在下方输入路径并点击「检测」</li>' +
             '</ol>';
@@ -3317,6 +3548,41 @@ $('#go-path-input')?.addEventListener('keydown', (e) => {
 /* ---------- 市场：MCP 服务器 + 技能模板 ---------- */
 bindSegmented('#mc-trust');
 
+
+// 标签筛选：只用目录里真有的 tags，客户端过滤，不新增后端
+let mcpTagActive = '';
+function renderMCPTags(presets) {
+  const row = $('#mcp-tags');
+  const tags = [...new Set(presets.flatMap((p) => p.tags || []))].slice(0, 12);
+  row.innerHTML = '';
+  if (!tags.length) return;
+  if (mcpTagActive && !tags.includes(mcpTagActive)) mcpTagActive = '';
+  ['', ...tags].forEach((t) => {
+    const b = el('button', 'chip' + (t === mcpTagActive ? ' active' : ''), t || '全部');
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(t === mcpTagActive));
+    b.addEventListener('click', () => { mcpTagActive = t; renderMCPTags(presets); applyMCPTagFilter(); });
+    row.appendChild(b);
+  });
+  applyMCPTagFilter();
+}
+function applyMCPTagFilter() {
+  document.querySelectorAll('#mcp-presets .market-item').forEach((c) => {
+    c.hidden = !!mcpTagActive && !(c.dataset.tags || '').split('|').includes(mcpTagActive);
+  });
+}
+document.querySelectorAll('#market-tabs .text-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const k = tab.dataset.mtab;
+    document.querySelectorAll('#market-tabs .text-tab').forEach((t) => {
+      t.classList.toggle('active', t === tab);
+      t.setAttribute('aria-selected', String(t === tab));
+    });
+    document.querySelectorAll('#view-market .market-panel').forEach((pn) => { pn.hidden = pn.dataset.mtab !== k; });
+  });
+});
+document.querySelectorAll('[data-goto-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.gotoView)));
+
 async function loadMarket() {
   loadMCPMarket();
   loadSkillMarket();
@@ -3334,19 +3600,26 @@ async function loadMCPMarket() {
       return;
     }
     presets.forEach((p) => wrap.appendChild(mcpPresetCard(p)));
-  } catch (err) { toast(err.message, 'error'); }
+    renderMCPTags(presets);
+  } catch (err) { loadError(wrap, err, loadMCPMarket); }
 }
 
+// 市场条目：字母图标 · 名称 · 一行说明；细节进 title，不再堆三行小字
+function marketTile(name) {
+  const t = el('span', 'market-icon', ([...String(name || '?')][0] || '?').toUpperCase());
+  t.setAttribute('aria-hidden', 'true');
+  return t;
+}
 function mcpPresetCard(p) {
-  const card = el('div', 'card row');
-  card.style.padding = 'var(--space-3) 0';
-  const main = el('div', 'row-main');
-  main.innerHTML = `<div class="row-title">${esc(p.name)} ${p.installed ? '<span class="badge badge--success">已安装</span>' : ''}
-    ${p.params && p.params.length ? '<span class="badge badge--mode">需配置</span>' : ''}</div>
-    <div class="row-sub">${esc(p.desc)}</div>
-    <div class="stat">${esc(p.command)} · 信任 ${esc(PERM_LABELS[p.trust] || p.trust)}${p.tags && p.tags.length ? ' · ' + esc(p.tags.join(' / ')) : ''}</div>`;
+  const card = el('div', 'market-item');
+  card.dataset.tags = (p.tags || []).join('|');
+  card.appendChild(marketTile(p.name));
+  const main = el('div', 'market-main');
+  main.innerHTML = `<div class="market-name">${esc(p.name)}${p.installed ? '<span class="badge badge--success">已安装</span>' : ''}${p.params && p.params.length ? '<span class="badge badge--mode">需配置</span>' : ''}</div>
+    <div class="market-desc">${esc(p.desc)}</div>`;
+  main.title = `${p.desc || ''}\n${p.command} · 信任 ${PERM_LABELS[p.trust] || p.trust}${p.tags && p.tags.length ? ' · ' + p.tags.join(' / ') : ''}`;
   const actions = el('div', 'row-actions');
-  const btn = el('button', 'btn btn-primary btn-sm', p.installed ? '重装' : '安装');
+  const btn = el('button', 'btn btn-secondary btn-sm', p.installed ? '重装' : '安装');
   btn.addEventListener('click', () => openMCPInstallDialog(p));
   actions.appendChild(btn);
   card.appendChild(main);
@@ -3421,14 +3694,14 @@ async function loadSkillMarket() {
       return;
     }
     presets.forEach((s) => {
-      const card = el('div', 'card row');
-      card.style.padding = 'var(--space-3) 0';
-      const main = el('div', 'row-main');
-      main.innerHTML = `<div class="row-title">${esc(s.name)} ${s.installed ? '<span class="badge badge--success">已安装</span>' : ''}</div>
-        <div class="row-sub">${esc(s.description)}</div>
-        <div class="stat">${(s.steps || []).length} 步 · 参数: ${esc((s.params || []).join(', ') || '无')}</div>`;
+      const card = el('div', 'market-item');
+      card.appendChild(marketTile(s.name));
+      const main = el('div', 'market-main');
+      main.innerHTML = `<div class="market-name">${esc(s.name)}${s.installed ? '<span class="badge badge--success">已安装</span>' : ''}</div>
+        <div class="market-desc">${esc(s.description)}</div>`;
+      main.title = `${s.description || ''}\n${(s.steps || []).length} 步 · 参数: ${(s.params || []).join(', ') || '无'}`;
       const actions = el('div', 'row-actions');
-      const btn = el('button', 'btn btn-primary btn-sm', s.installed ? '重装' : '一键安装');
+      const btn = el('button', 'btn btn-secondary btn-sm', s.installed ? '重装' : '安装');
       btn.addEventListener('click', async () => {
         if (s.installed && !await confirmModal(`技能「${s.name}」已经装过了。重装会把它恢复成市场模板，你改过的步骤会被替换；只想临时别用它，请取消后到技能页点停用。`,
           '已经装过了', { okText: '重装它', danger: true })) return;
@@ -3459,7 +3732,7 @@ async function loadSkillMarket() {
       card.appendChild(actions);
       wrap.appendChild(card);
     });
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { loadError(wrap, err, loadSkillMarket); }
 }
 
 async function loadMCPInstalled() {
@@ -3593,7 +3866,13 @@ function renderWorkspace(ws) {
     text.textContent = ws.workspace ? '工作区 · ' + wsShort(ws.workspace) : '选择工作区';
     text.title = ws.workspace || '';
   }
+  const foot = $('#composer-ws-text');
+  if (foot) {
+    foot.textContent = ws.workspace ? wsShort(ws.workspace) : '选择工作区（可选）';
+    foot.title = ws.workspace || '';
+  }
 }
+$('#composer-ws').addEventListener('click', () => openWorkspaceDialog());
 
 $('#ws-chip').addEventListener('click', () => openWorkspaceDialog());
 
@@ -3895,6 +4174,7 @@ function setThreadMode(on) {
   viewingConvo = on;
   const sec = $('#view-goals');
   sec.classList.toggle('thread-mode', on);
+  goalInput.placeholder = composerPlaceholder();
   $('#goal-filters').parentElement.style.display = on ? 'none' : '';
   document.querySelector('.command-deck').style.display = on ? 'none' : '';
   document.querySelector('.quick-launch').style.display = on ? 'none' : '';
@@ -3903,13 +4183,18 @@ function setThreadMode(on) {
   document.querySelector('.cue-deck').style.display = on ? 'none' : '';
 }
 
-function resetFeedToEmpty(title, desc) {
+// 首页 / 空任务的插图位：Gleam 软件内的线条标记（随主题强调色），与 index.html 里的静态版保持一致；
+// 官方折角 logo 只用于应用图标、favicon 和官网
+const HERO_ART = `<div class="hero-art" aria-hidden="true"><svg class="brand-mark" viewBox="0 0 96 96" width="96" height="96" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="18" width="60" height="60" rx="18" stroke-width="1.6" opacity=".35"/><g stroke-width="3"><circle cx="48" cy="48" r="7"/><path d="M48 30v6M48 60v6M30 48h6M60 48h6M35.3 35.3l4.2 4.2M56.5 56.5l4.2 4.2M35.3 60.7l4.2-4.2M56.5 39.5l4.2-4.2"/></g></svg></div>`;
+
+function resetFeedToEmpty(title, desc, opts = {}) {
   const feed = $('#goal-feed');
   feed.innerHTML = '';
-  const empty = el('div', 'empty');
+  const empty = el('div', opts.home ? 'empty home-hero' : 'empty home-hero home-hero--task');
   empty.id = 'goals-empty';
-  empty.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/><circle cx="12" cy="12" r="3"/></svg>
-    <div class="empty-title">${esc(title)}</div><p class="empty-desc">${esc(desc)}</p>`;
+  empty.innerHTML = `${HERO_ART}<div class="empty-title">${esc(title)}</div><p class="empty-desc">${esc(desc)}</p>`
+    + (opts.home ? '<section class="activity-card" aria-label="本机活动"></section>' : '')
+    + '<section class="site-tpl" aria-label="站点模板" hidden></section>';
   feed.appendChild(empty);
 }
 
@@ -3918,7 +4203,7 @@ async function enterConvoView(c, opts = {}) {
   setThreadMode(true);
   $('#goals-title').textContent = c.title || '新对话';
   if (opts.create) {
-    resetFeedToEmpty('新对话已开始', '在下方输入消息，Gleam 会记住这轮会话的上下文。');
+    resetFeedToEmpty('可以直接开口说了', '说出你想推进的事，Gleam 会边听边整理这轮会话的上下文。');
   }
   await loadConvoList(c.id);
   refreshWorkbench();
@@ -3938,7 +4223,7 @@ async function startNewConvo(spaceId) {
     currentConvo = c;
     setThreadMode(true);
     $('#goals-title').textContent = c.title || '新对话';
-    resetFeedToEmpty('新对话已开始', '在下方输入消息，微光会记住这轮会话的上下文。');
+    resetFeedToEmpty('可以直接开口说了', '说出你想推进的事，Gleam 会边听边整理这轮会话的上下文。');
     convoLive.clear();
     await loadConvoList(c.id);
     goalInput.focus();
@@ -4602,7 +4887,7 @@ async function runGEOAnalyze() {
  * ============================================================ */
 const UIPrefs = (() => {
   const KEY = 'gleam-ui';
-  let p = Object.assign({ themeMode: 'dark', accent: 'emerald' }, load());
+  let p = Object.assign({ themeMode: 'light', accent: 'gleam', lang: 'zh', font: 'sans', text: 's', zoom: 'm', width: 'standard' }, load());
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* 隐私模式 */ } }
   function get() { return p; }
@@ -4619,15 +4904,91 @@ function applyTheme() {
   const { themeMode, accent } = UIPrefs.get();
   const dark = effectiveDark();
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-  document.documentElement.setAttribute('data-accent', accent || 'emerald');
+  document.documentElement.setAttribute('data-accent', accent || 'gleam');
   const mc = document.querySelector('meta[name="theme-color"]');
-  if (mc) mc.setAttribute('content', dark ? '#0B0D12' : '#F4F6FA');
+  if (mc) {
+    // 取当前主题的窗框色：每个主题各自定义 --frame，这里不再写死两种
+    const frame = getComputedStyle(document.documentElement).getPropertyValue('--frame').trim();
+    if (frame) mc.setAttribute('content', frame);
+  }
   const cs = document.querySelector('meta[name="color-scheme"]');
   if (cs) cs.setAttribute('content', dark ? 'dark' : 'light');
   document.querySelectorAll('.theme-mode-btn').forEach((b) =>
     b.setAttribute('aria-pressed', String(b.dataset.mode === themeMode)));
   document.querySelectorAll('.accent-swatch').forEach((b) =>
     b.setAttribute('aria-pressed', String(b.dataset.accent === accent)));
+  // 纯前端外观偏好：字体 / 字号 / 缩放 / 内容宽度 / 语言，全部落到 <html> 属性上由 CSS 接管
+  const prefs = UIPrefs.get();
+  const de = document.documentElement;
+  de.setAttribute('data-font', prefs.font || 'sans');
+  de.setAttribute('data-text', prefs.text || 's');
+  de.setAttribute('data-zoom', prefs.zoom || 'm');
+  de.setAttribute('data-width', prefs.width || 'standard');
+  de.setAttribute('data-sidebar', prefs.sidebarCollapsed ? 'collapsed' : 'open');
+  document.querySelectorAll('[data-pref]').forEach((b) => {
+    const on = String(prefs[b.dataset.pref]) === b.dataset.val;
+    if (b.getAttribute('role') === 'menuitemradio') b.setAttribute('aria-checked', String(on));
+    else b.setAttribute('aria-pressed', String(on));
+  });
+  applyLang(prefs.lang || 'zh');
+}
+
+/* ---------- 界面语言：壳层文案的中英切换（动态内容与后端消息保持中文） ---------- */
+const I18N_EN = {
+  '目标': 'Goals', '定时任务': 'Schedules', '技能': 'Skills', '工具': 'Tools', '更多': 'More', '记忆': 'Memory',
+  '市场': 'Market', '成长': 'Growth', '就绪体检': 'Readiness', '反馈与建议': 'Feedback', '设置': 'Settings', '我的': 'Me',
+  '新任务': 'New task', '不止于对话，把事做完': 'Beyond chat, get it done', '上下文留在本机，Gleam 帮你一步步推进': 'Context stays on this machine while Gleam moves the work forward',
+  '会话': 'Chats', '任务': 'Tasks', '收起侧栏': 'Collapse sidebar', '展开侧栏': 'Expand sidebar', '展开现场栏': 'Open live panel', '收起现场栏': 'Close live panel', '搜索': 'Search', '工作区': 'Workspaces', '微光 · 本地智能体': 'Gleam · local agent',
+  '新对话': 'New chat', '选择工作区': 'Choose workspace', '选择工作区（可选）': 'Choose workspace (optional)',
+  '准备就绪': 'Ready', '可以开始一个新目标': 'Start a new goal', '全部': 'All', '进行中': 'Active', '已完成': 'Done', '需处理': 'Needs you',
+  '本地工作台': 'Local workbench', '不止于对话，': 'Beyond chat, ', '把事做完。': 'get it done.',
+  '描述一个目标，或从下方快捷入口开始。上下文留在本机，持续推进。': 'Describe a goal or start from a shortcut below. Context stays on this machine.',
+  '本周完成': 'Done this week', '条记忆': 'memories', '整理工作区': 'Tidy workspace', '项目复盘': 'Project review', '快速研究': 'Quick research',
+  '文件归档 · 生成索引': 'Archive files · build index', '进度分析 · 风险提醒': 'Progress · risks', '阅读文档 · 输出简报': 'Read docs · brief',
+  '从一个小目标开始': 'Start with a small goal', '可以直接开口说了': 'Go ahead and say it',
+  '模式': 'Mode', '权限': 'Access', '对话': 'Chat', '工作': 'Work', '编程': 'Code', '批准': 'Approve', '全自动': 'Auto', '执行前询问': 'Ask first', '自动执行': 'Auto-run', '仅对话': 'Chat only', '通用': 'General', '执行权限': 'Access', '任务档位': 'Task mode', '专家角色': 'Expert role', '演示模型': 'Demo model', '本机': 'Local', '继续当前会话…': 'Continue this chat…', '执行方式': 'Run mode', '工作模式': 'Work mode', '添加文件': 'Add file',
+  'Enter 发送 · Shift+Enter 换行': 'Enter to send · Shift+Enter for newline',
+  '一切从这里开始… 描述任务，或输入 @ 引用': 'Start here… describe a task, or type @ to reference',
+  '添加文件': 'Add file', '添加文件夹': 'Add folder', '添加目标': 'Add goal', '计划模式': 'Plan mode', '添加插件': 'Add plugin', '@ 引用': '@ mention', '浏览器预览': 'Browser preview',
+  '上下文水位': 'Context usage', '立即压缩': 'Compress now', '去设置查看': 'Open settings', '当前模型': 'Current model',
+  '长期记忆': 'Long-term memory', '写入记忆': 'Save a memory', '保存': 'Save', '检索你的记忆': 'Search your memory', '写一条记忆': 'Write a memory',
+  '新建定时任务': 'New schedule', '创建': 'Create', '从市场安装': 'Install from market',
+  'MCP 服务器': 'MCP servers', '技能模板': 'Skill templates', '已安装': 'Installed', '自定义接入': 'Custom',
+  '个人': 'Personal', '智能体': 'Agent', '安全': 'Safety', '开发': 'Developer', '协作': 'Collaboration', '外观': 'Appearance',
+  '模型': 'Model', '引擎': 'Engine', 'Go 工具链': 'Go toolchain', '账号与登录': 'Account', '累计任务': 'Tasks', '连续成功': 'Streak', '本周 tokens': 'Tokens this week',
+  '语言': 'Language', '明暗模式': 'Mode', '主题': 'Theme', '字体风格': 'Font', '文字大小': 'Text size', '界面缩放': 'Zoom', '内容宽度': 'Content width',
+  '系统': 'System', '浅色': 'Light', '深色': 'Dark', '跟随系统': 'System', '微光': 'Gleam', '站点': 'Sites', '我的站点': 'My sites', '共享给我的': 'Shared with me', '添加站点': 'Add site', '还没有站点': 'No sites yet', '落地页': 'Landing', '作品集': 'Portfolio', '博客与内容': 'Blog', '数据看板': 'Dashboard', '内部工具': 'Internal tool', '其他': 'Other', '森林': 'Forest', '薄荷': 'Mint', '蜜蜂': 'Bee', '羊皮纸': 'Parchment',
+  '无衬线': 'Sans', '衬线': 'Serif', '小': 'S', '中': 'M', '大': 'L', '标准': 'Standard', '宽': 'Wide',
+  '使用统计与成长': 'Usage & growth', '检查更新': 'Check for updates', '帮助与反馈': 'Help & feedback', '账号与本地数据': 'Account & local data', '退出登录': 'Sign out',
+  '所有任务': 'All tasks', '选择': 'select', '打开': 'open', '个': '',
+  '搜索会话标题、内容摘要或目标…': 'Search chats, previews or goals…', '搜索设置…': 'Search settings…',
+  '现场': 'Live', '空闲': 'Idle', '外观皮肤': 'Appearance', '深浅模式': 'Mode', '强调色': 'Accent',
+};
+const i18nOrig = new WeakMap();
+const I18N_ATTRS = ['placeholder', 'title', 'aria-label'];
+function applyLang(lang) {
+  const en = lang === 'en';
+  document.documentElement.setAttribute('lang', en ? 'en' : 'zh-CN');
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    const raw = i18nOrig.has(n) ? i18nOrig.get(n) : n.nodeValue;
+    const key = raw.trim();
+    if (!key || !(key in I18N_EN)) continue;
+    if (!i18nOrig.has(n)) i18nOrig.set(n, raw);
+    n.nodeValue = en ? raw.replace(key, I18N_EN[key]) : raw;
+  }
+  document.querySelectorAll('[placeholder],[title],[aria-label]').forEach((elx) => {
+    I18N_ATTRS.forEach((a) => {
+      const store = 'i18n' + a.replace(/-./g, (m) => m[1].toUpperCase());
+      const cur = elx.getAttribute(a);
+      if (cur == null) return;
+      const orig = elx.dataset[store] != null ? elx.dataset[store] : cur;
+      if (!(orig in I18N_EN)) return;
+      elx.dataset[store] = orig;
+      elx.setAttribute(a, en ? I18N_EN[orig] : orig);
+    });
+  });
 }
 if (darkMedia.addEventListener) darkMedia.addEventListener('change', () => { if (UIPrefs.get().themeMode === 'system') applyTheme(); });
 
@@ -4637,6 +4998,10 @@ document.querySelectorAll('.theme-mode-btn').forEach((b) => {
 document.querySelectorAll('.accent-swatch').forEach((b) => {
   b.addEventListener('click', () => { UIPrefs.set({ accent: b.dataset.accent }); });
 });
+// 设置页里的外观分段（语言 / 字体 / 字号 / 缩放 / 宽度）与头像菜单共用同一份偏好
+document.querySelectorAll('.settings-panel [data-pref]').forEach((b) => {
+  b.addEventListener('click', () => UIPrefs.set({ [b.dataset.pref]: b.dataset.val }));
+});
 
 /* ============================================================
  * 「我的」抽屉
@@ -4645,7 +5010,6 @@ const MeDrawer = (() => {
   const overlay = $('#me-overlay');
   function open() { overlay.hidden = false; loadAccount(); }
   function close() { overlay.hidden = true; }
-  $('#open-me').addEventListener('click', open);
   $('#me-close').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
@@ -4915,8 +5279,7 @@ async function loadFeedback() {
     (items || []).forEach((f) => list.appendChild(fbRow(f)));
     if (remote) $('#fb-dest').textContent = '本机一份，另送一份到 ' + remote;
   } catch (err) {
-    list.innerHTML = '';
-    toast(err.message, 'error');
+    loadError(list, err, loadFeedback);
   }
 }
 
@@ -4976,7 +5339,7 @@ function fbViewShots(f) {
   Modal.open(esc('这条反馈的截图（' + (f.attachments || []).length + ' 张，只在本机）'), (box) => {
     (f.attachments || []).forEach((a) => {
       const img = el('img', 'fb-modal-shot');
-      img.src = '/api/feedback/attachment?name=' + encodeURIComponent(a.name);
+      img.src = withToken('/api/feedback/attachment?name=' + encodeURIComponent(a.name));
       img.alt = '反馈截图 ' + a.name;
       box.appendChild(img);
       box.appendChild(el('p', 'field-hint', a.name + ' · ' + Math.max(1, Math.round(a.bytes / 1024)) + 'KB · ' + a.mime));
@@ -5152,7 +5515,7 @@ const LiveRail = (() => {
   // 用户没点过收展 = 默认跟着视口走，**每次现读**：init 时快照一份宽度，遇到布局还没
   // 落定的场合（内嵌帧、刚创建就 maximise 的窗口）会把按钮文案和画面锁成反的——
   // 第一下点击因此"看起来没反应"。点过了就只认他点的。
-  const folded = () => (userChose ? choice : midMQ.matches);
+  const folded = () => (userChose ? choice : true);
   // 窄屏浮层是**临时**状态，不进偏好：没人希望"下次打开窗口默认挡住对话"。
   let overlayOpen = false;
   let rows = 0;
@@ -5168,6 +5531,12 @@ const LiveRail = (() => {
     const expanded = narrow() ? overlayOpen : !folded();
     foldBtn.title = expanded ? '收起现场栏' : '展开现场栏';
     foldBtn.setAttribute('aria-expanded', String(expanded));
+    const openBtn = $('#rail-open');
+    if (openBtn) {
+      openBtn.setAttribute('aria-expanded', String(expanded));
+      openBtn.title = expanded ? '收起现场栏' : '展开现场栏';
+      openBtn.setAttribute('aria-label', openBtn.title);
+    }
   }
   function setFolded(next) {
     userChose = true;
@@ -5184,6 +5553,10 @@ const LiveRail = (() => {
   // 一条竖签在两种视口下含义不同：宽屏是"把栏放回来"，窄屏是"把浮层掀开"。
   foldBtn.addEventListener('click', () => (narrow() ? setOverlay(!overlayOpen) : setFolded(!folded())));
   stripBtn.addEventListener('click', () => (narrow() ? setOverlay(true) : setFolded(false)));
+  $('#rail-open').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (narrow()) setOverlay(!overlayOpen); else setFolded(!folded());
+  });
   if (narrowMQ.addEventListener) {
     narrowMQ.addEventListener('change', () => { overlayOpen = false; applyFold(); });
   }
@@ -5590,6 +5963,15 @@ const BrowserPane = (() => {
     // 这里不能图省事写 'noopener'：按规范那样传第三参，window.open 成功时也返回
     // null，于是"被拦了"这句永远报得出来——是假警报。改为拿到新窗口后亲手摘掉
     // opener（等价于 noopener，挡住反向 tabnabbing），返回值才真的能用来判成败。
+    // 桌面壳里 window.open 一律被主进程拦下（返回 null），按返回值判会报一句假的「弹窗被拦」：
+    // 走 preload 的 openExternal，由主进程 shell.openExternal 交给系统浏览器。
+    const desk = window.gleamDesktop;
+    if (desk && typeof desk.openExternal === 'function') {
+      desk.openExternal(url)
+        .then(() => setStatus('已在系统浏览器打开。'))
+        .catch((err) => setStatus('没能交给系统浏览器：' + ((err && err.message) || err), true));
+      return;
+    }
     const w = window.open(url, '_blank');
     if (w) { try { w.opener = null; } catch { /* 跨源时摘不动，也不影响 */ } }
     setStatus(w ? '已在系统浏览器打开。' : '没弹出来：浏览器拦了弹窗，请在地址栏那里放行。', !w);
@@ -5742,6 +6124,677 @@ const Onboarding = (function () {
   }
 
   return { start };
+})();
+
+
+/* ---------- 头像菜单 + 外观子菜单 ---------- */
+const MeMenu = (() => {
+  const menu = $('#me-menu');
+  const btn = $('#open-me');
+  const sub = $('#me-appearance');
+  function syncChecks() {
+    applyTheme();
+    const signedIn = !$('#me-user').hidden;
+    menu.querySelector('[data-me="signout"]').hidden = !signedIn;
+    menu.querySelector('[data-me-signout-sep]').hidden = !signedIn;
+  }
+  // 菜单贴在用户行正上方、与侧栏左缘对齐；侧栏收起时退回按钮右侧
+  function place() {
+    const row = btn.closest('.user-row') || btn;
+    const r = row.getBoundingClientRect();
+    const collapsed = r.width === 0;
+    const anchor = collapsed ? $('#sidebar-toggle').getBoundingClientRect() : r;
+    menu.style.left = Math.round(collapsed ? anchor.left : r.left + 12) + 'px';
+    menu.style.bottom = Math.max(8, Math.round(window.innerHeight - r.top + 11)) + 'px';
+  }
+  // 子菜单顶边对齐触发项；超出视口底部时整体上移，留 16px 余量
+  function clampFlyout(fly) {
+    if (!fly) return;
+    fly.style.top = '';
+    const rect = fly.getBoundingClientRect();
+    const over = rect.bottom - (window.innerHeight - 16);
+    if (over > 0) fly.style.top = -Math.round(over) + 'px';
+  }
+  function setSub(open) {
+    sub.classList.toggle('open', open);
+    sub.querySelector('[data-me="appearance"]').setAttribute('aria-expanded', String(open));
+    if (open) clampFlyout(sub.querySelector(':scope > .menu-flyout'));
+    if (!open) openLeaf(null);
+  }
+  // 三级子菜单：同一时刻只开一个
+  function openLeaf(leaf) {
+    sub.querySelectorAll('.menu-flyout .menu-sub').forEach((s) => {
+      const on = s === leaf;
+      s.classList.toggle('open', on);
+      s.querySelector('[data-sub]').setAttribute('aria-expanded', String(on));
+      if (on) clampFlyout(s.querySelector(':scope > .menu-flyout'));
+    });
+  }
+  sub.querySelectorAll('.menu-flyout .menu-sub').forEach((s) => s.addEventListener('mouseenter', () => openLeaf(s)));
+  function open() { syncChecks(); place(); menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); menu.querySelector('.menu-item').focus(); }
+  function close() { if (menu.hidden) return; menu.hidden = true; setSub(false); btn.setAttribute('aria-expanded', 'false'); }
+  btn.setAttribute('aria-haspopup', 'menu');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.addEventListener('click', (e) => { e.stopPropagation(); if (menu.hidden) open(); else close(); });
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', close);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  window.addEventListener('resize', close);
+  sub.addEventListener('mouseenter', () => setSub(true));
+  sub.addEventListener('mouseleave', () => setSub(false));
+  menu.addEventListener('click', async (e) => {
+    const pr = e.target.closest('[data-pref]');
+    if (pr) { UIPrefs.set({ [pr.dataset.pref]: pr.dataset.val }); return; }
+    const leaf = e.target.closest('[data-sub]');
+    if (leaf) { const s = leaf.closest('.menu-sub'); openLeaf(s.classList.contains('open') ? null : s); return; }
+    const it = e.target.closest('[data-me]');
+    if (!it) return;
+    const act = it.dataset.me;
+    if (act === 'appearance') { setSub(!sub.classList.contains('open')); return; }
+    close();
+    if (act === 'settings') showView('settings');
+    else if (act === 'growth') showView('growth');
+    else if (act === 'update') $('#me-update').click();
+    else if (act === 'help') $('#me-help').click();
+    else if (act === 'account') MeDrawer.open();
+    else if (act === 'signout') $('#me-signout').click();
+  });
+  return { open, close };
+})();
+$('#sp-account').addEventListener('click', () => MeDrawer.open());
+// Ctrl/⌘ + , 打开设置：已并入 chrome.js 的全局键位表（可在「设置 → 快捷键」里改）。
+$('#memory-empty-write').addEventListener('click', () => $('#memory-content').focus());
+
+/* ---------- 全局任务搜索（Ctrl+K）：本机会话 + 当前已载入的目标 ---------- */
+const TaskSearch = (() => {
+  const overlay = $('#task-search');
+  const input = $('#task-search-input');
+  const list = $('#task-search-list');
+  const count = $('#task-search-count');
+  let items = [];
+  let shown = [];
+  let sel = 0;
+  let lastFocus = null;
+  const fmtTime = (s) => {
+    if (!s) return '';
+    const d = new Date(s);
+    if (isNaN(d)) return '';
+    const today = new Date();
+    return d.toDateString() === today.toDateString()
+      ? d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  };
+  async function collect() {
+    const spaceName = new Map((spaceState.spaces || []).map((sp) => [sp.id, sp.name]));
+    let convos = [];
+    try { convos = (await api('GET', '/api/conversations')).conversations || []; } catch { convos = []; }
+    const out = convos.map((c) => ({
+      kind: 'convo', id: c.id, title: c.title || '新对话',
+      sub: [spaceName.get(c.space_id || 'default') || '默认空间', c.preview || ''].filter(Boolean).join(' · '),
+      time: c.updated_at, hay: `${c.title} ${c.preview || ''} ${c.id}`.toLowerCase(),
+    }));
+    [...tasks.values()].forEach((t) => {
+      const i = t.info || {};
+      out.push({ kind: 'goal', id: i.task_id, title: i.goal || '目标', sub: '目标 · ' + (STATUS_LABEL[i.status] || i.status || ''),
+        time: i.created_at || i.started_at, hay: `${i.goal || ''} ${i.task_id || ''}`.toLowerCase() });
+    });
+    out.sort((a, b) => (new Date(b.time || 0)) - (new Date(a.time || 0)));
+    return out;
+  }
+  function render() {
+    const q = input.value.trim().toLowerCase();
+    shown = q ? items.filter((it) => it.hay.includes(q)) : items;
+    sel = Math.min(sel, Math.max(0, shown.length - 1));
+    count.textContent = String(shown.length);
+    list.innerHTML = '';
+    if (!shown.length) { list.appendChild(el('div', 'search-empty', q ? '没有匹配的任务' : '还没有任务')); return; }
+    shown.slice(0, 200).forEach((it, i) => {
+      const row = el('button', 'search-row' + (i === sel ? ' active' : ''));
+      row.type = 'button';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', String(i === sel));
+      row.innerHTML = `<span class="search-row-title">${esc(it.title)}</span><span class="search-row-sub">${esc(it.sub)}</span><span class="search-row-time">${esc(fmtTime(it.time))}</span>`;
+      row.addEventListener('mousemove', () => { if (sel !== i) { sel = i; paintSel(); } });
+      row.addEventListener('click', () => choose(it));
+      list.appendChild(row);
+    });
+  }
+  function paintSel() {
+    [...list.children].forEach((r, i) => { r.classList.toggle('active', i === sel); r.setAttribute('aria-selected', String(i === sel)); });
+    const cur = list.children[sel];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+  }
+  function choose(it) {
+    close();
+    if (it.kind === 'convo') { showView('goals'); openConvo(it.id); return; }
+    showView('goals');
+    const t = tasks.get(it.id);
+    if (t && t.card && t.card.isConnected) t.card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  async function open() {
+    lastFocus = document.activeElement;
+    overlay.hidden = false;
+    input.value = '';
+    sel = 0;
+    list.innerHTML = '<div class="search-empty">加载中…</div>';
+    input.focus();
+    items = await collect();
+    render();
+  }
+  function close() { if (overlay.hidden) return; overlay.hidden = true; if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+  input.addEventListener('input', () => { sel = 0; render(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (shown.length) { sel = (sel + 1) % Math.min(shown.length, 200); paintSel(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (shown.length) { sel = (sel - 1 + Math.min(shown.length, 200)) % Math.min(shown.length, 200); paintSel(); } }
+    else if (e.key === 'Enter') { e.preventDefault(); if (shown[sel]) choose(shown[sel]); }
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !overlay.hidden) { close(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K') && !e.isComposing) { e.preventDefault(); if (overlay.hidden) open(); else close(); }
+  });
+  $('#task-search-open').addEventListener('click', open);
+  return { open, close };
+})();
+
+// 设置面板：分区标题挪到卡片上方，卡片只装设置行
+document.querySelectorAll('.settings-panel > .card > .section-title:first-child').forEach((h) => {
+  h.classList.add('settings-section-label');
+  h.parentElement.before(h);
+});
+
+/* ============================================================
+ * 站点：模板轮播（首页）+ 「站点」页
+ *
+ * 模板是 Gleam 自己写的起手式：点一下只是把一句建站目标填进输入框并挂上「站点」芯片，
+ * 不会替你提交，也不会凭空生成文件。缩略图是对应骨架页面的截图（static/sites/*.webp）。
+ * 「我的站点」只列真实存在的东西：各空间文件夹里 sites/ 等位置的 index.html，
+ * 用与文件选择器相同的只读工具（file.search / file.read）扫出来；扫不到就是空态。
+ * ============================================================ */
+const SITE_CATS = [
+  { id: 'landing', label: '落地页' }, { id: 'portfolio', label: '作品集' }, { id: 'blog', label: '博客与内容' },
+  { id: 'dashboard', label: '数据看板' }, { id: 'internal', label: '内部工具' }, { id: 'other', label: '其他' },
+];
+const SITE_TEMPLATES = [
+  {
+    "id": "notes-app",
+    "cat": "landing",
+    "title": "本地笔记应用 · 产品落地页",
+    "prompt": "为一款本地优先的笔记应用做产品落地页：首屏标语与两个行动按钮、三项特性介绍、价格区与常见问题。"
+  },
+  {
+    "id": "night-ride",
+    "cat": "landing",
+    "title": "城市夜骑活动 · 报名页",
+    "prompt": "为一场城市夜骑活动做报名落地页：活动主视觉、时间地点、路线说明、报名表单（姓名、手机、车型），以及注意事项。"
+  },
+  {
+    "id": "street-photo",
+    "cat": "portfolio",
+    "title": "街头摄影 · 暗色作品集",
+    "prompt": "做一个街头摄影师的暗色作品集：顶部姓名与简介、按年份筛选、瀑布流照片网格（用占位色块代替照片）、点击放大的灯箱。"
+  },
+  {
+    "id": "illustrator",
+    "cat": "portfolio",
+    "title": "插画师 · 个人作品主页",
+    "prompt": "做一个插画师的个人作品主页：大号姓名标题、三栏精选作品卡片（作品名 + 年份）、合作邀约区和联系方式，风格明亮活泼。"
+  },
+  {
+    "id": "tech-blog",
+    "cat": "blog",
+    "title": "极简技术博客 · 首页",
+    "prompt": "做一个极简技术博客：站点名与一句话简介、文章列表（标题、日期、标签、两行摘要）、标签云和订阅入口，阅读舒适、深浅两套配色。"
+  },
+  {
+    "id": "reading-weekly",
+    "cat": "blog",
+    "title": "读书笔记周刊 · 归档页",
+    "prompt": "做一个读书笔记周刊的归档页：刊头、按期号排列的卡片（期号、本期书名、一句摘录）、搜索框与按年份分组，排版偏杂志感。"
+  },
+  {
+    "id": "budget",
+    "cat": "dashboard",
+    "title": "家庭记账 · 月度看板",
+    "prompt": "做一个家庭记账的月度看板：读取同目录 data.json（先生成一份示例数据并标明是示例），展示收支概览、按分类的环形图、按周的柱状图和最近流水表。"
+  },
+  {
+    "id": "team-weekly",
+    "cat": "dashboard",
+    "title": "团队周报 · 指标看板",
+    "prompt": "做一个团队周报指标看板：本地 data.json 驱动（先生成示例并标注），包含本周完成事项、进行中事项、阻塞项列表和一条趋势折线，适合投屏。"
+  },
+  {
+    "id": "room-booking",
+    "cat": "internal",
+    "title": "会议室预约 · 内部表单",
+    "prompt": "做一个会议室预约的内部小工具：左侧房间列表、右侧按小时的时间格，点格子弹出预约表单，数据存浏览器 localStorage，不需要后端。"
+  },
+  {
+    "id": "asset-lending",
+    "cat": "internal",
+    "title": "设备借用登记 · 内部工具",
+    "prompt": "做一个设备借用登记台：设备表格（名称、编号、状态、借用人）、借出与归还按钮、按状态筛选，数据存 localStorage，可导出 CSV。"
+  },
+  {
+    "id": "party-invite",
+    "cat": "other",
+    "title": "生日派对邀请函 · 单页",
+    "prompt": "做一张生日派对的网页邀请函：大号标题、时间地点、一段手写感的邀请语、加入日历按钮和回执表单（是否出席、人数）。"
+  },
+  {
+    "id": "countdown",
+    "cat": "other",
+    "title": "发布会倒计时 · 单页",
+    "prompt": "做一个发布会倒计时单页：全屏深色背景、居中的天/时/分/秒倒计时（目标时间写在页面顶部的常量里）、一句标语和预约提醒按钮。"
+  }
+];
+
+function startSiteFromTemplate(t) {
+  if (viewingConvo || document.documentElement.dataset.view !== 'goals') showView('goals');
+  goalInput.value = `在工作区新建 sites/${t.id}/index.html：${t.prompt}单文件 HTML + CSS，不依赖外部资源，桌面和手机都能看。`;
+  goalInput.dispatchEvent(new Event('input', { bubbles: true }));
+  setSiteMode(true);
+  goalInput.focus();
+  goalInput.selectionStart = goalInput.selectionEnd = goalInput.value.length;
+}
+
+const SiteTemplates = (() => {
+  let cat = SITE_CATS[0].id;
+  function paint(box) {
+    if (UIPrefs.get().siteTplHidden) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = `<div class="site-tpl-head">
+        <div class="site-tpl-tabs" role="tablist" aria-label="模板分类">${SITE_CATS.map((c) =>
+          `<button type="button" role="tab" data-cat="${c.id}" aria-selected="${c.id === cat}">${esc(c.label)}</button>`).join('')}</div>
+        <div class="site-tpl-nav">
+          <button type="button" class="icon-btn" data-dir="-1" aria-label="上一组"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg></button>
+          <button type="button" class="icon-btn" data-dir="1" aria-label="下一组"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></button>
+          <button type="button" class="icon-btn" data-close aria-label="收起站点模板" title="收起（可在「站点」页重新打开）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+      </div>
+      <div class="site-tpl-row" role="list"></div>`;
+    const row = box.querySelector('.site-tpl-row');
+    // 一条横向轨道按分类顺序排开；分类标签只是跳转锚点，滚动时高亮跟着走
+    SITE_CATS.forEach((c) => SITE_TEMPLATES.filter((t) => t.cat === c.id).forEach((t) => {
+      const card = el('button', 'site-tpl-card');
+      card.type = 'button';
+      card.dataset.cat = t.cat;
+      card.setAttribute('role', 'listitem');
+      card.title = '用这个模板起一个站点（只填进输入框，不会自动提交）';
+      card.innerHTML = `<span class="site-tpl-thumb"><img src="/assets/sites/${esc(t.id)}.webp" alt="" loading="lazy" width="400" height="250"></span><span class="site-tpl-title">${esc(t.title)}</span>`;
+      card.addEventListener('click', () => startSiteFromTemplate(t));
+      row.appendChild(card);
+    }));
+    const tabs = [...box.querySelectorAll('.site-tpl-tabs [data-cat]')];
+    const prev = box.querySelector('[data-dir="-1"]');
+    const next = box.querySelector('[data-dir="1"]');
+    const mark = (id) => { cat = id; tabs.forEach((x) => x.setAttribute('aria-selected', String(x.dataset.cat === id))); };
+    const sync = () => {
+      const max = row.scrollWidth - row.clientWidth;
+      prev.disabled = row.scrollLeft <= 1;
+      next.disabled = row.scrollLeft >= max - 1;
+      if (jumping) return;
+      const first = [...row.children].find((c) => c.offsetLeft + c.offsetWidth / 2 >= row.scrollLeft);
+      if (first) mark(row.scrollLeft >= max - 1 && max > 0 ? cat : first.dataset.cat);
+    };
+    let jumping = null;
+    tabs.forEach((b) => b.addEventListener('click', () => {
+      mark(b.dataset.cat);
+      const target = row.querySelector(`.site-tpl-card[data-cat="${b.dataset.cat}"]`);
+      if (!target) return;
+      clearTimeout(jumping);
+      jumping = setTimeout(() => { jumping = null; sync(); }, 600);
+      row.scrollTo({ left: target.offsetLeft, behavior: 'smooth' });
+    }));
+    [prev, next].forEach((b) => b.addEventListener('click', () => {
+      row.scrollBy({ left: Number(b.dataset.dir) * row.clientWidth * 0.8, behavior: 'smooth' });
+    }));
+    row.addEventListener('scroll', sync, { passive: true });
+    requestAnimationFrame(() => {
+      const target = row.querySelector(`.site-tpl-card[data-cat="${cat}"]`);
+      if (target && cat !== SITE_CATS[0].id) row.scrollLeft = target.offsetLeft;
+      mark(cat); sync();
+    });
+    box.querySelector('[data-close]').addEventListener('click', () => {
+      UIPrefs.set({ siteTplHidden: true });
+      box.hidden = true;
+      box.innerHTML = '';
+      toast('已收起站点模板，可在「站点」页重新打开', 'success', 2600);
+    });
+  }
+  function restore() {
+    UIPrefs.set({ siteTplHidden: false });
+    const box = document.querySelector('#goals-empty .site-tpl');
+    if (box) paint(box);
+  }
+  return { paint, restore };
+})();
+
+// 「站点」页：扫各空间文件夹里的 index.html。只读、只扫，不建也不删。
+const SITE_SKIP = /[\/\\](node_modules|\.[^\/\\]+|vendor|bower_components)[\/\\]/;
+async function loadSites() {
+  const body = $('#sites-body');
+  const note = $('#sites-note');
+  const layout = UIPrefs.get().sitesLayout || 'grid';
+  body.dataset.layout = layout;
+  document.querySelectorAll('.sites-layout [data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === layout)));
+  body.innerHTML = '<div class="sites-grid">' + '<div class="site-card skeleton-card"><div class="skeleton" style="height:100%"></div></div>'.repeat(3) + '</div>';
+  note.hidden = true;
+  let spaces;
+  try {
+    const sv = await api('GET', '/api/spaces');
+    spaces = (sv.spaces || []).filter((s) => s.path).map((s) => ({ name: s.name, path: s.path }));
+    if (!spaces.length && sv.workspace) spaces = [{ name: '当前工作区', path: sv.workspace }];
+  } catch (err) {
+    try {
+      const ws = await api('GET', '/api/workspace');
+      spaces = ws.workspace ? [{ name: '当前工作区', path: ws.workspace }] : [];
+    } catch (e2) { loadError(body, e2, loadSites); return; }
+  }
+  const seen = new Set();
+  const found = [];
+  let skipped = 0;
+  for (const sp of spaces) {
+    if (seen.has(sp.path)) continue;
+    seen.add(sp.path);
+    try {
+      const res = await api('POST', '/api/tools/call', { name: 'file.search', args: { root: sp.path, pattern: 'index.html' } });
+      (res.output?.files || []).forEach((f) => {
+        if (SITE_SKIP.test(f)) return;
+        found.push({ file: f, dir: f.replace(/[\/\\][^\/\\]+$/, ''), space: sp });
+      });
+    } catch { skipped++; }
+  }
+  // 标题与预览都来自文件本身；最多读 24 个，避免大仓库里一口气读太多
+  const sites = found.slice(0, 24);
+  await Promise.all(sites.map(async (s) => {
+    try {
+      const r = await api('POST', '/api/tools/call', { name: 'file.read', args: { path: s.file } });
+      s.html = r.output?.content || '';
+      s.size = r.output?.size || 0;
+      const m = s.html.match(/<title[^>]*>([^<]{1,120})<\/title>/i);
+      s.title = m ? m[1].trim() : '';
+    } catch { s.html = ''; }
+  }));
+  if (skipped) {
+    note.hidden = false;
+    note.textContent = `有 ${skipped} 个空间不在当前工作区范围内，切换到那个空间后再刷新就能扫到。`;
+  } else if (found.length > sites.length) {
+    note.hidden = false;
+    note.textContent = `共找到 ${found.length} 个，这里先列出前 ${sites.length} 个。`;
+  }
+  renderSites(body, sites);
+}
+
+function renderSites(body, sites) {
+  body.innerHTML = '';
+  if (!sites.length) {
+    const empty = el('div', 'empty sites-empty');
+    empty.innerHTML = `<div class="sites-empty-art" aria-hidden="true"><svg viewBox="0 0 64 44" width="64" height="44" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="60" height="40" rx="4"/><path d="M2 10h60"/><path d="M8 6h.01M12 6h.01M16 6h.01"/><path d="M14 20h18M14 26h26M14 32h12" opacity=".6"/></svg></div>
+      <div class="empty-title">还没有站点</div>
+      <p class="empty-desc">让 Gleam 在工作区里做一个网页：做好的 index.html 会出现在这里。</p>`;
+    const go = el('button', 'btn btn-secondary btn-sm', '去首页挑个模板');
+    go.type = 'button';
+    go.addEventListener('click', () => { SiteTemplates.restore(); showView('goals'); setSiteMode(true); goalInput.focus(); });
+    empty.appendChild(go);
+    body.appendChild(empty);
+    return;
+  }
+  const grid = el('div', 'sites-grid');
+  // 缩略图是把 1280×800 的页面按卡片实际宽度等比缩小；宽度随窗口变，比例也跟着变
+  const fit = new ResizeObserver((entries) => entries.forEach((e) => e.target.style.setProperty('--s', String(e.contentRect.width / 1280))));
+  sites.forEach((s) => {
+    const name = s.title || s.dir.split(/[\/\\]/).pop();
+    const rel = relPath(s.file, s.space.path);
+    const card = el('article', 'site-card');
+    const thumb = el('div', 'site-thumb');
+    if (s.html) {
+      // 只读预览：sandbox 不给脚本、不给同源，外链资源加载不到时就是骨架样子——这是真实文件的样子，不做美化
+      const fr = document.createElement('iframe');
+      fr.setAttribute('sandbox', '');
+      fr.setAttribute('loading', 'lazy');
+      fr.setAttribute('tabindex', '-1');
+      fr.setAttribute('aria-hidden', 'true');
+      fr.srcdoc = s.html;
+      thumb.appendChild(fr);
+    } else {
+      thumb.appendChild(el('span', 'site-thumb-miss', '读不到内容'));
+    }
+    const meta = el('div', 'site-meta');
+    meta.innerHTML = `<div class="site-name" title="${esc(name)}">${esc(name)}</div><div class="site-path" title="${esc(s.file)}">${esc(s.space.name)} · ${esc(rel)}</div>`;
+    const acts = el('div', 'site-acts');
+    const pv = el('button', 'btn btn-secondary btn-sm', '预览');
+    pv.type = 'button';
+    pv.disabled = !s.html;
+    pv.addEventListener('click', () => openSitePreview(name, s));
+    const more = el('button', 'btn btn-ghost btn-sm', '继续完善');
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      showView('goals');
+      goalInput.value = `继续完善 ${rel}：`;
+      goalInput.dispatchEvent(new Event('input', { bubbles: true }));
+      addRef('file', rel, '@' + s.file);
+      setSiteMode(true);
+      goalInput.focus();
+    });
+    const cp = el('button', 'btn btn-ghost btn-sm', '复制路径');
+    cp.type = 'button';
+    cp.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(s.file); toast('已复制路径', 'success', 1600); }
+      catch { toast('复制失败，路径是：' + s.file, 'error', 6000); }
+    });
+    acts.append(pv, more, cp);
+    fit.observe(thumb);
+    card.append(thumb, meta, acts);
+    grid.appendChild(card);
+  });
+  body.appendChild(grid);
+}
+
+function openSitePreview(name, s) {
+  Modal.open(esc(name), (box) => {
+    box.appendChild(el('p', 'field-hint', `${s.file} · 只读预览：脚本和外链资源不会运行，完整效果请用浏览器直接打开这个文件。`));
+    const fr = document.createElement('iframe');
+    fr.className = 'site-preview-frame';
+    fr.setAttribute('sandbox', '');
+    fr.srcdoc = s.html;
+    box.appendChild(fr);
+  });
+}
+
+document.getElementById('sites-refresh')?.addEventListener('click', () => loadSites());
+document.getElementById('sites-add')?.addEventListener('click', () => {
+  SiteTemplates.restore();
+  showView('goals');
+  setSiteMode(true);
+  goalInput.focus();
+});
+document.querySelectorAll('.sites-layout [data-layout]').forEach((b) => b.addEventListener('click', () => {
+  UIPrefs.set({ sitesLayout: b.dataset.layout });
+  $('#sites-body').dataset.layout = b.dataset.layout;
+  document.querySelectorAll('.sites-layout [data-layout]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+}));
+
+/* ---------- 壳层：侧栏收展 / 底部快捷跳转 / 首页态 / 本机活动卡 ---------- */
+const ShellLayout = (() => {
+  const toggle = $('#sidebar-toggle');
+  function syncToggle() {
+    const collapsed = !!UIPrefs.get().sidebarCollapsed;
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.title = collapsed ? '展开侧栏' : '收起侧栏';
+    toggle.setAttribute('aria-label', toggle.title);
+  }
+  toggle.addEventListener('click', () => {
+    UIPrefs.set({ sidebarCollapsed: !UIPrefs.get().sidebarCollapsed });
+    syncToggle();
+  });
+  syncToggle();
+  document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.goto)));
+
+  // 本机活动：只用本机真实数据（会话最后活跃日、成长日志里完成的任务），没有就保持全空格子
+  const WEEKS = 52;
+  let tab = 'convo';
+  let cache = null;
+  const dayKey = (d) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  async function fetchData() {
+    const [cv, gr] = await Promise.all([
+      api('GET', '/api/conversations').catch(() => ({})),
+      api('GET', '/api/growth/recent?n=200').catch(() => ({})),
+    ]);
+    const convo = new Map();
+    (cv.conversations || []).forEach((c) => {
+      if (!c.count || !c.updated_at) return;
+      const k = dayKey(new Date(c.updated_at));
+      convo.set(k, (convo.get(k) || 0) + 1);
+    });
+    const task = new Map();
+    (gr.entries || []).forEach((e) => {
+      if (e.type !== 'task_completed' || !e.time) return;
+      const k = dayKey(new Date(e.time));
+      task.set(k, (task.get(k) || 0) + 1);
+    });
+    return { convo, task };
+  }
+  function level(n, max) {
+    if (!n) return 0;
+    if (max <= 1) return 4;
+    return Math.min(4, 1 + Math.floor((n - 1) / Math.max(1, max / 4)));
+  }
+  function render(card) {
+    const data = cache ? cache[tab] : new Map();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    start.setDate(start.getDate() - (WEEKS - 1) * 7 - today.getDay());
+    const max = Math.max(0, ...data.values());
+    let total = 0;
+    const cells = [];
+    const months = [];
+    let lastMonth = -1;
+    for (let w = 0; w < WEEKS; w++) {
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(start); day.setDate(start.getDate() + w * 7 + d);
+        if (d === 0 && day.getMonth() !== lastMonth) {
+          if (w > 0) months.push(`<span style="grid-column:${w + 1}">${day.getMonth() + 1}月</span>`);
+          lastMonth = day.getMonth();
+        }
+        if (day > today) { cells.push('<i class="heat-cell" data-future></i>'); continue; }
+        const n = data.get(dayKey(day)) || 0;
+        total += n;
+        cells.push(`<i class="heat-cell" data-l="${level(n, max)}" title="${day.getMonth() + 1}/${day.getDate()} · ${n}"></i>`);
+      }
+    }
+    card.innerHTML = `<div class="activity-tabs" role="tablist">
+        <button type="button" role="tab" data-act="convo" aria-selected="${tab === 'convo'}">会话</button>
+        <button type="button" role="tab" data-act="task" aria-selected="${tab === 'task'}">任务</button>
+      </div>
+      <div class="heat-grid" aria-label="过去一年的本机活动，共 ${total} 次">${cells.join('')}</div>
+      <div class="heat-months" aria-hidden="true">${months.join('')}</div>`;
+    card.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.act; render(card); }));
+  }
+  async function paintActivity() {
+    const card = document.querySelector('#goals-empty .activity-card');
+    if (!card) return;
+    if (!card.childElementCount) render(card);
+    try { cache = await fetchData(); } catch { cache = null; }
+    if (card.isConnected) render(card);
+  }
+
+  // 首页态：会话流里只有空态时，主区换成首页布局（插图位 + 活动卡 + 底部输入框）
+  const view = $('#view-goals');
+  const feed = $('#goal-feed');
+  function syncHome() {
+    const empty = $('#goals-empty');
+    const home = !!empty && feed.children.length === 1;
+    view.classList.toggle('is-home', home);
+    if (home && empty.querySelector('.activity-card') && !empty.querySelector('.activity-card').childElementCount) paintActivity();
+    const tpl = empty && empty.querySelector('.site-tpl');
+    if (home && tpl && !tpl.childElementCount) SiteTemplates.paint(tpl);
+  }
+  new MutationObserver(syncHome).observe(feed, { childList: true });
+  syncHome();
+  return { paintActivity, syncHome };
+})();
+
+/* ---------- 输入框工具条：执行方式下拉 + 侧栏模式切换 + 附件 ----------
+ * 下拉和侧栏开关都不存状态：真实状态仍在 #perm-seg / #task-seg 的 aria-pressed 上，
+ * 这里只读它们来画按钮，改动也一律转成对那两组按钮的点击（同一条保存路径）。 */
+const ComposerControls = (() => {
+  const permBtn = $('#cp-perm');
+  const permPop = $('#cp-perm-pop');
+  const permLabel = $('#cp-perm-label');
+  const permIcon = $('#cp-perm-icon');
+  const toggle = $('#mode-toggle');
+  if (!permBtn || !permPop || !toggle) return {};
+  const ICON = {
+    auto: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.8v6.4l5-3.2z"/></svg>',
+    plan_first: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 5.8v5.4c0 4.4 3 7.9 7 9.3 4-1.4 7-4.9 7-9.3V5.8z"/><path d="m9.3 12 1.9 1.9 3.6-3.7"/></svg>',
+    chat: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H8l-4 3v-4.6A7.5 7.5 0 1 1 20 11.5z"/></svg>',
+  };
+  const LABEL = { auto: '自动执行', plan_first: '执行前询问', chat: '仅对话' };
+  const pressed = (sel) => {
+    const b = document.querySelector(sel + ' button[aria-pressed="true"]');
+    return b ? (b.dataset.perm || b.dataset.task) : '';
+  };
+  function paint() {
+    const task = pressed('#task-seg') || 'work';
+    const perm = pressed('#perm-seg') || 'auto';
+    const key = task === 'chat' ? 'chat' : (perm === 'plan_first' ? 'plan_first' : 'auto');
+    permLabel.textContent = LABEL[key];
+    permIcon.innerHTML = ICON[key];
+    permBtn.dataset.mode = key;
+    permBtn.title = key === 'auto' ? '自动执行：仅高风险操作才征求批准（点击切换）'
+      : key === 'plan_first' ? '执行前先给出计划，征求你的批准（点击切换）'
+        : '只聊天，不规划执行（点击切换）';
+    const code = task === 'code';
+    toggle.querySelectorAll('button[data-mode]').forEach((b) => {
+      b.setAttribute('aria-checked', String((b.dataset.mode === 'code') === code));
+    });
+  }
+  const mo = new MutationObserver(paint);
+  ['#task-seg', '#perm-seg'].forEach((sel) => {
+    const n = $(sel);
+    if (n) mo.observe(n, { subtree: true, attributes: true, attributeFilter: ['aria-pressed'] });
+  });
+  paint();
+
+  const setOpen = (open) => {
+    permPop.hidden = !open;
+    permBtn.setAttribute('aria-expanded', String(open));
+  };
+  permBtn.addEventListener('click', () => {
+    const open = permPop.hidden;
+    // 让其它输入框弹层先按自己的规矩收起（它们监听 document 点击），再开这一个
+    setTimeout(() => setOpen(open), 0);
+  });
+  document.addEventListener('click', (e) => {
+    if (!permPop.hidden && !e.target.closest('#cp-perm-pop') && !e.target.closest('#cp-perm')) setOpen(false);
+  });
+  ['#cp-model', '#cp-context', '#plus-btn'].forEach((sel) => {
+    const n = $(sel);
+    if (n) n.addEventListener('click', () => setOpen(false), true);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !permPop.hidden) setOpen(false); });
+
+  toggle.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-mode]');
+    if (!b) return;
+    const cur = pressed('#task-seg') || 'work';
+    const want = b.dataset.mode;
+    if (want === 'code' && cur !== 'code') document.querySelector('#task-seg button[data-task="code"]').click();
+    if (want === 'work' && cur === 'code') document.querySelector('#task-seg button[data-task="work"]').click();
+  });
+
+  const attach = $('#cp-attach');
+  if (attach) {
+    attach.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = document.querySelector('#plus-menu button[data-plus="file"]');
+      if (item) item.click();
+    });
+  }
+  return { paint };
 })();
 
 /* ---------- 启动（必须是本文件的最后一段，判据见 scripts/check-app-startup.py） ---------- */

@@ -93,7 +93,7 @@ func TestConnections_NoRowHasAnEmptyCell(t *testing.T) {
 // TestConnections_InboundRowFollowsRealBindAddr 本机服务这一行只画真实监听地址。
 //
 // 默认 fixture 不传地址 → 这一行**不出现**（不是"猜一个回环给自己壮胆"）；
-// 传非回环地址 → 状态与警示都必须改口，因为这一层没有鉴权，风险完全由绑定地址决定。
+// 传非回环地址 → 状态与警示都必须改口：口令挡得住网页，挡不住明文链路上的旁听，风险由绑定地址决定。
 func TestConnections_InboundRowFollowsRealBindAddr(t *testing.T) {
 	f := newFixture(t, nil)
 
@@ -109,7 +109,7 @@ func TestConnections_InboundRowFollowsRealBindAddr(t *testing.T) {
 		t.Errorf("回环行 = %+v", loop)
 	}
 	if !strings.Contains(loop.Alert, "回环") {
-		t.Errorf("回环应说明\"只有本机能连、但没有鉴权\"：%q", loop.Alert)
+		t.Errorf("回环应说明\"只有本机能连、口令文件同用户可读\"：%q", loop.Alert)
 	}
 
 	open, ok := rowByID(f.a.ConnectionView("0.0.0.0:8787"), "inbound")

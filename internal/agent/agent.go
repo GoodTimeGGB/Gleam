@@ -166,7 +166,7 @@ func (a *Agent) RunGoal(ctx context.Context, req types.GoalRequest) *types.GoalR
 	}
 	result.FinishedAt = time.Now()
 	result.Usage = a.usageOf(taskID)
-	result.Usage.DurationMs = result.FinishedAt.Sub(handle.started).Milliseconds()
+	result.Usage.DurationMs = elapsedMs(result.FinishedAt.Sub(handle.started))
 
 	// 记录助手回复到同一会话；失败/取消也留痕，避免历史缺轮。
 	a.appendConvo(req.ConversationID, conversation.Message{
@@ -1725,4 +1725,18 @@ func DataDir(cfg *config.Config) string {
 	_ = os.MkdirAll(filepath.Join(cfg.DataDir, "skills"), 0o755)
 	_ = os.MkdirAll(filepath.Join(cfg.DataDir, "tasks"), 0o755)
 	return cfg.DataDir
+}
+
+// elapsedMs 已结束任务的耗时（整数毫秒），不足 1ms 记为 1ms。
+//
+// 为什么钳到 1 而不是改成小数或向上取整：duration_ms 是对外的整数字段——前端、归档、
+// replay 的前后对比都按整数毫秒读，历史归档里也全是截断值。改类型会破坏这些读者；
+// 全量向上取整会让每一条新记录都比同口径的旧记录多出不到 1ms，replay 对比里凭空冒出差异。
+// 只有「不足 1ms」这一档会被截成 0，而 0 在这里的意思是「没记录耗时」，对一个确实跑完的
+// 任务是错的说法。所以只修这一档：其余数值与以前逐位相同。
+func elapsedMs(d time.Duration) int64 {
+	if ms := d.Milliseconds(); ms >= 1 {
+		return ms
+	}
+	return 1
 }

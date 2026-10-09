@@ -66,7 +66,7 @@ func feedbackDir(dataDir string) string { return filepath.Join(dataDir, "feedbac
 // 而那句话唯一的凭据就是这份归档。
 func TestFeedbackSubmit_ArchivesLocally(t *testing.T) {
 	srv, dataDir := newArchiveFixture(t)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	code, got, _ := fbDo(t, ts, "POST", "/api/feedback", map[string]any{
@@ -112,7 +112,7 @@ func TestFeedbackSubmit_ArchivesLocally(t *testing.T) {
 // 换后端时这里跟着变，前端不需要再改一处。
 func TestFeedbackList_SaysWhereItGoes(t *testing.T) {
 	srv, _ := newArchiveFixture(t)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 	_, list, _ := fbDo(t, ts, "GET", "/api/feedback", nil)
 	if r, _ := list["remote"].(string); r != "" {
@@ -121,7 +121,7 @@ func TestFeedbackList_SaysWhereItGoes(t *testing.T) {
 
 	counts, _ := countHandler()
 	dsrv, _ := newDeliveryFixture(t, counts)
-	dts := httptest.NewServer(dsrv.Handler())
+	dts := newTokenTestServer(dsrv)
 	defer dts.Close()
 	_, dl, _ := fbDo(t, dts, "GET", "/api/feedback", nil)
 	if r, _ := dl["remote"].(string); r != "supabase" {
@@ -150,7 +150,7 @@ func TestFeedbackSubmit_ContextIsServerSideAndHostOnly(t *testing.T) {
 	if err := store.SetLLMAPIKey(apiKey, "gw.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	code, got, _ := fbDo(t, ts, "POST", "/api/feedback", map[string]any{
@@ -204,7 +204,7 @@ func TestFeedbackSubmit_ContextFromTaskArchive(t *testing.T) {
 			{StepID: "s3", Tool: "http.post", Status: types.StepFailed, Error: "连接被重置"},
 		},
 	})
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	_, got, _ := fbDo(t, ts, "POST", "/api/feedback", map[string]any{
@@ -237,7 +237,7 @@ func TestFeedbackSubmit_ContextFromTaskArchive(t *testing.T) {
 // 像提交了却没生效，用户于是再提交一次。
 func TestFeedbackSubmit_RejectsBadInput(t *testing.T) {
 	srv, dataDir := newArchiveFixture(t)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	cases := []struct {
@@ -269,7 +269,7 @@ func TestFeedbackSubmit_RejectsBadInput(t *testing.T) {
 // 并且要能看得回来——历史列表里列得出名字却取不回图片，等于只留了个占位。
 func TestFeedbackSubmit_StoresAndServesScreenshot(t *testing.T) {
 	srv, _ := newArchiveFixture(t)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)
@@ -318,7 +318,7 @@ func TestFeedbackSubmit_StoresAndServesScreenshot(t *testing.T) {
 // 就失败、什么都没写，回滚那段代码删不删都一样——诱饵得让"先写成功的部分"真的存在。
 func TestFeedbackSubmit_FakeImageRollsBack(t *testing.T) {
 	srv, dataDir := newArchiveFixture(t)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	script := base64.StdEncoding.EncodeToString([]byte("#!/bin/sh\nrm -rf /\n"))
@@ -362,7 +362,7 @@ func TestFeedbackAttachment_RejectsTraversal(t *testing.T) {
 	if err := os.WriteFile(decoy, []byte(`{"api_key":"不该被读到"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	for _, name := range []string{"../settings.json", `..\..\settings.json`, "settings.json", "", "fb-99999999-999999-ffff-1.png", "fb-20260924-120000-abcd-1.exe"} {
@@ -385,7 +385,7 @@ func TestFeedbackAttachment_RejectsTraversal(t *testing.T) {
 // 截到的可能是别人的窗口、别家的页面，"还留在你机器上"这句话要有出口。
 func TestFeedbackDelete_RemovesArchiveAndScreenshots(t *testing.T) {
 	srv, dataDir := newArchiveFixture(t)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	_, got, _ := fbDo(t, ts, "POST", "/api/feedback", map[string]any{
@@ -491,7 +491,7 @@ func TestFeedbackSubmit_DeliversRedactedCopy(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	}
 	srv, dataDir := newDeliveryFixture(t, handler)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	problemText := `写入失败：cannot open ` + secretWorkspace + `\a.txt（key=` + secretAPIKey + `）`
@@ -560,7 +560,7 @@ func TestFeedbackSubmit_DeliveryFailureStaysLocalAndVisible(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, `{"message":"gateway blew up"}`)
 	})
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	code, got, _ := fbDo(t, ts, "POST", "/api/feedback", map[string]any{"kind": "bug", "text": "远端是坏的"})
@@ -596,7 +596,7 @@ func TestFeedbackSubmit_DeliveryFailureStaysLocalAndVisible(t *testing.T) {
 func TestFeedbackResend_DoesNotRepeatSentRows(t *testing.T) {
 	counts, sent := countHandler()
 	srv, _ := newDeliveryFixture(t, counts)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	_, got, _ := fbDo(t, ts, "POST", "/api/feedback", map[string]any{"kind": "suggestion", "text": "希望支持批量启用"})
@@ -635,7 +635,7 @@ func TestFeedbackContextPreview_MatchesWhatGetsArchived(t *testing.T) {
 		TaskID: "task-fb-prev", Goal: "导出报表", Status: types.GoalFailed,
 		Steps: []types.StepResult{{StepID: "s1", Tool: "shell.exec", Status: types.StepFailed, Error: "退出码 1"}},
 	})
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	code, prev, raw := fbDo(t, ts, "GET", "/api/feedback/context?task_id=task-fb-prev", nil)

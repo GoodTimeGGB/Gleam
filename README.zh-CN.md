@@ -194,6 +194,7 @@ Windows 安装辅助：`scripts/install.ps1`。
 | `~/.gleam/schedules.json` | 调度状态 |
 | `~/.gleam/audit.jsonl` | 安全 / 出网审计 |
 | `~/.gleam/browser-profile/` | 桌面端内嵌浏览器配置 |
+| `~/.gleam/webui.token` | 每次启动生成的 Web UI API 口令（0600）。所有 Web UI API 请求都要在 `X-Gleam-Token` 头里带上它，应用内界面会自动携带；可用 `GLEAM_WEBUI_TOKEN` 预置 |
 
 API Key 建议用环境变量 `GLEAM_API_KEY` 注入，不要写入并提交 YAML。
 

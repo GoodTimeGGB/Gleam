@@ -37,9 +37,12 @@ type Server struct {
 	//
 	// 为什么引擎不该自己知道：「监听在哪」是宿主的事实（桌面端固定回环、命令行可带 --addr），
 	// 而「连接与出网」台账必须把它如实列出来——一个非回环的监听地址意味着局域网里
-	// 任何设备都能提交目标、裁决审批，而这一层没有鉴权。空值时台账不画那一行，
-	// 而不是猜一个"127.0.0.1"给自己壮胆。
+	// 任何设备都能连上来。空值时台账不画那一行，而不是猜一个"127.0.0.1"给自己壮胆。
+	// 守卫（guard.go）也读它：Host 白名单要知道监听在哪，非回环时宿主要打印警告。
 	BindAddr string
+
+	// token 本次启动的 API 口令（guard.go）。NewServer 时生成，进程内不变。
+	token string
 
 	// feedback 用户反馈的本地仓库（<DataDir>/feedback/）。建在服务上而不是每次
 	// new 一个：数据目录在进程生命周期内不变，而"这条反馈存哪儿"不该由调用方记住。
@@ -82,6 +85,7 @@ type approvalWaiter struct {
 func NewServer(a *agent.Agent) *Server {
 	s := &Server{
 		Agent:     a,
+		token:     tokenOrNew(),
 		feedback:  feedback.NewStore(a.DataDir()),
 		tasks:     map[string]*taskInfo{},
 		approvals: map[string]*approvalWaiter{},

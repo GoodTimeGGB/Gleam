@@ -137,6 +137,10 @@ grep -q 'smoke-job' "$OUT" && ok "schedule/create + list" || bad "schedule/creat
 
 # ---------- Web UI 冒烟 ----------
 PORT=8791
+# /api 要本次启动的口令（internal/webui/guard.go）。冒烟用 GLEAM_WEBUI_TOKEN 预置一个，
+# 并让本段所有 curl 自动带上；口令文件 <data-dir>/webui.token 另有一条断言。
+SMOKE_TOKEN="smoke-token-$$-$(date +%s)"
+curl() { command curl -H "X-Gleam-Token: $SMOKE_TOKEN" "$@"; }
 # page_has：首页正文里有没有这个子串。**别改回 `curl … | grep -q`**，理由见文件头 ③。
 page_has() {
   local body
@@ -146,12 +150,16 @@ page_has() {
 # GLEAM_NO_SYS_NOTIFY=1：冒烟会真的触发定时任务，不禁用就会在开发机上弹系统通知。
 # 禁用**不是**静默丢弃——待发内容会打到 stderr（webui.out），所以"通知到底发了没有"
 # 仍然可断言。这条断言正是本批 P0 的端到端出口：判据对但线没接，本仓库栽过四次。
-GLEAM_NO_SYS_NOTIFY=1 "$BIN" webui --addr "127.0.0.1:$PORT" --mock-llm --mock-script "$TMPC/script.json" --workspace "$WSC" --data-dir "$DATAC" > "$TMP/webui.out" 2>&1 &
+GLEAM_WEBUI_TOKEN="$SMOKE_TOKEN" GLEAM_NO_SYS_NOTIFY=1 "$BIN" webui --addr "127.0.0.1:$PORT" --mock-llm --mock-script "$TMPC/script.json" --workspace "$WSC" --data-dir "$DATAC" > "$TMP/webui.out" 2>&1 &
 WEBPID=$!
 trap 'kill "${WEBPID:-}" 2>/dev/null || true' EXIT
 sleep 1.5
 
 curl -sf "http://127.0.0.1:$PORT/api/info" | grep -q '"name":"gleam"' && ok "WebUI /api/info" || bad "WebUI /api/info"
+CODE=$(command curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/info")
+[ "$CODE" = "401" ] && ok "WebUI 无口令请求被拒（401）" || bad "WebUI 无口令请求被拒（实际 $CODE）"
+[ "$(tr -d '[:space:]' < "$DATA/webui.token" 2>/dev/null)" = "$SMOKE_TOKEN" ] && ok "WebUI 口令文件 webui.token" || bad "WebUI 口令文件 webui.token"
+page_has 'name="gleam-token"' && ok "WebUI 首页注入口令" || bad "WebUI 首页注入口令"
 page_has "Gleam" && ok "WebUI 首页渲染" || bad "WebUI 首页渲染"
 curl -sf -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/assets/app.js" | grep -q 200 && ok "WebUI 静态资源" || bad "WebUI 静态资源"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/heartbeat" -o /dev/null -w "%{http_code}" | grep -q 200 && ok "WebUI 心跳 /api/heartbeat" || bad "WebUI 心跳 /api/heartbeat"

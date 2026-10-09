@@ -194,6 +194,7 @@ Windows install helper: `scripts/install.ps1`.
 | `~/.gleam/schedules.json` | Scheduler state |
 | `~/.gleam/audit.jsonl` | Safety / egress audit log |
 | `~/.gleam/browser-profile/` | Embedded browser profile (desktop) |
+| `~/.gleam/webui.token` | Per-launch Web UI API token (0600). Every Web UI API request needs it in the `X-Gleam-Token` header; the in-app UI gets it automatically. Preset it with `GLEAM_WEBUI_TOKEN` |
 
 Prefer injecting secrets via `GLEAM_API_KEY` rather than committing keys into YAML.
 

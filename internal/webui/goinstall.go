@@ -319,18 +319,20 @@ func cleanEntry(name, dstRoot string) (string, bool) {
 	return filepath.Join(dstRoot, "go", clean), true
 }
 
-// withinDir 复核 target 确实落在 root 之内。
+// insideRoot 复核 target 确实落在 root 之内，就地用于写入之前。
 //
 // cleanEntry 已经在归一化时挡过目录穿越，这里是**就地可见的第二道**：解压是真正往盘上
-// 写文件的那一步，多一道便宜的复核不亏；而且它让"写到哪儿"在调用点就能读出来，
-// 不必翻到 cleanEntry 去推。用 filepath.Rel 判归属而不是字符串前缀——前缀法在
-// `.../go` 与 `.../gox` 这种同前缀目录上会误判。
-func withinDir(root, target string) bool {
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
+// 写文件的那一步，多一道便宜的复核不亏，而且"写到哪儿"在调用点就能读出来。
+//
+// 判定用 `前缀 + 分隔符` 而不是 filepath.Rel：`.../go` 与 `.../gox` 这种同前缀目录，
+// 只比前缀会误判，补上分隔符才严格。两侧都先 Clean，目标必须仍是绝对路径。
+func insideRoot(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	if !filepath.IsAbs(target) {
 		return false
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return target != root && strings.HasPrefix(target, root+string(filepath.Separator))
 }
 
 // extractZip 展开 Windows 归档。逐条写，符号链接一律跳过——Go 的 zip 里不该有，
@@ -344,7 +346,7 @@ func extractZip(archive, dstRoot string) error {
 
 	for _, f := range zr.File {
 		target, ok := cleanEntry(f.Name, dstRoot)
-		if !ok || !withinDir(dstRoot, target) {
+		if !ok || !insideRoot(dstRoot, target) {
 			continue
 		}
 		if f.FileInfo().IsDir() {
@@ -399,7 +401,7 @@ func extractTarGz(archive, dstRoot string) error {
 			return err
 		}
 		target, ok := cleanEntry(hdr.Name, dstRoot)
-		if !ok || !withinDir(dstRoot, target) {
+		if !ok || !insideRoot(dstRoot, target) {
 			continue
 		}
 		switch hdr.Typeflag {

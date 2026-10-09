@@ -184,7 +184,7 @@ function promptModal(label, oldValue = '', title = '请输入') {
 }
 
 /* ---------- 导航 ---------- */
-const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: initMemoryOnce, schedules: loadSchedules, tools: loadTools, settings: () => { loadSettingsProfile(); return loadSettings(); }, market: loadMarket, growth: loadGrowth, geo: loadGEO, readiness: loadReadiness, feedback: loadFeedbackView };
+const VIEW_LOADERS = { goals: loadGoals, skills: loadSkills, memory: initMemoryOnce, schedules: loadSchedules, tools: loadTools, settings: () => { loadSettingsProfile(); return loadSettings(); }, market: loadMarket, sites: loadSites, growth: loadGrowth, geo: loadGEO, readiness: loadReadiness, feedback: loadFeedbackView };
 
 function showView(name) {
   document.querySelectorAll('.nav-item[data-view]').forEach((b) => {
@@ -376,8 +376,9 @@ async function submitGoal() {
       return;
     }
     await ensureConvo();
+    const goalText = siteMode && !/index\.html/i.test(displayGoal) ? displayGoal + SITE_SUFFIX : displayGoal;
     const submitted = await api('POST', '/api/goals', {
-      goal: displayGoal,
+      goal: goalText,
       mode: currentMode,
       task_mode: currentTask, role: currentRole,
       conversation_id: currentConvo ? currentConvo.id : undefined,
@@ -431,6 +432,7 @@ plusMenu.addEventListener('click', (e) => {
   else if (act === 'plugin') openPluginPicker();
   else if (act === 'mention') { goalInput.focus(); insertAtCursor('@'); }
   else if (act === 'browser') BrowserPane.toggle();
+  else if (act === 'site') { setSiteMode(!siteMode); goalInput.focus(); }
 });
 
 function insertAtCursor(text) {
@@ -448,8 +450,9 @@ const refsBox = $('#composer-refs');
 const REF_KIND_CN = { file: '文件', goal: '目标', skill: '技能', mcp: '插件', memory: '记忆' };
 
 function renderRefs() {
-  refsBox.hidden = refs.length === 0;
+  refsBox.hidden = refs.length === 0 && !siteMode;
   refsBox.innerHTML = '';
+  if (siteMode) refsBox.appendChild(siteChip());
   refs.forEach((r, i) => {
     const chip = el('span', 'ref-chip');
     chip.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${r.kind === 'file' ? '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M13 2v7h7"/>' : r.kind === 'skill' ? '<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/>' : '<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V18c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/>'}</svg><span class="ref-kind">${esc(REF_KIND_CN[r.kind] || r.kind)}</span><span class="ref-label" title="${esc(r.label)}">${esc(r.label)}</span>`;
@@ -470,7 +473,37 @@ function addRef(kind, label, refText) {
   renderRefs();
 }
 
-function clearRefs() { refs.length = 0; renderRefs(); }
+function clearRefs() { refs.length = 0; siteMode = false; paintSiteSub(); renderRefs(); }
+
+/* ---------- 站点模式：输入框里的「站点」芯片 ----------
+ * 它不是后端意义上的引用（引用类型白名单里没有站点），而是一句写进目标的产出约定：
+ * 网页放在当前工作区 sites/ 下、入口 index.html。「站点」页扫的正是这个约定，
+ * 所以芯片和页面是同一条闭环，而不是一个只在界面上亮一下的标签。 */
+let siteMode = false;
+const SITE_SUFFIX = '\n\n（站点：产出放在当前工作区 sites/ 下的一个新文件夹里，用简短的英文文件夹名，入口是 index.html；HTML 和 CSS 写在同一个文件里，不依赖外部资源，用浏览器直接打开就能看。）';
+function siteChip() {
+  const chip = el('span', 'ref-chip ref-chip--site');
+  chip.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg><span class="ref-label">站点</span>';
+  chip.title = '做出来的网页会放进工作区 sites/，并出现在「站点」页';
+  const x = el('button', 'ref-x');
+  x.type = 'button';
+  x.setAttribute('aria-label', '移除站点');
+  x.innerHTML = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  x.addEventListener('click', () => setSiteMode(false));
+  chip.appendChild(x);
+  return chip;
+}
+function setSiteMode(on) {
+  siteMode = !!on;
+  // 对话档只聊天、不动文件；要做网页至少得是「通用」档
+  if (siteMode && currentTask === 'chat') document.querySelector('#task-seg button[data-task="work"]')?.click();
+  paintSiteSub();
+  renderRefs();
+}
+function paintSiteSub() {
+  const sub = document.getElementById('plus-site-sub');
+  if (sub) sub.textContent = siteMode ? '已开启 · 再点一次取消' : '做一个能直接打开的网页';
+}
 
 function openGoalPicker() {
   Modal.open('引用一个历史目标', (box) => {
@@ -4117,7 +4150,8 @@ function resetFeedToEmpty(title, desc, opts = {}) {
   const empty = el('div', opts.home ? 'empty home-hero' : 'empty home-hero home-hero--task');
   empty.id = 'goals-empty';
   empty.innerHTML = `${HERO_ART}<div class="empty-title">${esc(title)}</div><p class="empty-desc">${esc(desc)}</p>`
-    + (opts.home ? '<section class="activity-card" aria-label="本机活动"></section>' : '');
+    + (opts.home ? '<section class="activity-card" aria-label="本机活动"></section>' : '')
+    + '<section class="site-tpl" aria-label="站点模板" hidden></section>';
   feed.appendChild(empty);
 }
 
@@ -4880,7 +4914,7 @@ const I18N_EN = {
   '个人': 'Personal', '智能体': 'Agent', '安全': 'Safety', '开发': 'Developer', '协作': 'Collaboration', '外观': 'Appearance',
   '模型': 'Model', '引擎': 'Engine', 'Go 工具链': 'Go toolchain', '账号与登录': 'Account', '累计任务': 'Tasks', '连续成功': 'Streak', '本周 tokens': 'Tokens this week',
   '语言': 'Language', '明暗模式': 'Mode', '主题': 'Theme', '字体风格': 'Font', '文字大小': 'Text size', '界面缩放': 'Zoom', '内容宽度': 'Content width',
-  '系统': 'System', '浅色': 'Light', '深色': 'Dark', '跟随系统': 'System', '微光': 'Gleam', '森林': 'Forest', '薄荷': 'Mint', '蜜蜂': 'Bee', '羊皮纸': 'Parchment',
+  '系统': 'System', '浅色': 'Light', '深色': 'Dark', '跟随系统': 'System', '微光': 'Gleam', '站点': 'Sites', '我的站点': 'My sites', '共享给我的': 'Shared with me', '添加站点': 'Add site', '还没有站点': 'No sites yet', '落地页': 'Landing', '作品集': 'Portfolio', '博客与内容': 'Blog', '数据看板': 'Dashboard', '内部工具': 'Internal tool', '其他': 'Other', '森林': 'Forest', '薄荷': 'Mint', '蜜蜂': 'Bee', '羊皮纸': 'Parchment',
   '无衬线': 'Sans', '衬线': 'Serif', '小': 'S', '中': 'M', '大': 'L', '标准': 'Standard', '宽': 'Wide',
   '使用统计与成长': 'Usage & growth', '检查更新': 'Check for updates', '帮助与反馈': 'Help & feedback', '账号与本地数据': 'Account & local data', '退出登录': 'Sign out',
   '所有任务': 'All tasks', '选择': 'select', '打开': 'open', '个': '',
@@ -6221,6 +6255,319 @@ document.querySelectorAll('.settings-panel > .card > .section-title:first-child'
   h.parentElement.before(h);
 });
 
+/* ============================================================
+ * 站点：模板轮播（首页）+ 「站点」页
+ *
+ * 模板是 Gleam 自己写的起手式：点一下只是把一句建站目标填进输入框并挂上「站点」芯片，
+ * 不会替你提交，也不会凭空生成文件。缩略图是对应骨架页面的截图（static/sites/*.webp）。
+ * 「我的站点」只列真实存在的东西：各空间文件夹里 sites/ 等位置的 index.html，
+ * 用与文件选择器相同的只读工具（file.search / file.read）扫出来；扫不到就是空态。
+ * ============================================================ */
+const SITE_CATS = [
+  { id: 'landing', label: '落地页' }, { id: 'portfolio', label: '作品集' }, { id: 'blog', label: '博客与内容' },
+  { id: 'dashboard', label: '数据看板' }, { id: 'internal', label: '内部工具' }, { id: 'other', label: '其他' },
+];
+const SITE_TEMPLATES = [
+  {
+    "id": "notes-app",
+    "cat": "landing",
+    "title": "本地笔记应用 · 产品落地页",
+    "prompt": "为一款本地优先的笔记应用做产品落地页：首屏标语与两个行动按钮、三项特性介绍、价格区与常见问题。"
+  },
+  {
+    "id": "night-ride",
+    "cat": "landing",
+    "title": "城市夜骑活动 · 报名页",
+    "prompt": "为一场城市夜骑活动做报名落地页：活动主视觉、时间地点、路线说明、报名表单（姓名、手机、车型），以及注意事项。"
+  },
+  {
+    "id": "street-photo",
+    "cat": "portfolio",
+    "title": "街头摄影 · 暗色作品集",
+    "prompt": "做一个街头摄影师的暗色作品集：顶部姓名与简介、按年份筛选、瀑布流照片网格（用占位色块代替照片）、点击放大的灯箱。"
+  },
+  {
+    "id": "illustrator",
+    "cat": "portfolio",
+    "title": "插画师 · 个人作品主页",
+    "prompt": "做一个插画师的个人作品主页：大号姓名标题、三栏精选作品卡片（作品名 + 年份）、合作邀约区和联系方式，风格明亮活泼。"
+  },
+  {
+    "id": "tech-blog",
+    "cat": "blog",
+    "title": "极简技术博客 · 首页",
+    "prompt": "做一个极简技术博客：站点名与一句话简介、文章列表（标题、日期、标签、两行摘要）、标签云和订阅入口，阅读舒适、深浅两套配色。"
+  },
+  {
+    "id": "reading-weekly",
+    "cat": "blog",
+    "title": "读书笔记周刊 · 归档页",
+    "prompt": "做一个读书笔记周刊的归档页：刊头、按期号排列的卡片（期号、本期书名、一句摘录）、搜索框与按年份分组，排版偏杂志感。"
+  },
+  {
+    "id": "budget",
+    "cat": "dashboard",
+    "title": "家庭记账 · 月度看板",
+    "prompt": "做一个家庭记账的月度看板：读取同目录 data.json（先生成一份示例数据并标明是示例），展示收支概览、按分类的环形图、按周的柱状图和最近流水表。"
+  },
+  {
+    "id": "team-weekly",
+    "cat": "dashboard",
+    "title": "团队周报 · 指标看板",
+    "prompt": "做一个团队周报指标看板：本地 data.json 驱动（先生成示例并标注），包含本周完成事项、进行中事项、阻塞项列表和一条趋势折线，适合投屏。"
+  },
+  {
+    "id": "room-booking",
+    "cat": "internal",
+    "title": "会议室预约 · 内部表单",
+    "prompt": "做一个会议室预约的内部小工具：左侧房间列表、右侧按小时的时间格，点格子弹出预约表单，数据存浏览器 localStorage，不需要后端。"
+  },
+  {
+    "id": "asset-lending",
+    "cat": "internal",
+    "title": "设备借用登记 · 内部工具",
+    "prompt": "做一个设备借用登记台：设备表格（名称、编号、状态、借用人）、借出与归还按钮、按状态筛选，数据存 localStorage，可导出 CSV。"
+  },
+  {
+    "id": "party-invite",
+    "cat": "other",
+    "title": "生日派对邀请函 · 单页",
+    "prompt": "做一张生日派对的网页邀请函：大号标题、时间地点、一段手写感的邀请语、加入日历按钮和回执表单（是否出席、人数）。"
+  },
+  {
+    "id": "countdown",
+    "cat": "other",
+    "title": "发布会倒计时 · 单页",
+    "prompt": "做一个发布会倒计时单页：全屏深色背景、居中的天/时/分/秒倒计时（目标时间写在页面顶部的常量里）、一句标语和预约提醒按钮。"
+  }
+];
+
+function startSiteFromTemplate(t) {
+  if (viewingConvo || document.documentElement.dataset.view !== 'goals') showView('goals');
+  goalInput.value = `在工作区新建 sites/${t.id}/index.html：${t.prompt}单文件 HTML + CSS，不依赖外部资源，桌面和手机都能看。`;
+  goalInput.dispatchEvent(new Event('input', { bubbles: true }));
+  setSiteMode(true);
+  goalInput.focus();
+  goalInput.selectionStart = goalInput.selectionEnd = goalInput.value.length;
+}
+
+const SiteTemplates = (() => {
+  let cat = SITE_CATS[0].id;
+  function paint(box) {
+    if (UIPrefs.get().siteTplHidden) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = `<div class="site-tpl-head">
+        <div class="site-tpl-tabs" role="tablist" aria-label="模板分类">${SITE_CATS.map((c) =>
+          `<button type="button" role="tab" data-cat="${c.id}" aria-selected="${c.id === cat}">${esc(c.label)}</button>`).join('')}</div>
+        <div class="site-tpl-nav">
+          <button type="button" class="icon-btn" data-dir="-1" aria-label="上一组"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg></button>
+          <button type="button" class="icon-btn" data-dir="1" aria-label="下一组"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></button>
+          <button type="button" class="icon-btn" data-close aria-label="收起站点模板" title="收起（可在「站点」页重新打开）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+      </div>
+      <div class="site-tpl-row" role="list"></div>`;
+    const row = box.querySelector('.site-tpl-row');
+    // 一条横向轨道按分类顺序排开；分类标签只是跳转锚点，滚动时高亮跟着走
+    SITE_CATS.forEach((c) => SITE_TEMPLATES.filter((t) => t.cat === c.id).forEach((t) => {
+      const card = el('button', 'site-tpl-card');
+      card.type = 'button';
+      card.dataset.cat = t.cat;
+      card.setAttribute('role', 'listitem');
+      card.title = '用这个模板起一个站点（只填进输入框，不会自动提交）';
+      card.innerHTML = `<span class="site-tpl-thumb"><img src="/assets/sites/${esc(t.id)}.webp" alt="" loading="lazy" width="400" height="250"></span><span class="site-tpl-title">${esc(t.title)}</span>`;
+      card.addEventListener('click', () => startSiteFromTemplate(t));
+      row.appendChild(card);
+    }));
+    const tabs = [...box.querySelectorAll('.site-tpl-tabs [data-cat]')];
+    const prev = box.querySelector('[data-dir="-1"]');
+    const next = box.querySelector('[data-dir="1"]');
+    const mark = (id) => { cat = id; tabs.forEach((x) => x.setAttribute('aria-selected', String(x.dataset.cat === id))); };
+    const sync = () => {
+      const max = row.scrollWidth - row.clientWidth;
+      prev.disabled = row.scrollLeft <= 1;
+      next.disabled = row.scrollLeft >= max - 1;
+      if (jumping) return;
+      const first = [...row.children].find((c) => c.offsetLeft + c.offsetWidth / 2 >= row.scrollLeft);
+      if (first) mark(row.scrollLeft >= max - 1 && max > 0 ? cat : first.dataset.cat);
+    };
+    let jumping = null;
+    tabs.forEach((b) => b.addEventListener('click', () => {
+      mark(b.dataset.cat);
+      const target = row.querySelector(`.site-tpl-card[data-cat="${b.dataset.cat}"]`);
+      if (!target) return;
+      clearTimeout(jumping);
+      jumping = setTimeout(() => { jumping = null; sync(); }, 600);
+      row.scrollTo({ left: target.offsetLeft, behavior: 'smooth' });
+    }));
+    [prev, next].forEach((b) => b.addEventListener('click', () => {
+      row.scrollBy({ left: Number(b.dataset.dir) * row.clientWidth * 0.8, behavior: 'smooth' });
+    }));
+    row.addEventListener('scroll', sync, { passive: true });
+    requestAnimationFrame(() => {
+      const target = row.querySelector(`.site-tpl-card[data-cat="${cat}"]`);
+      if (target && cat !== SITE_CATS[0].id) row.scrollLeft = target.offsetLeft;
+      mark(cat); sync();
+    });
+    box.querySelector('[data-close]').addEventListener('click', () => {
+      UIPrefs.set({ siteTplHidden: true });
+      box.hidden = true;
+      box.innerHTML = '';
+      toast('已收起站点模板，可在「站点」页重新打开', 'success', 2600);
+    });
+  }
+  function restore() {
+    UIPrefs.set({ siteTplHidden: false });
+    const box = document.querySelector('#goals-empty .site-tpl');
+    if (box) paint(box);
+  }
+  return { paint, restore };
+})();
+
+// 「站点」页：扫各空间文件夹里的 index.html。只读、只扫，不建也不删。
+const SITE_SKIP = /[\/\\](node_modules|\.[^\/\\]+|vendor|bower_components)[\/\\]/;
+async function loadSites() {
+  const body = $('#sites-body');
+  const note = $('#sites-note');
+  const layout = UIPrefs.get().sitesLayout || 'grid';
+  body.dataset.layout = layout;
+  document.querySelectorAll('.sites-layout [data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === layout)));
+  body.innerHTML = '<div class="sites-grid">' + '<div class="site-card skeleton-card"><div class="skeleton" style="height:100%"></div></div>'.repeat(3) + '</div>';
+  note.hidden = true;
+  let spaces;
+  try {
+    const sv = await api('GET', '/api/spaces');
+    spaces = (sv.spaces || []).filter((s) => s.path).map((s) => ({ name: s.name, path: s.path }));
+    if (!spaces.length && sv.workspace) spaces = [{ name: '当前工作区', path: sv.workspace }];
+  } catch (err) {
+    try {
+      const ws = await api('GET', '/api/workspace');
+      spaces = ws.workspace ? [{ name: '当前工作区', path: ws.workspace }] : [];
+    } catch (e2) { loadError(body, e2, loadSites); return; }
+  }
+  const seen = new Set();
+  const found = [];
+  let skipped = 0;
+  for (const sp of spaces) {
+    if (seen.has(sp.path)) continue;
+    seen.add(sp.path);
+    try {
+      const res = await api('POST', '/api/tools/call', { name: 'file.search', args: { root: sp.path, pattern: 'index.html' } });
+      (res.output?.files || []).forEach((f) => {
+        if (SITE_SKIP.test(f)) return;
+        found.push({ file: f, dir: f.replace(/[\/\\][^\/\\]+$/, ''), space: sp });
+      });
+    } catch { skipped++; }
+  }
+  // 标题与预览都来自文件本身；最多读 24 个，避免大仓库里一口气读太多
+  const sites = found.slice(0, 24);
+  await Promise.all(sites.map(async (s) => {
+    try {
+      const r = await api('POST', '/api/tools/call', { name: 'file.read', args: { path: s.file } });
+      s.html = r.output?.content || '';
+      s.size = r.output?.size || 0;
+      const m = s.html.match(/<title[^>]*>([^<]{1,120})<\/title>/i);
+      s.title = m ? m[1].trim() : '';
+    } catch { s.html = ''; }
+  }));
+  if (skipped) {
+    note.hidden = false;
+    note.textContent = `有 ${skipped} 个空间不在当前工作区范围内，切换到那个空间后再刷新就能扫到。`;
+  } else if (found.length > sites.length) {
+    note.hidden = false;
+    note.textContent = `共找到 ${found.length} 个，这里先列出前 ${sites.length} 个。`;
+  }
+  renderSites(body, sites);
+}
+
+function renderSites(body, sites) {
+  body.innerHTML = '';
+  if (!sites.length) {
+    const empty = el('div', 'empty sites-empty');
+    empty.innerHTML = `<div class="sites-empty-art" aria-hidden="true"><svg viewBox="0 0 64 44" width="64" height="44" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="60" height="40" rx="4"/><path d="M2 10h60"/><path d="M8 6h.01M12 6h.01M16 6h.01"/><path d="M14 20h18M14 26h26M14 32h12" opacity=".6"/></svg></div>
+      <div class="empty-title">还没有站点</div>
+      <p class="empty-desc">让 Gleam 在工作区里做一个网页：做好的 index.html 会出现在这里。</p>`;
+    const go = el('button', 'btn btn-secondary btn-sm', '去首页挑个模板');
+    go.type = 'button';
+    go.addEventListener('click', () => { SiteTemplates.restore(); showView('goals'); setSiteMode(true); goalInput.focus(); });
+    empty.appendChild(go);
+    body.appendChild(empty);
+    return;
+  }
+  const grid = el('div', 'sites-grid');
+  // 缩略图是把 1280×800 的页面按卡片实际宽度等比缩小；宽度随窗口变，比例也跟着变
+  const fit = new ResizeObserver((entries) => entries.forEach((e) => e.target.style.setProperty('--s', String(e.contentRect.width / 1280))));
+  sites.forEach((s) => {
+    const name = s.title || s.dir.split(/[\/\\]/).pop();
+    const rel = relPath(s.file, s.space.path);
+    const card = el('article', 'site-card');
+    const thumb = el('div', 'site-thumb');
+    if (s.html) {
+      // 只读预览：sandbox 不给脚本、不给同源，外链资源加载不到时就是骨架样子——这是真实文件的样子，不做美化
+      const fr = document.createElement('iframe');
+      fr.setAttribute('sandbox', '');
+      fr.setAttribute('loading', 'lazy');
+      fr.setAttribute('tabindex', '-1');
+      fr.setAttribute('aria-hidden', 'true');
+      fr.srcdoc = s.html;
+      thumb.appendChild(fr);
+    } else {
+      thumb.appendChild(el('span', 'site-thumb-miss', '读不到内容'));
+    }
+    const meta = el('div', 'site-meta');
+    meta.innerHTML = `<div class="site-name" title="${esc(name)}">${esc(name)}</div><div class="site-path" title="${esc(s.file)}">${esc(s.space.name)} · ${esc(rel)}</div>`;
+    const acts = el('div', 'site-acts');
+    const pv = el('button', 'btn btn-secondary btn-sm', '预览');
+    pv.type = 'button';
+    pv.disabled = !s.html;
+    pv.addEventListener('click', () => openSitePreview(name, s));
+    const more = el('button', 'btn btn-ghost btn-sm', '继续完善');
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      showView('goals');
+      goalInput.value = `继续完善 ${rel}：`;
+      goalInput.dispatchEvent(new Event('input', { bubbles: true }));
+      addRef('file', rel, '@' + s.file);
+      setSiteMode(true);
+      goalInput.focus();
+    });
+    const cp = el('button', 'btn btn-ghost btn-sm', '复制路径');
+    cp.type = 'button';
+    cp.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(s.file); toast('已复制路径', 'success', 1600); }
+      catch { toast('复制失败，路径是：' + s.file, 'error', 6000); }
+    });
+    acts.append(pv, more, cp);
+    fit.observe(thumb);
+    card.append(thumb, meta, acts);
+    grid.appendChild(card);
+  });
+  body.appendChild(grid);
+}
+
+function openSitePreview(name, s) {
+  Modal.open(esc(name), (box) => {
+    box.appendChild(el('p', 'field-hint', `${s.file} · 只读预览：脚本和外链资源不会运行，完整效果请用浏览器直接打开这个文件。`));
+    const fr = document.createElement('iframe');
+    fr.className = 'site-preview-frame';
+    fr.setAttribute('sandbox', '');
+    fr.srcdoc = s.html;
+    box.appendChild(fr);
+  });
+}
+
+document.getElementById('sites-refresh')?.addEventListener('click', () => loadSites());
+document.getElementById('sites-add')?.addEventListener('click', () => {
+  SiteTemplates.restore();
+  showView('goals');
+  setSiteMode(true);
+  goalInput.focus();
+});
+document.querySelectorAll('.sites-layout [data-layout]').forEach((b) => b.addEventListener('click', () => {
+  UIPrefs.set({ sitesLayout: b.dataset.layout });
+  $('#sites-body').dataset.layout = b.dataset.layout;
+  document.querySelectorAll('.sites-layout [data-layout]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+}));
+
 /* ---------- 壳层：侧栏收展 / 底部快捷跳转 / 首页态 / 本机活动卡 ---------- */
 const ShellLayout = (() => {
   const toggle = $('#sidebar-toggle');
@@ -6313,6 +6660,8 @@ const ShellLayout = (() => {
     const home = !!empty && feed.children.length === 1;
     view.classList.toggle('is-home', home);
     if (home && empty.querySelector('.activity-card') && !empty.querySelector('.activity-card').childElementCount) paintActivity();
+    const tpl = empty && empty.querySelector('.site-tpl');
+    if (home && tpl && !tpl.childElementCount) SiteTemplates.paint(tpl);
   }
   new MutationObserver(syncHome).observe(feed, { childList: true });
   syncHome();

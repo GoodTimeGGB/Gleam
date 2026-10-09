@@ -36,7 +36,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':
 async function api(method, url, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const resp = await fetch(url, opts);
+  let resp;
+  try {
+    resp = await fetch(url, opts);
+  } catch {
+    // 浏览器给的是 "Failed to fetch" 这类英文原文：换成用户看得懂的一句，原因只可能是本机服务没在答话
+    throw new Error('连不上本机的 Gleam 服务，请确认它仍在运行');
+  }
   let data = null;
   try { data = await resp.json(); } catch { /* 空响应 */ }
   if (!resp.ok) {
@@ -45,6 +51,21 @@ async function api(method, url, body) {
     throw e;
   }
   return data;
+}
+
+/* ---------- 列表加载失败：替换骨架屏，给原因和重试，而不是让骨架一直闪 ---------- */
+function loadError(wrap, err, retry) {
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const box = el('div', 'empty empty--error');
+  box.innerHTML = `${ICONS.alert || ''}<div class="empty-title">没能加载</div><p class="empty-desc">${esc(err && err.message ? err.message : String(err || ''))}</p>`;
+  if (retry) {
+    const b = el('button', 'btn btn-secondary btn-sm', '重试');
+    b.type = 'button';
+    b.addEventListener('click', retry);
+    box.appendChild(b);
+  }
+  wrap.appendChild(box);
 }
 
 /* ---------- Toast ---------- */
@@ -1830,8 +1851,7 @@ async function loadSkills() {
     }
     skills.forEach((sk) => grid.appendChild(skillCard(sk)));
   } catch (err) {
-    grid.innerHTML = '';
-    toast(`加载技能失败：${err.message}`, 'error');
+    loadError(grid, err, loadSkills);
   }
 }
 
@@ -2056,7 +2076,7 @@ async function loadSchedules() {
     }
     jobs.forEach((j, i) => { const c = scheduleCard(j); c.dataset.order = String(i); list.appendChild(c); });
     applySchView();
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { loadError(list, err, loadSchedules); }
 }
 
 
@@ -2218,7 +2238,7 @@ async function loadTools() {
     tools.forEach((t) => {
       const row = el('div', 'card row');
       const main = el('div', 'row-main');
-      main.innerHTML = `<div class="row-title"><code style="font-family: var(--font-mono); font-size: var(--fs-sm);">${esc(t.name)}</code>
+      main.innerHTML = `<div class="row-title"><code class="tool-name">${esc(t.name)}</code>
         <select class="input select-sm perm-select" data-tool="${esc(t.name)}" title="权限级别：只读自动放行 / 需我批准 / 完全访问（始终审批）">
           <option value="readonly">只读放行</option>
           <option value="user_approved">需我批准</option>
@@ -2249,7 +2269,7 @@ async function loadTools() {
         }
       });
     });
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { loadError(list, err, loadTools); }
 }
 
 // schemaSummary（L6，2026-09-23 QA）：JSON Schema 直 dump 对不写代码的人是天书，
@@ -3401,7 +3421,7 @@ async function installGoGuided() {
             '<div><div class="row-title">需要手动安装 Go</div>' +
             '<div class="row-sub">自动安装需要管理员权限。请按以下步骤操作：</div></div></div>' +
             '<ol style="margin: 0 0 var(--space-3) var(--space-4); padding-left: var(--space-4); line-height: 2;">' +
-            '<li>在 Gleam 项目目录下运行安装脚本：<br><code style="font-family:var(--font-mono);font-size:var(--fs-xs);background:rgba(0,0,0,.3);padding:2px 6px;border-radius:4px;">powershell -ExecutionPolicy Bypass -File scripts/install.ps1</code></li>' +
+            '<li>在 Gleam 项目目录下运行安装脚本：<br><code class="inline-code">powershell -ExecutionPolicy Bypass -File scripts/install.ps1</code></li>' +
             '<li>或手动下载 Go：<br><a href="' + esc(res.download || 'https://go.dev/dl/') + '" target="_blank" style="color:var(--color-accent);">' + esc(res.download || 'https://go.dev/dl/') + '</a></li>' +
             '<li>安装完成后，在下方输入路径并点击「检测」</li>' +
             '</ol>';
@@ -3506,7 +3526,7 @@ async function loadMCPMarket() {
     }
     presets.forEach((p) => wrap.appendChild(mcpPresetCard(p)));
     renderMCPTags(presets);
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { loadError(wrap, err, loadMCPMarket); }
 }
 
 // 市场条目：字母图标 · 名称 · 一行说明；细节进 title，不再堆三行小字
@@ -3637,7 +3657,7 @@ async function loadSkillMarket() {
       card.appendChild(actions);
       wrap.appendChild(card);
     });
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) { loadError(wrap, err, loadSkillMarket); }
 }
 
 async function loadMCPInstalled() {
@@ -4809,7 +4829,11 @@ function applyTheme() {
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
   document.documentElement.setAttribute('data-accent', accent || 'emerald');
   const mc = document.querySelector('meta[name="theme-color"]');
-  if (mc) mc.setAttribute('content', dark ? '#0B0D12' : '#F4F6FA');
+  if (mc) {
+    // 取当前主题的窗框色：每个主题各自定义 --frame，这里不再写死两种
+    const frame = getComputedStyle(document.documentElement).getPropertyValue('--frame').trim();
+    if (frame) mc.setAttribute('content', frame);
+  }
   const cs = document.querySelector('meta[name="color-scheme"]');
   if (cs) cs.setAttribute('content', dark ? 'dark' : 'light');
   document.querySelectorAll('.theme-mode-btn').forEach((b) =>
@@ -5178,8 +5202,7 @@ async function loadFeedback() {
     (items || []).forEach((f) => list.appendChild(fbRow(f)));
     if (remote) $('#fb-dest').textContent = '本机一份，另送一份到 ' + remote;
   } catch (err) {
-    list.innerHTML = '';
-    toast(err.message, 'error');
+    loadError(list, err, loadFeedback);
   }
 }
 

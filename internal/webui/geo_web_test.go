@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,7 +131,7 @@ func newGEOFixtureFull(t *testing.T, planJSON, reflectJSON string) (*fixture, *s
 		a.Convos = convo
 	}
 	srv := NewServer(a)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	t.Cleanup(ts.Close)
 	return &fixture{t: t, ts: ts, agent: a, srv: srv, ws: ws, dataDir: dataDir}, stub
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +65,7 @@ func TestGoalGet_FallsBackToArchive(t *testing.T) {
 		Score:  95,
 	})
 
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/goals/task-archived-1")
@@ -103,7 +102,7 @@ func TestGoalGet_MemoryWinsOverArchive(t *testing.T) {
 	srv.tasks["dup"] = &taskInfo{ID: "dup", Goal: "内存里的新版本", Status: types.GoalRunning}
 	srv.mu.Unlock()
 
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/goals/dup")
@@ -129,7 +128,7 @@ func TestGoalGet_MemoryWinsOverArchive(t *testing.T) {
 // "确实没有"的答复就消失了，前端再也分不清"存在但空"与"不存在"。
 func TestGoalGet_NoArchiveStill404(t *testing.T) {
 	srv, _ := newArchiveFixture(t)
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/goals/nope")
@@ -243,7 +242,7 @@ func TestGoalGet_RejectsPathTraversal(t *testing.T) {
 	}
 
 	// ② 再走一遍真实路由：确认这一层也没有漏。
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 	for _, id := range []string{"..%2Fsettings", "..%5Csettings", "..settings"} {
 		resp, err := http.Get(ts.URL + "/api/goals/" + id)
@@ -279,7 +278,7 @@ func TestGoalList_IncludesArchived(t *testing.T) {
 	srv.tasks["task-live"] = &taskInfo{ID: "task-live", Goal: "正在跑的", Status: types.GoalRunning}
 	srv.mu.Unlock()
 
-	ts := httptest.NewServer(srv.Handler())
+	ts := newTokenTestServer(srv)
 	defer ts.Close()
 	resp, err := http.Get(ts.URL + "/api/goals")
 	if err != nil {

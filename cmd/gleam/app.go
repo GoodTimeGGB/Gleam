@@ -81,6 +81,7 @@ func cmdApp(args []string) error {
 	// 把 --addr 那个字符串报上去就是说谎。
 	srv.BindAddr = ln.Addr().String()
 	url := "http://" + ln.Addr().String() + "/"
+	announceToken(srv)
 	fmt.Fprintf(os.Stderr, "[gleam] 桌面端已启动: %s（托盘常驻，关闭窗口不退出）\n", url)
 
 	go func() {
@@ -183,6 +184,11 @@ func probeAddr(addr string) (busy, isGleam bool) {
 		return true, false
 	}
 	defer resp.Body.Close()
+	// 新版本的 /api/info 要口令：没带口令会拿到 401，但守卫在任何响应上都挂着 X-Gleam-Server，
+	// 认它就够了，不需要先拿到对方的口令。旧版本没有这个头，仍按响应体认。
+	if resp.Header.Get("X-Gleam-Server") == "gleam" {
+		return true, true
+	}
 	buf := make([]byte, 512)
 	n, _ := resp.Body.Read(buf)
 	return true, strings.Contains(string(buf[:n]), `"name":"gleam"`)

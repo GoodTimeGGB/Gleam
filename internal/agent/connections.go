@@ -204,9 +204,10 @@ func (a *Agent) webFetchRow(rep safety.EgressReport) ConnectionRow {
 
 // inboundRow 本机服务端口：台账里唯一一条"入"的方向。
 //
-// 这一行值得单独存在，是因为它常被当成"这是本机所以安全"——而这个端口没有鉴权：
-// 能连上它的进程，就等于能提交目标、裁决审批、读你的会话。
-// 默认只绑回环，所以它是安全的；**风险只在有人手改 --addr 之后**，所以状态必须如实印出来。
+// 这一行值得单独存在，是因为它常被当成"这是本机所以安全"。/api 现在要每次启动随机生成的口令
+// （internal/webui/guard.go），还校验 Host 与跨站来源，浏览器里的网页替你发请求这条路已经堵上；
+// 但口令文件就在数据目录里，**同一用户下的本机进程读得到它**，拿到口令就能提交目标、裁决审批、读你的会话。
+// 默认只绑回环；**风险在有人手改 --addr 之后变大**（明文 HTTP，口令在网络上可见），所以状态必须如实印出来。
 func inboundRow(bindAddr string) *ConnectionRow {
 	if strings.TrimSpace(bindAddr) == "" {
 		return nil
@@ -216,17 +217,17 @@ func inboundRow(bindAddr string) *ConnectionRow {
 		ID: "inbound", Title: "本机服务端口", Kind: "in", KindText: "入网",
 		Target:   bindAddr,
 		Status:   "在监听",
-		Trigger:  "能连到这个端口的任何程序",
-		Leaves:   "不外发。但对面能提交目标、批准或拒绝审批、读你的会话与设置",
+		Trigger:  "能连到这个端口、并持有本次启动口令的程序",
+		Leaves:   "不外发。但持有口令的一方能提交目标、批准或拒绝审批、读你的会话与设置",
 		Trace:    "没有留痕：这个端口不记录谁连过",
 		Untraced: true,
 		Off:      "桌面端固定只绑 127.0.0.1；命令行别带 --addr，或显式写 127.0.0.1:8787",
 	}
 	if loopback {
-		r.Alert = "回环地址：只有本机能连。但这一层没有鉴权——本机任何进程都能替你操作这个 Gleam"
+		r.Alert = "回环地址：只有本机能连，/api 要本次启动的口令。口令文件在数据目录里，同一用户下的本机进程读得到它"
 	} else {
 		r.Status = "在监听（非回环）"
-		r.Alert = "监听在非回环地址：局域网里任何设备都能提交目标、裁决审批，而它没有鉴权。要出这台机器，请放到反代后面自己加鉴权"
+		r.Alert = "监听在非回环地址：局域网里的设备能连上来。/api 要口令，但连接是明文 HTTP，口令在网络上可见。要出这台机器，请放到带 TLS 的反代后面"
 	}
 	return &r
 }

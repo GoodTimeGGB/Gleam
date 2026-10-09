@@ -3,6 +3,41 @@
  * 遵循 ui-ux-pro-max：实时遥测标注、操作全程有反馈、无障碍（aria-live / focus 管理）。 */
 'use strict';
 
+/* ---------- 本机 API 口令 ----------
+ * 服务端每次启动生成一个口令，注入首页的 <meta name="gleam-token">（见 internal/webui/guard.go）。
+ * 所有同源 /api/ 请求都要带上它：fetch 走请求头；EventSource 与 <img> 设不了请求头，走查询参数
+ * （服务端只对 GET 认查询参数）。这里包一层全局 fetch / EventSource，而不是逐个调用点去改：
+ * 漏掉一处就是一个静默 401，而新加的调用点不会记得这件事。 */
+const GLEAM_TOKEN = (document.querySelector('meta[name="gleam-token"]') || {}).content || '';
+const isOwnAPI = (u) => {
+  try { const x = new URL(u, location.href); return x.origin === location.origin && x.pathname.startsWith('/api/'); }
+  catch { return false; }
+};
+const withToken = (u) => {
+  if (!GLEAM_TOKEN || !isOwnAPI(u)) return u;
+  const x = new URL(u, location.href);
+  x.searchParams.set('token', GLEAM_TOKEN);
+  return x.pathname + x.search;
+};
+(function installTokenTransport() {
+  if (!GLEAM_TOKEN) return;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+    if (!isOwnAPI(url)) return nativeFetch(input, init);
+    const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+    headers.set('X-Gleam-Token', GLEAM_TOKEN);
+    return nativeFetch(input, { ...init, headers });
+  };
+  const NativeEventSource = window.EventSource;
+  if (NativeEventSource) {
+    const Wrapped = function (url, cfg) { return new NativeEventSource(withToken(url), cfg); };
+    Wrapped.prototype = NativeEventSource.prototype;
+    Wrapped.CONNECTING = 0; Wrapped.OPEN = 1; Wrapped.CLOSED = 2;
+    window.EventSource = Wrapped;
+  }
+})();
+
 /* ---------- 图标（内联 SVG，禁止 emoji 当图标） ---------- */
 const ICONS = {
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
@@ -4976,7 +5011,7 @@ function fbViewShots(f) {
   Modal.open(esc('这条反馈的截图（' + (f.attachments || []).length + ' 张，只在本机）'), (box) => {
     (f.attachments || []).forEach((a) => {
       const img = el('img', 'fb-modal-shot');
-      img.src = '/api/feedback/attachment?name=' + encodeURIComponent(a.name);
+      img.src = withToken('/api/feedback/attachment?name=' + encodeURIComponent(a.name));
       img.alt = '反馈截图 ' + a.name;
       box.appendChild(img);
       box.appendChild(el('p', 'field-hint', a.name + ' · ' + Math.max(1, Math.round(a.bytes / 1024)) + 'KB · ' + a.mime));

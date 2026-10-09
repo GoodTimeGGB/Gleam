@@ -1,1 +1,441 @@
-�,z�?٢�+-��h��)�6�k��q�M��f���
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Gleam（微光）——一个放在本地的桌面 AI 小工具。单文件二进制约 10MB，数据不联网。">
+  <title>Gleam 微光</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#top">
+        <span class="brand-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/><circle cx="12" cy="12" r="3"/></svg>
+        </span>
+        <span class="brand-text">Gleam <em>微光</em></span>
+      </a>
+      <nav class="topnav" aria-label="站点导航">
+        <a href="#screenshots">截图</a>
+        <a href="#what">是什么</a>
+        <a href="#features">功能</a>
+        <a href="#demo">演示</a>
+        <a href="#download">下载</a>
+        <a href="#quickstart">快速开始</a>
+        <a href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero" id="top">
+    <div class="hero-inner">
+      <p class="hero-kicker reveal">Go 手写 · 单文件 · 数据不联网 · 开源</p>
+      <h1 class="reveal">有个能干的桌面帮手，<br>不<span class="grad">也挺好吗</span></h1>
+      <p class="hero-sub reveal">Gleam 就是放在你电脑里的一个小工具。<br>
+      你说"帮我整理下桌面照片"，它真的会去干——<br>
+      先规划、再执行、做完还会看看做得好不好。<br>
+      <strong>而且这一切都在你的电脑上完成，数据不往外传。</strong></p>
+      <div class="hero-actions reveal">
+        <a class="btn btn-primary" href="#download">下载试试</a>
+        <a class="btn btn-secondary" href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <a class="btn btn-secondary" href="#demo">先玩一下</a>
+      </div>
+      <dl class="hero-stats reveal" aria-label="关键指标">
+        <div><dt>~10 MB</dt><dd>就一个文件</dd></div>
+        <div><dt>&lt; 20 ms</dt><dd>打开就能用</dd></div>
+        <div><dt>&lt; 15 MB</dt><dd>内存占用</dd></div>
+        <div><dt>0</dt><dd>第三方依赖</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="section" id="screenshots">
+    <div class="section-inner">
+      <h2 class="reveal">界面一览</h2>
+      <p class="section-sub reveal">深色玻璃拟态风格，所有数据留在本地。</p>
+      <div class="screenshot-grid reveal">
+        <figure class="screenshot-card">
+          <img src="images/gleam-desktop-01.png" alt="Gleam 桌面版主界面" loading="lazy">
+          <figcaption>桌面版 — 任务对话与执行时间线</figcaption>
+        </figure>
+        <figure class="screenshot-card">
+          <img src="images/settings-llm.png" alt="模型配置界面" loading="lazy">
+          <figcaption>模型配置 — 支持 GLM / OpenAI 兼容协议</figcaption>
+        </figure>
+        <figure class="screenshot-card">
+          <img src="images/settings-engine.png" alt="引擎参数设置" loading="lazy">
+          <figcaption>引擎参数 — 规划、安全、成本一档可调</figcaption>
+        </figure>
+        <figure class="screenshot-card">
+          <img src="images/settings-persona.png" alt="人格与风格设置" loading="lazy">
+          <figcaption>人格风格 — 换个语气，换个节奏</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="what">
+    <div class="section-inner">
+      <h2 class="reveal">三个特点</h2>
+      <p class="section-sub reveal">市面上 AI 工具已经够多了，为什么还要写 Gleam？</p>
+      <div class="grid-3">
+        <article class="card pillar reveal">
+          <div class="pillar-no">01</div>
+          <h3>它真会干活</h3>
+          <p>不是聊天框里回你一段话就完事了。你说"整理桌面"，它会列计划、执行、检查，做完了还主动告诉你"搞定了"。</p>
+        </article>
+        <article class="card pillar reveal">
+          <div class="pillar-no">02</div>
+          <h3>数据留在本地</h3>
+          <p>不用注册、不用联网、不用把文件传到别人的服务器。你的东西就在你电脑上，放心。</p>
+        </article>
+        <article class="card pillar reveal">
+          <div class="pillar-no">03</div>
+          <h3>一个文件搞定</h3>
+          <p>整个程序就一个 exe（或二进制文件），双击就能跑。没有安装向导、没有依赖。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="section-inner">
+      <h2 class="reveal">核心功能</h2>
+      <p class="section-sub reveal">全部用 Go 标准库手写，零第三方依赖。</p>
+
+      <div class="grid-3">
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg></div>
+          <h4>Plan-Execute-Reflect 循环</h4>
+          <p>理解目标 → 拆解步骤 → 并行执行 → 自评打分。不达标自动重来，实在不行才认输。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+          <h4>23 个内置工具</h4>
+          <p>文件读写、命令执行、网页抓取、剪贴板、截屏、通知……还能通过 MCP 协议热插拔外部工具。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/><path d="M4 12v6.5c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V12"/></svg></div>
+          <h4>三层记忆</h4>
+          <p>短期记对话，中期记任务，长期记你的习惯偏好。全部本地存储，自研词法索引。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h4>安全门控</h4>
+          <p>删除文件、执行命令等危险操作默认需你确认。审批留痕，进程退出后下次打开还能续上。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg></div>
+          <h4>技能系统</h4>
+          <p>常用操作流程保存为技能，一键复用。七个专家角色即场景模板，换场景不用改引擎。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+          <h4>定时任务</h4>
+          <p>Cron 表达式、固定间隔、文件变化监听。跑完结果直接送达系统通知，失败不静默。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 21h18"/><path d="M6 20V11M12 20V5M18 20v-6"/></svg></div>
+          <h4>成本看板</h4>
+          <p>每个任务用了多少次模型、多少 token、多少工具调用，实时可见。任务预算可设上限，超了自动停。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="m7 14 3.5-3.5 3 3L20 7"/></svg></div>
+          <h4>成长日志</h4>
+          <p>做完的任务、固化的技能、效率趋势，七个等级一路往上。连续活跃天数也给你数着。</p>
+        </article>
+        <article class="card mod reveal">
+          <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/></svg></div>
+          <h4>三种接入方式</h4>
+          <p>CLI 命令行、Web UI 浏览器、JSON-RPC 编辑器插件。底层引擎独立，怎么接都行。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="architecture">
+    <div class="section-inner">
+      <h2 class="reveal">架构</h2>
+      <p class="section-sub reveal">三层分离，引擎独立。</p>
+      <div class="arch reveal" role="img" aria-label="分层架构图">
+        <div class="arch-layer">
+          <div class="arch-label">用户界面层</div>
+          <div class="arch-boxes">
+            <div class="arch-box">CLI<br><small>gleam goal</small></div>
+            <div class="arch-box">Web UI<br><small>gleam webui</small></div>
+            <div class="arch-box">编辑器插件<br><small>JSON-RPC / stdio</small></div>
+          </div>
+        </div>
+        <div class="arch-connector" aria-hidden="true">JSON-RPC 2.0 · HTTP + SSE</div>
+        <div class="arch-layer arch-layer--core">
+          <div class="arch-label">核心引擎</div>
+          <div class="arch-boxes">
+            <div class="arch-box">意图理解 &amp; 分发</div>
+          </div>
+          <div class="arch-boxes">
+            <div class="arch-box">Planner 规划器</div>
+            <div class="arch-box arch-link">⟷</div>
+            <div class="arch-box">Reflector 反思器</div>
+          </div>
+          <div class="arch-boxes">
+            <div class="arch-box arch-wide">Executor 执行器 → 工具 1 · 工具 2 · … · 工具 N</div>
+          </div>
+          <div class="arch-boxes">
+            <div class="arch-box arch-wide">Memory Manager</div>
+          </div>
+        </div>
+        <div class="arch-connector" aria-hidden="true">调用</div>
+        <div class="arch-layer">
+          <div class="arch-label">基础设施层</div>
+          <div class="arch-boxes">
+            <div class="arch-box">LLM Client<br><small>GLM / OpenAI 兼容</small></div>
+            <div class="arch-box">文件系统</div>
+            <div class="arch-box">进程管理</div>
+            <div class="arch-box">HTTP Client</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="demo">
+    <div class="section-inner">
+      <h2 class="reveal">试试看</h2>
+      <p class="section-sub reveal">下面有三个场景，点"执行"看看 Gleam 是怎么干活的。</p>
+
+      <div class="demo card reveal">
+        <div class="demo-pick" role="group" aria-label="选择示例目标">
+          <button class="chip" data-demo="organize" aria-pressed="true">整理桌面文件</button>
+          <button class="chip" data-demo="briefing" aria-pressed="false">生成每日简报</button>
+          <button class="chip" data-demo="cleanup" aria-pressed="false">清理临时文件（高风险）</button>
+        </div>
+        <div class="demo-bar">
+          <div class="demo-goal" id="demo-goal">整理桌面文件并按日期归档</div>
+          <button class="btn btn-primary" id="demo-run">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 4.5v15l13-7.5-13-7.5z"/></svg>
+            执行
+          </button>
+        </div>
+        <div class="demo-progress" id="demo-progress" aria-hidden="true"><div class="demo-progress-bar" id="demo-progress-bar"></div></div>
+        <div class="timeline" id="demo-timeline" role="log" aria-live="polite"></div>
+        <div class="demo-result" id="demo-result" hidden>
+          <svg class="score-ring" viewBox="0 0 36 36" role="img" aria-label="完成度">
+            <circle class="ring-bg" cx="18" cy="18" r="15.9"/>
+            <circle class="ring-fg" cx="18" cy="18" r="15.9" stroke-dasharray="100" stroke-dashoffset="100"/>
+            <text x="18" y="18" text-anchor="middle" dy=".35em">0</text>
+          </svg>
+          <div class="demo-summary" id="demo-summary"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="download">
+    <div class="section-inner">
+      <h2 class="reveal">下载</h2>
+      <p class="section-sub reveal">一个文件，下载就能跑。不用安装别的东西。</p>
+      <p class="dl-meta reveal">
+        <span class="dl-ver" id="dl-version">v1.0.0</span>
+        <span>发布于 <time id="dl-date" datetime="2026-10-09">2026-10-09</time></span>
+        <span>单文件约 10 MB · MIT 许可 · <a href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener" style="color:var(--color-accent)">源码在 GitHub</a></span>
+      </p>
+
+      <div class="dl-platforms reveal" id="dl-platforms">
+        <div class="dl-card dl-card--windows" data-platform="windows">
+          <div class="dl-card-head">
+            <div class="dl-platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+            </div>
+            <div>
+              <h3>Windows</h3>
+              <span class="dl-arch">x86_64 · 64位</span>
+            </div>
+          </div>
+          <div class="dl-downloads">
+            <a class="dl-btn dl-btn--primary" href="dist/Gleam-Desktop-Windows-x86_64.exe" download>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span>桌面版</span>
+              <span class="dl-size">约 10 MB · .exe</span>
+            </a>
+            <a class="dl-btn" href="dist/Gleam-Windows-x86_64.exe" download>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span>命令行版</span>
+              <span class="dl-size">约 10 MB · .exe</span>
+            </a>
+          </div>
+          <div class="dl-note">
+            <p class="dl-tip" id="dl-tip-windows"></p>
+            <details class="dl-guide">
+              <summary>安装步骤</summary>
+              <ol>
+                <li>下载桌面版 <code>Gleam-Desktop-Windows-x86_64.exe</code></li>
+                <li>双击运行即可</li>
+                <li>首次运行被 SmartScreen 拦下（二进制未做代码签名）：点「更多信息」→「仍要运行」</li>
+                <li>命令行版：放入 PATH 目录</li>
+              </ol>
+            </details>
+          </div>
+        </div>
+
+        <div class="dl-card dl-card--macos" data-platform="macos-arm">
+          <div class="dl-card-head">
+            <div class="dl-platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+            </div>
+            <div>
+              <h3>macOS</h3>
+              <span class="dl-arch">Apple Silicon · ARM64</span>
+            </div>
+          </div>
+          <div class="dl-downloads">
+            <a class="dl-btn dl-btn--primary" href="dist/Gleam-macOS-AppleSilicon-arm64" download>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span>下载</span>
+              <span class="dl-size">约 9 MB</span>
+            </a>
+          </div>
+          <div class="dl-note">
+            <p class="dl-tip" id="dl-tip-macos-arm"></p>
+            <details class="dl-guide">
+              <summary>安装步骤</summary>
+              <ol>
+                <li>下载 <code>Gleam-macOS-AppleSilicon-arm64</code></li>
+                <li>执行 <code>chmod +x Gleam-macOS-AppleSilicon-arm64</code> 加运行权限</li>
+                <li>首次运行被 Gatekeeper 拦下：终端执行 <code>xattr -d com.apple.quarantine ./Gleam-macOS-AppleSilicon-arm64</code></li>
+                <li>运行：<code>./Gleam-macOS-AppleSilicon-arm64 app</code></li>
+              </ol>
+            </details>
+          </div>
+        </div>
+
+        <div class="dl-card dl-card--macos" data-platform="macos-intel">
+          <div class="dl-card-head">
+            <div class="dl-platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+            </div>
+            <div>
+              <h3>macOS</h3>
+              <span class="dl-arch">Intel · x86_64</span>
+            </div>
+          </div>
+          <div class="dl-downloads">
+            <a class="dl-btn dl-btn--primary" href="dist/Gleam-macOS-Intel-x86_64" download>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span>下载</span>
+              <span class="dl-size">约 10 MB</span>
+            </a>
+          </div>
+          <div class="dl-note">
+            <p class="dl-tip" id="dl-tip-macos-intel"></p>
+            <details class="dl-guide">
+              <summary>安装步骤</summary>
+              <ol>
+                <li>下载 <code>Gleam-macOS-Intel-x86_64</code></li>
+                <li>执行 <code>chmod +x Gleam-macOS-Intel-x86_64</code> 加运行权限</li>
+                <li>首次运行被 Gatekeeper 拦下：终端执行 <code>xattr -d com.apple.quarantine ./Gleam-macOS-Intel-x86_64</code></li>
+                <li>运行：<code>./Gleam-macOS-Intel-x86_64 app</code></li>
+              </ol>
+            </details>
+          </div>
+        </div>
+
+        <div class="dl-card dl-card--linux" data-platform="linux">
+          <div class="dl-card-head">
+            <div class="dl-platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h5"/></svg>
+            </div>
+            <div>
+              <h3>Linux</h3>
+              <span class="dl-arch">x86_64 · 零依赖</span>
+            </div>
+          </div>
+          <div class="dl-downloads">
+            <a class="dl-btn dl-btn--primary" href="dist/Gleam-Linux-x86_64" download>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span>下载</span>
+              <span class="dl-size">约 10 MB</span>
+            </a>
+          </div>
+          <div class="dl-note">
+            <p class="dl-tip" id="dl-tip-linux"></p>
+            <details class="dl-guide">
+              <summary>安装步骤</summary>
+              <ol>
+                <li>下载 <code>Gleam-Linux-x86_64</code></li>
+                <li>执行 <code>chmod +x Gleam-Linux-x86_64</code> 加运行权限</li>
+                <li>运行：<code>./Gleam-Linux-x86_64 app</code></li>
+              </ol>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <div class="dl-other reveal">
+        <p>不确定你的 Mac 是 Intel 还是 Apple Silicon？左上角 Apple 菜单 → 关于本机，看芯片字段。</p>
+        <p class="dl-source">源码构建：<code>git clone https://github.com/GoodTimeGGB/Gleam</code> 后运行 <code>scripts/build-desktop.sh</code>（macOS/Linux）或 <code>scripts/install.ps1</code>（Windows）</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="quickstart">
+    <div class="section-inner">
+      <h2 class="reveal">快速开始</h2>
+      <p class="section-sub reveal">三步搞定。断网也能玩。</p>
+      <div class="qs reveal">
+        <div class="qs-step">
+          <span class="qs-no">1</span>
+          <div>
+            <h4>构建</h4>
+            <pre><code>go build -trimpath -ldflags="-s -w" -o bin/gleam.exe ./cmd/gleam</code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <span class="qs-no">2</span>
+          <div>
+            <h4>离线体验（Mock 模型）</h4>
+            <pre><code>./bin/gleam.exe goal "整理当前目录的 Markdown 文件" --mock-llm</code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <span class="qs-no">3</span>
+          <div>
+            <h4>接入真实模型</h4>
+            <pre><code>export GLEAM_API_KEY=你的APIKey
+./bin/gleam.exe goal "列出当前目录的图片并按日期归档"</code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <span class="qs-no">4</span>
+          <div>
+            <h4>打开 Web 操作台</h4>
+            <pre><code>./bin/gleam.exe webui     # 浏览器打开 http://127.0.0.1:8787
+./bin/gleam.exe serve     # JSON-RPC stdio（编辑器插件入口）</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div>
+        <strong>Gleam 微光</strong> · 本地桌面 AI 工具
+        <p>写给自己用的，顺便开源了 · MIT 许可</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/GoodTimeGGB/Gleam" target="_blank" rel="noopener">GitHub</a>
+        <a href="#what">是什么</a>
+        <a href="#download">下载</a>
+        <a href="#quickstart">快速开始</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -5615,8 +5615,138 @@ const BrowserPane = (() => {
 applyTheme();
 api('GET', '/api/info').then((info) => { const v = $('#me-version'); if (v && info.version) v.textContent = 'v' + info.version; LiveRail.facts(info); }).catch(() => {});
 
+/* ---------- 首次引导 ---------- */
+const Onboarding = (function () {
+  let providers = [];
+  let selectedProvider = null;
+  let selectedPlan = null;
+
+  function show(step) {
+    const overlay = $('#onboarding-overlay');
+    overlay.hidden = false;
+    for (let i = 0; i < 3; i++) {
+      const page = $(`#ob-page-${i}`);
+      page.hidden = i !== step;
+      const dot = overlay.querySelector(`.onboarding-dot[data-step="${i}"]`);
+      dot.classList.toggle('active', i === step);
+      dot.classList.toggle('done', i < step);
+    }
+    if (step === 1) renderProviders();
+    if (step === 2) {
+      const p = providers.find((x) => x.id === selectedProvider);
+      if (p) $('#ob-key-desc').textContent = `${p.name} 的 API Key，填好后测试连通性。`;
+      $('#ob-api-key').value = '';
+      $('#ob-test-result').hidden = true;
+    }
+  }
+
+  function hide() {
+    $('#onboarding-overlay').hidden = true;
+    localStorage.setItem('gleam-onboarding-done', '1');
+  }
+
+  function renderProviders() {
+    const box = $('#ob-providers');
+    box.innerHTML = '';
+    providers.forEach((p) => {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'onboarding-provider';
+      card.dataset.id = p.id;
+      card.innerHTML = `<span class="ob-p-name">${esc(p.name)}</span><span class="ob-p-id">${esc(p.id)}</span>`;
+      card.addEventListener('click', () => {
+        box.querySelectorAll('.onboarding-provider').forEach((c) => c.classList.remove('selected'));
+        card.classList.add('selected');
+        selectedProvider = p.id;
+        selectedPlan = p.plans && p.plans[0] ? p.plans[0].kind : 'token';
+        $('#ob-next-1').disabled = false;
+      });
+      box.appendChild(card);
+    });
+  }
+
+  async function testConnection() {
+    const btn = $('#ob-test-btn');
+    const out = $('#ob-test-result');
+    btn.disabled = true;
+    out.hidden = false;
+    out.className = 'onboarding-test-result testing';
+    out.textContent = '正在探测…';
+    const key = $('#ob-api-key').value.trim();
+    try {
+      const r = await api('POST', '/api/llm/test', {
+        provider_id: selectedProvider,
+        api_key: key,
+      });
+      if (r.ok) {
+        const lat = Number.isFinite(r.latency_ms) ? ` · ${r.latency_ms}ms` : '';
+        out.textContent = r.kind === 'mock' ? 'Mock 模型' : `连接成功${lat}`;
+        out.className = 'onboarding-test-result ok';
+      } else {
+        const hints = { auth: 'Key 无效或已过期', timeout: '连接超时', network: '网络不通', provider: '厂商服务异常', api: '接口返回错误', not_found: '接口不存在', rate_limited: '请求过于频繁', config: '配置有误' };
+        out.textContent = (hints[r.kind] || '连接失败') + (r.message ? `（${r.message}）` : '');
+        out.className = 'onboarding-test-result fail';
+      }
+    } catch (err) {
+      out.textContent = `测试失败：${err.message}`;
+      out.className = 'onboarding-test-result fail';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function finish() {
+    const key = $('#ob-api-key').value.trim();
+    if (!key) { toast('请先填写 API Key', 'error'); return; }
+    const btn = $('#ob-finish');
+    btn.disabled = true;
+    btn.textContent = '保存中…';
+    try {
+      const r = await api('POST', '/api/onboarding', {
+        provider_id: selectedProvider,
+        plan: selectedPlan || 'token',
+        api_key: key,
+      });
+      if (r.test_result && r.test_result.ok) {
+        toast('配置成功，开始使用吧', 'success');
+      } else {
+        toast('已保存，但连接测试未通过，可在设置页调整', 'warning');
+      }
+      hide();
+      loadSettings();
+    } catch (err) {
+      toast(`保存失败：${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '完成';
+    }
+  }
+
+  async function start() {
+    if (localStorage.getItem('gleam-onboarding-done')) return;
+    try {
+      const data = await api('GET', '/api/onboarding');
+      if (!data.needs_onboarding) { hide(); return; }
+      providers = data.providers || [];
+      show(0);
+
+      $('#ob-next-0').onclick = () => show(1);
+      $('#ob-skip').onclick = () => hide();
+      $('#ob-back-1').onclick = () => show(0);
+      $('#ob-next-1').onclick = () => { if (selectedProvider) show(2); };
+      $('#ob-back-2').onclick = () => show(1);
+      $('#ob-test-btn').onclick = () => testConnection();
+      $('#ob-finish').onclick = () => finish();
+      $('#ob-api-key').addEventListener('keydown', (e) => { if (e.key === 'Enter') finish(); });
+    } catch { /* 引导加载失败不阻塞主界面 */ }
+  }
+
+  return { start };
+})();
+
 /* ---------- 启动（必须是本文件的最后一段，判据见 scripts/check-app-startup.py） ---------- */
 (async function init() {
+  Onboarding.start();
   fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
   connectSSE();
   setConn('up');

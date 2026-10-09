@@ -1094,6 +1094,58 @@
     </aside>
   </div>
 
+  <!-- 首次引导遮罩 -->
+  <div class="onboarding-overlay" id="onboarding-overlay" hidden>
+    <div class="onboarding-card">
+      <div class="onboarding-steps">
+        <span class="onboarding-dot active" data-step="0"></span>
+        <span class="onboarding-dot" data-step="1"></span>
+        <span class="onboarding-dot" data-step="2"></span>
+      </div>
+
+      <!-- Step 0: 欢迎 -->
+      <div class="onboarding-page" id="ob-page-0">
+        <div class="onboarding-icon">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <h2 class="onboarding-title">欢迎使用 Gleam 微光</h2>
+        <p class="onboarding-desc">你是做决定的那个人，具体执行交给我。<br>先花一分钟接入一个模型，之后的一切就开始了。</p>
+        <button class="onboarding-btn primary" id="ob-next-0">开始配置</button>
+        <button class="onboarding-btn ghost" id="ob-skip">跳过，稍后配置</button>
+      </div>
+
+      <!-- Step 1: 选择厂商 -->
+      <div class="onboarding-page" id="ob-page-1" hidden>
+        <h2 class="onboarding-title">选择模型厂商</h2>
+        <p class="onboarding-desc">选一个你有账号的厂商，下一步填写 API Key。</p>
+        <div class="onboarding-providers" id="ob-providers"></div>
+        <div class="onboarding-actions">
+          <button class="onboarding-btn" id="ob-back-1">上一步</button>
+          <button class="onboarding-btn primary" id="ob-next-1" disabled>下一步</button>
+        </div>
+      </div>
+
+      <!-- Step 2: 填写 Key + 测试 -->
+      <div class="onboarding-page" id="ob-page-2" hidden>
+        <h2 class="onboarding-title">填写 API Key</h2>
+        <p class="onboarding-desc" id="ob-key-desc">为选定的厂商填入 API Key，我们会测试连通性。</p>
+        <div class="onboarding-form">
+          <label class="onboarding-label" for="ob-api-key">API Key</label>
+          <input class="onboarding-input" id="ob-api-key" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
+          <div class="onboarding-test-result" id="ob-test-result" hidden></div>
+        </div>
+        <div class="onboarding-actions">
+          <button class="onboarding-btn" id="ob-back-2">上一步</button>
+          <button class="onboarding-btn" id="ob-test-btn">测试连接</button>
+          <button class="onboarding-btn primary" id="ob-finish">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast 与模态根 -->
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
   <div class="modal-overlay" id="modal-overlay" hidden>

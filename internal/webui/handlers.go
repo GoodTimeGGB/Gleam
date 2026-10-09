@@ -177,6 +177,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/feedback/{id}", s.handleFeedbackDelete)
 	mux.HandleFunc("GET /api/feedback/attachment", s.handleFeedbackAttachment)
 
+	// 首次引导（检测是否已配置 API Key，一键完成初始化）
+	mux.HandleFunc("GET /api/onboarding", s.handleOnboardingGet)
+	mux.HandleFunc("POST /api/onboarding", s.handleOnboardingSave)
+
 	return mux
 }
 
@@ -1099,5 +1103,70 @@ func (s *Server) handleGoInstall(w http.ResponseWriter, r *http.Request) {
 		"message":  "请运行安装脚本：powershell -ExecutionPolicy Bypass -File scripts/install.ps1",
 		"script":   "scripts/install.ps1",
 		"download": "https://mirrors.aliyun.com/golang/go1.23.4.windows-amd64.zip",
+	})
+}
+
+// ---------- 首次引导 ----------
+
+// handleOnboardingGet 返回引导状态与厂商列表。
+// needs_onboarding = 当前无有效 API Key 且非 mock 模式。
+func (s *Server) handleOnboardingGet(w http.ResponseWriter, _ *http.Request) {
+	needs := false
+	if s.Agent.Cfg.LLM.Provider != "mock" {
+		key, _ := agent.LLMKeyFor(s.Agent.Cfg, s.Agent.Creds, s.Agent.Cfg.LLM.BaseURL, "")
+		needs = key == ""
+	}
+	writeJSON(w, 200, map[string]any{
+		"needs_onboarding": needs,
+		"providers":        s.Agent.ProvidersView(),
+	})
+}
+
+// handleOnboardingSave 引导流程保存：选厂商 → 填 Key → 保存并测试连接。
+// 成功后标记引导完成，前端不再弹出引导页。
+func (s *Server) handleOnboardingSave(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ProviderID string `json:"provider_id"`
+		Plan       string `json:"plan"`
+		APIKey     string `json:"api_key"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, "参数解析失败")
+		return
+	}
+	body.ProviderID = strings.TrimSpace(body.ProviderID)
+	body.Plan = strings.TrimSpace(body.Plan)
+	body.APIKey = strings.TrimSpace(body.APIKey)
+	if body.ProviderID == "" {
+		writeErr(w, 400, "请选择一个模型厂商")
+		return
+	}
+	if body.APIKey == "" {
+		writeErr(w, 400, "请填写 API Key")
+		return
+	}
+
+	patch := map[string]any{
+		"llm": map[string]any{
+			"provider_id": body.ProviderID,
+			"plan":        body.Plan,
+			"api_key":     body.APIKey,
+		},
+	}
+	view, err := s.Agent.ApplySettings(patch)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+
+	testResult := s.Agent.TestLLMConnection(map[string]any{
+		"provider_id": body.ProviderID,
+		"api_key":     body.APIKey,
+	})
+
+	writeJSON(w, 200, map[string]any{
+		"saved":       true,
+		"settings":    view,
+		"test_result": testResult,
 	})
 }

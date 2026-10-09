@@ -3,6 +3,7 @@
 package desktop
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -183,11 +184,39 @@ func openWindowPlatform(target string, onClose func()) bool {
 }
 
 func closeWindowPlatform() {
-	// 优先向 app 窗口发 WM_CLOSE，优雅关闭（浏览器进程随之退出）
-	for _, h := range findGleamWindows() {
+	hwnds := findGleamWindows()
+
+	// 优先向 app 窗口发 WM_CLOSE，优雅关闭（浏览器进程随之退出）。
+	for _, h := range hwnds {
 		pPostMessageW.Call(h, wmClose, 0, 0)
 	}
-	// 兜底：结束仍被跟踪的启动器进程
+
+	if len(hwnds) > 0 {
+		// WM_CLOSE 是异步的：投递后立即返回，浏览器需要数百毫秒处理关闭。
+		// 这里轮询等待窗口真正消失，最长 3 秒——否则下面 HTTP server 一关，
+		// 浏览器页面失去后端就变成白屏，而窗口本身还挂着。
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if len(findGleamWindows()) == 0 {
+				return
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+
+		// 优雅关闭超时：找到仍存在的窗口所属进程，强杀整棵进程树。
+		// 不能只杀 procs 里记录的启动器——Edge 的多进程架构下，启动器早已退出，
+		// 真正持有窗口的是孙子辈的渲染进程。按窗口句柄反查 PID 才杀得对。
+		for _, h := range findGleamWindows() {
+			var pid uint32
+			pGetWindowThreadProcessId.Call(h, uintptr(unsafe.Pointer(&pid)))
+			if pid > 0 {
+				killProcessTree(pid)
+			}
+		}
+		return
+	}
+
+	// 没找到窗口句柄时，兜底结束仍被跟踪的启动器进程。
 	mu.Lock()
 	targets := append([]*exec.Cmd(nil), procs...)
 	mu.Unlock()
@@ -196,6 +225,14 @@ func closeWindowPlatform() {
 			_ = c.Process.Kill()
 		}
 	}
+}
+
+// killProcessTree 强杀指定 PID 及其所有子进程。
+// taskkill /T 走进程树，比手动枚举子进程可靠（Edge 的进程层级深且随时 fork）。
+func killProcessTree(pid uint32) {
+	cmd := exec.Command("taskkill", "/T", "/F", "/PID", fmt.Sprint(pid))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Run()
 }
 
 func windowOpenPlatform() bool {

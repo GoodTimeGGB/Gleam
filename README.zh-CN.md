@@ -1,6 +1,6 @@
 # Gleam（微光）
 
-**语言：** [English](README.md) | 简体中文 | [日本語](README.ja.md)
+Read this in other languages: [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
 **本地优先的桌面 AI 智能体——眼里有活，心里有你。**
 

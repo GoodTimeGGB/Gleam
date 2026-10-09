@@ -1,6 +1,6 @@
 # Gleam（微光）
 
-**言語:** [English](README.md) | [简体中文](README.zh-CN.md) | 日本語
+Read this in other languages: [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
 **ローカルファーストなデスクトップ AI エージェント——仕事を見据え、あなたに寄り添う。**
 

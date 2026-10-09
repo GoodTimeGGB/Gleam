@@ -59,7 +59,8 @@ func cmdDesktopSidecar(args []string) error {
 		fmt.Fprintf(os.Stderr, "[gleam] 警告：未设置 %s，desktop-sidecar 将使用随机口令（桌面壳拿不到它）\n", webui.TokenEnv)
 	}
 
-	rt, err := buildRuntime(*configPath, *workspace, *dataDir, *mockLLM, *mockScript, nil)
+	// 桌面应用：没选过工作区就停在「不指定工作区」，不用进程 CWD 兜底。
+	rt, err := buildRuntime(*configPath, *workspace, *dataDir, *mockLLM, *mockScript, nil, WithNoDefaultWorkspace())
 	if err != nil {
 		return err
 	}

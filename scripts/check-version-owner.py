@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""前端不许再抄一份版本号，也不许替「有没有新版」下结论。
+r"""前端不许再抄一份版本号，也不许替「有没有新版」下结论。
 
 **为什么要有**：「检查更新」这一行以前写的是「当前版本 v0.1.0，已是本地运行的版本」——
 两个缺陷叠在一句文案里：
@@ -81,15 +81,20 @@ def version_re(version):
     return re.compile(r"(?<![\d.])v?" + re.escape(version) + r"(?![\d.])")
 
 
-def scan(version, docs, ban_literal=True):
+def scan(version, docs, ban_literal=True, ban_claim=True):
     """docs = [(标签, [行])] → 命中描述列表。判据只写这一份，真文件与负例共用。
 
     `ban_literal=False` 只用于官网：静态页没有 `/api/info` 可问，允许抄一份版本号，
     改由 `site_hits` 断言"抄的那一份等于 owner、且只有一处"。
+
+    `ban_claim`：应用内前端接上更新源之后，「已是最新」就不再是假结论了——
+    它是问出来的。所以这条禁令由调用方按「链路到底通没通」决定，见
+    `update_source_wired()`。官网没有出口可问，永远保持禁令。
     """
     lit = version_re(version)
-    pats = ((lit, "抄了一份版本号（owner 是 internal/buildinfo）"),
-            (CLAIM_RE, "替「有没有新版」下了结论，而本机没有更新源"))
+    pats = [(lit, "抄了一份版本号（owner 是 internal/buildinfo）")]
+    if ban_claim:
+        pats.append((CLAIM_RE, "替「有没有新版」下了结论，而本机没有更新源"))
     if not ban_literal:
         pats = pats[1:]
     hits = []
@@ -112,6 +117,26 @@ def report(hits, say, ok_line):
         return 1
     say(ok_line)
     return 0
+
+
+UPDATE_CALL = "/api/update/check"
+UPDATE_ROUTE = "GET /api/update/check"
+
+
+def update_source_wired(root, docs):
+    """更新源到底接没接上：前端会去问 + 后端有这条路由。两条都成立才算。
+
+    「已是最新」这句话的性质完全取决于这个：链路通了，它是问出来的结论；
+    链路被摘掉，它立刻又变成一句本机无从判断的空话。判据跟着事实走，
+    不跟着某句文案走，所以这里查的是链路，不是措辞。
+    """
+    fe = any(UPDATE_CALL in line for _, lines in docs for line in lines)
+    try:
+        with open(os.path.join(root, "internal", "webui", "handlers.go"), encoding="utf-8") as f:
+            be = UPDATE_ROUTE in f.read()
+    except OSError:
+        be = False
+    return fe and be
 
 
 def marked(text, marker):
@@ -270,8 +295,10 @@ def main() -> int:
         print("一个前端文件都没扫到（%s）：检查本身失效，请先修本脚本。" % STATIC.replace("\\", "/"))
         return 1
 
-    rc = report(scan(version, docs), print,
-                "  版本口径干净：%d 个前端文件，无 %r 字面量、无更新结论式文案" % (len(docs), version))
+    wired = update_source_wired(root, docs)
+    rc = report(scan(version, docs, ban_claim=not wired), print,
+                "  版本口径干净：%d 个前端文件，无 %r 字面量；更新源已接上（%s）"
+                % (len(docs), version, UPDATE_CALL if wired else "未接上，禁止更新结论式文案"))
 
     site_docs = website_docs(root)
     latest = release_date(root)

@@ -70,6 +70,13 @@ func (s *Store) Remember(content string, tags []string) (string, error) {
 
 // RememberWithSource 同 Remember，并记录条目来源（"task" = 任务收尾自动沉淀，"user" = memory.save 写入）。
 func (s *Store) RememberWithSource(content, source string, tags []string) (string, error) {
+	return s.RememberScoped(content, source, "", tags)
+}
+
+// RememberScoped 同 RememberWithSource，并带上归属工作区（空串 = 全局）。
+// 去重只在**同一个 scope** 内判：两个项目里各存一条同样的句子，是两条记忆，
+// 不该因为字面一样就互相覆盖。
+func (s *Store) RememberScoped(content, source, scope string, tags []string) (string, error) {
 	if strings.TrimSpace(content) == "" {
 		return "", fmt.Errorf("记忆内容为空")
 	}
@@ -82,6 +89,10 @@ func (s *Store) RememberWithSource(content, source string, tags []string) (strin
 	dupIdx := -1
 	for i := range s.items {
 		if s.items[i].Deleted {
+			continue
+		}
+		// 跨 scope 不算重复：A 项目写过的话，不该被 B 项目的同一句话顶掉
+		if s.items[i].Scope != scope {
 			continue
 		}
 		if cosine(newVec, s.items[i].Vec) >= DupThreshold {
@@ -110,6 +121,7 @@ func (s *Store) RememberWithSource(content, source string, tags []string) (strin
 		CreatedAt: now,
 		Vec:       newVec,
 		Source:    source,
+		Scope:     scope,
 	}
 	// 容量淘汰：超出上限移除最旧条目
 	if len(s.items) >= s.maxItems {
@@ -130,9 +142,24 @@ func (s *Store) RememberWithSource(content, source string, tags []string) (strin
 
 // Search 词法检索 top-k（哈希向量余弦，同义不同形的词不相关）。
 func (s *Store) Search(query string, k int) []Hit {
+	return s.SearchScoped(query, k, "")
+}
+
+// SearchScoped 同上，但只看本工作区与全局的条目。
+// scope 为空 = 不筛（全局模式，也是老行为）。
+func (s *Store) SearchScoped(query string, k int, scope string) []Hit {
 	s.mu.Lock()
 	items := append([]Item(nil), s.items...)
 	s.mu.Unlock()
+	if scope != "" {
+		kept := items[:0]
+		for _, it := range items {
+			if it.Scope == "" || it.Scope == scope {
+				kept = append(kept, it)
+			}
+		}
+		items = kept
+	}
 	if k <= 0 {
 		k = 5
 	}
@@ -533,6 +560,23 @@ func (m *Manager) Remember(content string, tags []string) (string, error) {
 	return m.RememberWithSource(content, "", tags)
 }
 
+// RememberScoped 写入长期记忆并落盘，带归属工作区（空串 = 全局）。
+func (m *Manager) RememberScoped(content, source, scope string, tags []string) (string, error) {
+	id, err := m.Long.RememberScoped(content, source, scope, tags)
+	if err != nil {
+		return "", err
+	}
+	if err := m.Long.Flush(); err != nil {
+		return id, err
+	}
+	return id, nil
+}
+
+// SearchScoped 词法检索，只看本工作区与全局的条目。
+func (m *Manager) SearchScoped(query string, k int, scope string) []Hit {
+	return m.Long.SearchScoped(query, k, scope)
+}
+
 // RememberWithSource 同 Remember，并记录来源（透传给 Store 的去重与入库）。
 func (m *Manager) RememberWithSource(content, source string, tags []string) (string, error) {
 	id, err := m.Long.RememberWithSource(content, source, tags)
@@ -548,6 +592,11 @@ func (m *Manager) RememberWithSource(content, source string, tags []string) (str
 // Relevant 词法检索（供规划器注入上下文）。
 func (m *Manager) Relevant(query string, k int) []Hit {
 	return m.Long.Search(query, k)
+}
+
+// RelevantScoped 同 Relevant，但只看本工作区与全局的条目。
+func (m *Manager) RelevantScoped(query string, k int, scope string) []Hit {
+	return m.Long.SearchScoped(query, k, scope)
 }
 
 // Close 落盘退出。

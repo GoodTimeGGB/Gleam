@@ -1,7 +1,8 @@
 /* 设置 v2：整页设置。内容一列居中（~560px），卡片里是「图标 / 标题与说明 / 右侧控件」的行。 */
 #view-settings { padding-top: 48px; padding-bottom: 64px; }
 #view-settings .settings-content { max-width: 560px; margin: 0 auto; gap: 0; }
-#view-settings .kb-page { max-width: none; }
+/* 快捷键页跟随其余设置页的列宽：右栏是 flex 容器，不给宽度的话这一页会按内容收缩成 506px */
+#view-settings .kb-page { max-width: none; width: 100%; }
 #view-settings .settings-panel { gap: 0; }
 html[data-view="settings"] .settings-tab { display: flex; align-items: center; gap: 9px; }
 .s2-nav-ico { display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--color-fg-muted); flex: none; }
@@ -238,3 +239,47 @@ html[data-blur="off"] *, html[data-blur="off"] *::before, html[data-blur="off"] 
 .settings-panel.s2-legacy > .card > h2.section-title:first-child { margin: 12px 0 0; }
 .s2-legacy .card-header { margin: 10px 0 2px; }
 .s2-legacy .card-header .section-title, .s2-ledger .card-header .section-title { font-size: 13px; font-weight: 500; }
+
+/* ---------- 自绘下拉（替换行内原生 select） ---------- */
+.s2-dd { position: relative; display: inline-flex; }
+.s2-dd-btn {
+  display: inline-flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px 0 10px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--surface, var(--panel));
+  color: var(--color-fg); font: inherit; font-size: 12.5px; cursor: pointer; max-width: 220px;
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.s2-dd-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--line) 55%, var(--color-fg-muted)); }
+.s2-dd-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.s2-dd-btn[aria-expanded="true"] { border-color: rgba(var(--accent-rgb) / 0.5); }
+.s2-dd-val { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s2-dd-caret { display: inline-flex; flex: none; color: var(--color-fg-faint); transition: transform var(--dur-fast) var(--ease-out); }
+.s2-dd-btn[aria-expanded="true"] .s2-dd-caret { transform: rotate(180deg); }
+.s2-dd-pop {
+  position: fixed; z-index: 140; min-width: 148px; padding: 5px;
+  background: var(--color-card); border: 1px solid var(--surface-line); border-radius: 10px;
+  box-shadow: var(--shadow-3); animation: ws-menu-in var(--dur-fast) var(--ease-out);
+}
+.s2-dd-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%;
+  padding: 7px 9px; border: none; border-radius: 7px; background: transparent;
+  color: var(--color-fg); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.s2-dd-item:hover:not(:disabled) { background: var(--hover); }
+.s2-dd-item:disabled { opacity: 0.5; cursor: not-allowed; }
+.s2-dd-item.is-on { background: color-mix(in srgb, var(--color-fg) 7%, transparent); }
+.s2-dd-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s2-dd-check { display: inline-flex; flex: none; color: var(--color-fg); }
+.s2-dd-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--accent-rgb) / 0.35); }
+
+/* 代理方式：下拉 + 只在「手动」时露出的地址输入框 */
+.s2-proxy-ctl { display: flex; align-items: center; gap: 8px; }
+.s2-proxy-ctl .s2-input { width: 200px; }
+.s2-proxy-ctl .s2-input[hidden] { display: none; }
+
+/* 全局唤起快捷键：组合串 + 录制 / 清除 */
+.s2-shortcut-ctl { display: flex; align-items: center; gap: 8px; }
+.s2-keys {
+  min-width: 96px; padding: 3px 8px; border-radius: 6px; text-align: center;
+  background: var(--hover); font-family: var(--font-mono); font-size: 11.5px; color: var(--color-fg);
+}
+.s2-keys[data-empty="true"] { color: var(--color-fg-faint); font-family: var(--font-sans); }

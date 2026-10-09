@@ -50,8 +50,8 @@ MUTATIONS = [
     {
         "name": "台账清单少登记一项：出网照记，界面上却没有这一行（连了没交代）",
         "file": "internal/agent/connections.go",
-        "edits": [('var egressKinds = []string{"llm", "web.fetch", "cloud", "feedback"}',
-                   'var egressKinds = []string{"llm", "web.fetch", "cloud"}')],
+        "edits": [('var egressKinds = []string{"llm", "web.fetch", "cloud", "feedback", "update", "go.toolchain"}',
+                   'var egressKinds = []string{"llm", "web.fetch", "cloud", "go.toolchain"}')],
         "targets": [EGRESS_CHECK],
     },
     {
@@ -79,8 +79,8 @@ MUTATIONS = [
     {
         "name": "ConnectionView 不画云端那一行：清单还在，运行时却少一行",
         "file": "internal/agent/connections.go",
-        "edits": [("rows = append(rows, a.cloudRow(rep), a.feedbackRow(rep), marketRow())",
-                   "rows = append(rows, a.feedbackRow(rep), marketRow())")],
+        "edits": [("rows = append(rows, a.cloudRow(rep), a.feedbackRow(rep), updateRow(rep), goToolchainRow(rep), marketRow())",
+                   "rows = append(rows, a.feedbackRow(rep), updateRow(rep), goToolchainRow(rep), marketRow())")],
         "targets": [("agent-rows",
                      "go test ./internal/agent -run TestConnections_EveryEgressKindHasARow -count=1 -timeout 120s")],
     },

@@ -34,7 +34,7 @@ func NewGLM(baseURL, apiKey, model string, temperature float64, maxTokens int, t
 		Model:       model,
 		Temperature: temperature,
 		MaxTokens:   maxTokens,
-		HTTP:        &http.Client{Timeout: timeout},
+		HTTP:        &http.Client{Timeout: timeout, Transport: Transport()},
 	}
 }
 

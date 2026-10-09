@@ -89,6 +89,7 @@
       <div class="sidebar-head">
         <!-- 工作模式：编程 / 通用，对应 #task-seg 的 code / work（对话档在输入框的执行方式下拉里） -->
         <div class="mode-toggle" id="mode-toggle" role="radiogroup" aria-label="工作模式">
+          <span class="mode-toggle-pill" aria-hidden="true"></span>
           <button type="button" role="radio" data-mode="code" aria-checked="false" title="编程：最小改动，附验证步骤">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="m8 10 2.5 2L8 14M12.5 15H16"/></svg>
             <span class="mode-label">编程</span>
@@ -123,11 +124,6 @@
 
       <div class="sidebar-foot">
         <nav class="nav nav-core" aria-label="核心功能">
-          <button class="nav-item" data-view="goals" aria-current="page" title="目标">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>
-            <span class="nav-label">目标</span>
-            <span class="nav-badge" id="approval-badge" hidden>0</span>
-          </button>
           <button class="nav-item" data-view="memory" title="记忆">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/><path d="M4 12v6.5c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V12"/></svg>
             <span class="nav-label">记忆</span>
@@ -148,6 +144,7 @@
             <button class="nav-item nav-more-toggle" id="nav-more-toggle" type="button" aria-expanded="false" title="更多">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
               <span class="nav-label">更多</span>
+              <span class="nav-badge" id="approval-badge" hidden>0</span>
               <svg class="nav-more-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
             </button>
             <div class="nav-more-body" id="nav-more-body" hidden>
@@ -168,14 +165,6 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M12 12 19 5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4"/><path d="M16.2 16.2a6 6 0 0 0 0-8.4"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2"/><path d="M19.1 19.1a10 10 0 0 0 0-14.2"/></svg>
             <span>GEO</span>
           </button>
-          <button class="nav-item" data-view="readiness" title="就绪体检">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l2.2 2.2L15.5 9"/><path d="M12 3l7.5 3.2v5.4c0 4.4-3 8.1-7.5 9.4-4.5-1.3-7.5-5-7.5-9.4V6.2z"/></svg>
-            <span>就绪体检</span>
-          </button>
-          <button class="nav-item" data-view="feedback" title="反馈与建议">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8.2L4 22.5V18a8 8 0 1 1 17-6.5z"/><path d="M9 10.5h7M9 13.5h4"/></svg>
-            <span>反馈与建议</span>
-          </button>
           <button class="nav-item" data-view="settings" title="设置">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.99 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.99a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.23a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.62.68 1.03 1.31 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03z"/></svg>
             <span>设置</span>
@@ -191,7 +180,7 @@
             </span>
             <span class="me-meta"><strong id="me-name">我的</strong><small id="me-sub">本地模式 · 功能完整</small></span>
           </button>
-          <button class="user-icon" type="button" data-goto="feedback" title="帮助与反馈" aria-label="帮助与反馈">
+          <button class="user-icon" type="button" id="help-btn" title="帮助" aria-label="帮助">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 16.9v.1"/></svg>
           </button>
           <button class="user-icon" type="button" data-goto="settings" title="设置" aria-label="设置">
@@ -303,6 +292,9 @@
         </div>
 
         <div class="card card--glass composer" id="composer">
+          <!-- 上边框正中那枚把手：按住上下拖可以改输入区高度 -->
+          <div class="composer-grip" id="composer-grip" role="separator" aria-orientation="horizontal"
+            aria-label="拖动调整输入框高度" tabindex="0" title="按住上下拖动，调整输入框高度（双击恢复自动高度）"></div>
           <div class="composer-refs" id="composer-refs" hidden></div>
           <textarea class="composer-input" id="goal-input" rows="1"
             placeholder="一切从这里开始… 描述任务，或输入 @ 引用"
@@ -348,9 +340,19 @@
                   </button>
                 </div>
               </div>
-              <button class="cp-icon-btn" id="cp-attach" type="button" title="添加文件" aria-label="添加文件">
+              <button class="cp-icon-btn" id="cp-attach" type="button" title="添加文件" aria-label="添加文件" aria-haspopup="menu" aria-expanded="false">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 11.6 12.2 19.9a5.2 5.2 0 0 1-7.4-7.4l8.6-8.6a3.4 3.4 0 0 1 4.9 4.9l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg>
               </button>
+              <div class="attach-menu" id="attach-menu" role="menu" aria-label="添加附件" hidden>
+                <button class="plus-item" data-attach="file" role="menuitem">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.4 11.5 12.5 20.4a5 5 0 0 1-7-7l8.9-8.9a3 3 0 0 1 4.2 4.2l-8.9 8.9a1 1 0 0 1-1.4-1.4l8.2-8.2"/></svg>
+                  <span>添加文件</span><span class="plus-sub">从本地选择</span>
+                </button>
+                <button class="plus-item" data-attach="folder" role="menuitem">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+                  <span>添加文件夹</span><span class="plus-sub">选择或切换工作区</span>
+                </button>
+              </div>
               <!-- 执行方式下拉：权限（请我批准 / 完全访问）+ 任务档位 + 专家角色。按钮文字只读当前真实状态 -->
               <button class="composer-meta-btn cp-perm" id="cp-perm" type="button"
                 aria-expanded="false" aria-controls="cp-perm-pop" title="执行方式">
@@ -375,16 +377,20 @@
           </div>
           <div class="cp-pop cp-perm-pop" id="cp-perm-pop" aria-label="执行方式" hidden>
             <div class="cp-pop-head">执行权限</div>
-              <div class="segmented perm-seg" role="group" aria-label="权限模式" id="perm-seg">
-                <button aria-pressed="false" data-perm="plan_first" title="执行前先展示完整计划，征求你的批准">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V5l-8-3z"/></svg>
-                  执行前询问
-                </button>
-                <button aria-pressed="true" data-perm="auto" title="自动执行，仅高风险操作（删除/执行命令）才征求批准">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg>
-                  自动执行
-                </button>
-              </div>
+            <div class="perm-list" role="radiogroup" aria-label="权限模式" id="perm-list">
+              <button class="perm-option" role="radio" data-perm="plan_first" data-perm-label="plan_first" aria-checked="false">
+                <span class="perm-option-title">询问审批</span>
+                <span class="perm-option-desc">执行命令、修改 Workspace 外文件或访问网络前，始终询问</span>
+              </button>
+              <button class="perm-option" role="radio" data-perm="auto" data-perm-label="auto" aria-checked="true">
+                <span class="perm-option-title">自动审批</span>
+                <span class="perm-option-desc">仅在检测到潜在风险时询问</span>
+              </button>
+              <button class="perm-option perm-option--danger" role="radio" data-perm="auto" data-perm-label="full_access" aria-checked="false">
+                <span class="perm-option-title"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>完全访问</span>
+                <span class="perm-option-desc">不再询问，可自由访问你的文件、终端和网络</span>
+              </button>
+            </div>
             <div class="cp-pop-head">任务档位</div>
               <div class="segmented task-seg" role="group" aria-label="任务模式" id="task-seg">
                 <button aria-pressed="false" data-task="chat" title="直聊问答，不经规划执行">对话</button>
@@ -413,11 +419,26 @@
             </div>
           </div>
           <div class="mention-pop" id="mention-pop" role="listbox" aria-label="引用建议" hidden></div>
+          <div class="ctx-menu" id="goal-ctx-menu" role="menu" aria-label="编辑" hidden>
+            <button class="ctx-item" data-ctx="undo" role="menuitem">撤销<span class="ctx-kbd">Ctrl+Z</span></button>
+            <button class="ctx-item" data-ctx="redo" role="menuitem">重做<span class="ctx-kbd">Ctrl+Y</span></button>
+            <div class="ctx-sep" role="separator"></div>
+            <button class="ctx-item" data-ctx="cut" role="menuitem">剪切<span class="ctx-kbd">Ctrl+X</span></button>
+            <button class="ctx-item" data-ctx="copy" role="menuitem">复制<span class="ctx-kbd">Ctrl+C</span></button>
+            <button class="ctx-item" data-ctx="paste" role="menuitem">粘贴<span class="ctx-kbd">Ctrl+V</span></button>
+            <div class="ctx-sep" role="separator"></div>
+            <button class="ctx-item" data-ctx="selectAll" role="menuitem">全选<span class="ctx-kbd">Ctrl+A</span></button>
+          </div>
         </div>
         <div class="composer-foot-row" id="composer-foot-row">
-          <button class="composer-foot" id="composer-ws" type="button" title="选择任务工作区（文件操作将限定在该文件夹内）">
+          <button class="composer-foot composer-foot--ws" id="composer-ws" type="button" aria-haspopup="menu" aria-expanded="false" title="选择任务工作区（文件操作将限定在该文件夹内）">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
-            <span id="composer-ws-text">选择工作区（可选）</span>
+            <span id="composer-ws-text">不指定工作区</span>
+            <span class="ws-branch" id="composer-ws-branch" hidden>
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 5-12 3-12 8"/></svg>
+              <span id="composer-ws-branch-text"></span>
+            </span>
+            <svg class="composer-ws-caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <span class="foot-chip foot-local" title="任务在这台电脑上执行">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="1.8"/><path d="M9 20h6M12 16.5V20"/></svg>
@@ -463,6 +484,18 @@
           <div class="inline-form">
             <input class="input" id="memory-content" placeholder="例如：我喜欢简洁的回复">
             <button class="btn btn-primary" id="memory-save">保存</button>
+          </div>
+        </div>
+        <!-- 从本机其他 AI 工具导入记忆：默认收起，点「扫描本机」才读盘 -->
+        <div class="soft-panel import-panel" id="memory-import" hidden>
+          <div class="import-head">
+            <h2 class="section-title">从本机导入记忆</h2>
+            <button class="btn btn-secondary btn-sm" id="memory-import-scan" type="button">扫描本机</button>
+          </div>
+          <p class="field-hint" id="memory-import-note">读取本机其他 AI 工具留下的记忆与规则文件，选中后按段落写进 Gleam 的记忆库。只读，不改动它们的文件。</p>
+          <div class="row-list" id="memory-import-list"></div>
+          <div class="import-actions">
+            <button class="btn btn-primary btn-sm" id="memory-import-apply" type="button" disabled>导入选中</button>
           </div>
         </div>
         <div class="row-list" id="memory-hits">
@@ -603,7 +636,11 @@
             <button class="text-tab" role="tab" aria-selected="false" data-mtab="skills">技能模板</button>
             <button class="text-tab" role="tab" aria-selected="false" data-mtab="installed">已安装</button>
             <button class="text-tab" role="tab" aria-selected="false" data-mtab="custom">自定义接入</button>
+            <button class="text-tab" role="tab" aria-selected="false" data-mtab="local">本机检测</button>
           </div>
+        </div>
+        <div class="market-panel" data-mtab="local" hidden>
+          <div id="local-import-body"></div>
         </div>
         <div class="market-panel" data-mtab="mcp">
           <div class="market-filter">
@@ -1103,87 +1140,6 @@
         </div>
       </section>
 
-      <!-- ===== 就绪体检（九坑自检） ===== -->
-      <section class="view" id="view-readiness" aria-labelledby="readiness-title">
-        <header class="view-header">
-          <h1 class="view-title" id="readiness-title">就绪体检</h1>
-          <p class="view-desc">逐条对照自建 Agent Runtime 常见的九个坑。每一项都从真实运行状态取证据——工具注册表、门控审计、用量归集、提示词实测、成长日志、记忆库，不是一份静态清单。只读检查，不改任何配置。</p>
-        </header>
-
-        <div class="card card--glass" style="margin-bottom: var(--space-5);">
-          <div class="card-header">
-            <h2 class="card-title">体检结论</h2>
-            <div class="readiness-head-actions">
-              <span class="badge" id="ready-verdict">—</span>
-              <button class="btn btn-secondary btn-sm" id="ready-refresh">重新体检</button>
-            </div>
-          </div>
-          <p class="readiness-summary" id="ready-summary">正在体检…</p>
-          <div class="readiness-tally">
-            <span class="readiness-tally-item readiness-tally-item--pass"><strong id="ready-pass">0</strong><span>通过</span></span>
-            <span class="readiness-tally-item readiness-tally-item--warn"><strong id="ready-warn">0</strong><span>待改进</span></span>
-            <span class="readiness-tally-item readiness-tally-item--fail"><strong id="ready-fail">0</strong><span>不合格</span></span>
-          </div>
-        </div>
-
-        <div class="readiness-list" id="readiness-items"></div>
-      </section>
-
-      <!-- ===== 反馈与建议 ===== -->
-      <section class="view" id="view-feedback" aria-labelledby="feedback-title">
-        <header class="view-header">
-          <h1 class="view-title" id="feedback-title">反馈与建议</h1>
-          <p class="view-desc">遇到的问题、想加的功能，都写在这里。每一条<strong>先存进你这台电脑</strong>，配了远端才会再送一份出去——不配远端不是失败，只是还没人收。</p>
-        </header>
-
-        <div class="card card--glass" style="margin-bottom: var(--space-4);">
-          <div class="field">
-            <span class="field-label" id="fb-kind-label">这条是</span>
-            <div class="segmented" role="group" aria-labelledby="fb-kind-label" id="fb-kind">
-              <button type="button" data-kind="bug" aria-pressed="true" title="哪里不对、怎么遇到的一次">报问题</button>
-              <button type="button" data-kind="suggestion" aria-pressed="false" title="希望变成什么样">提建议</button>
-            </div>
-          </div>
-          <div class="field" style="margin-top: var(--space-3);">
-            <label class="field-label" for="fb-text">描述</label>
-            <textarea class="input textarea" id="fb-text" rows="5" placeholder="例如：技能页点「运行」之后转圈到底，没有任何提示，控制台也看不到原因。"></textarea>
-            <div class="fb-composer-foot">
-              <span class="field-hint" id="fb-count">0 / 20000 字</span>
-              <span class="field-hint" id="fb-ref-slot"></span>
-            </div>
-          </div>
-          <div class="field" style="margin-top: var(--space-3);">
-            <span class="field-label">截图（可选，最多 5 张）</span>
-            <div class="fb-shot-row">
-              <input type="file" id="fb-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
-              <button type="button" class="btn btn-secondary btn-sm" id="fb-pick">选文件</button>
-              <span class="field-hint">也可以在这里直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴一张</span>
-            </div>
-            <div class="fb-shots" id="fb-shots"></div>
-            <p class="field-hint">截图只写进本机的 <code>feedback/</code> 目录（0600），<strong>不会</strong>跟着发给任何人。</p>
-          </div>
-          <div class="fb-context" id="fb-context"></div>
-          <div class="fb-actions">
-            <span class="field-hint" id="fb-dest">正在确认这份反馈会落在哪儿…</span>
-            <button type="button" class="btn btn-primary" id="fb-submit">提交</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">本机已提交</h2>
-            <button type="button" class="btn btn-secondary btn-sm" id="fb-refresh">刷新</button>
-          </div>
-          <p class="field-hint" id="fb-broken" hidden></p>
-          <div class="row-list" id="fb-list"></div>
-          <div class="empty" id="fb-empty" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8.2L4 22.5V18a8 8 0 1 1 17-6.5z"/></svg>
-            <div class="empty-title">还没有提交过反馈</div>
-            <p class="empty-desc">在上方写一句就行。对话里的任何一条回复，也可以点「反馈这条」直接指着那次运行说。</p>
-          </div>
-        </div>
-      </section>
-
     </main>
 
     <!-- 右侧栏：三张入口卡（工作区文件 / 内置浏览器 / 终端），点开的都是已有的面板 -->
@@ -1281,50 +1237,79 @@
         </section>
       </div>
     </aside>
-  </div>
 
-  <!-- 浏览器预览：非模态的右侧浮层（批次 F13）。刻意不遮中间列、不锁焦点——
-       它是"边干活边看本机 dev server"的面板，不是弹窗：开着它照样能发消息、看进度。 -->
-  <aside class="browser-pane" id="browser-pane" role="region" aria-label="浏览器预览" hidden>
-    <header class="bp-bar">
-      <div class="bp-nav" role="group" aria-label="页面导航">
-        <button class="icon-btn" id="bp-back" type="button" aria-label="上一页" title="上一页（只走我们自己的地址栈，跨站页面里我们控制不了它的历史）">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+  <!-- 面板坞（批次 A1）：右侧一列，页签在头、面板在体。
+       浏览器原来是 fixed 浮层（批次 F13），现在收进坞里；现场栏默认折叠，所以它就是最右列。 -->
+  <aside class="dock" id="dock" hidden aria-label="面板坞">
+    <div class="dock-resize" id="dock-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整面板宽度" tabindex="0"></div>
+    <header class="dock-head">
+      <div class="dock-tabs" role="tablist" aria-label="面板">
+        <button class="dock-tab" type="button" role="tab" data-dtab="browser" aria-selected="true">浏览器</button>
+        <button class="dock-tab" type="button" role="tab" data-dtab="review" aria-selected="false">审阅</button>
+      </div>
+      <div class="dock-tools">
+        <button class="dock-tool" id="dock-new" type="button" title="新建浏览器标签" aria-label="新建浏览器标签">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
-        <button class="icon-btn" id="bp-fwd" type="button" aria-label="下一页" title="下一页">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        <button class="dock-tool" id="dock-max" type="button" title="最大化面板" aria-label="最大化面板" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg>
         </button>
-        <button class="icon-btn" id="bp-reload" type="button" aria-label="刷新" title="刷新（重新载入这一个地址）">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v5h-5"/></svg>
+        <button class="dock-tool" id="dock-split" type="button" title="拆分面板" aria-label="拆分面板" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 5v14"/></svg>
+        </button>
+        <button class="dock-tool" id="dock-close" type="button" title="关闭面板（Esc）" aria-label="关闭面板">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
       </div>
-      <form class="bp-addr" id="bp-form" autocomplete="off">
-        <label class="sr-only" for="bp-url">地址</label>
-        <input id="bp-url" name="url" type="text" inputmode="url" spellcheck="false" placeholder="127.0.0.1:5173 或完整地址">
-        <button class="btn btn-secondary btn-sm" type="submit">打开</button>
-      </form>
-      <button class="icon-btn" id="bp-external" type="button" aria-label="在系统浏览器打开" title="在系统浏览器打开（Google、GitHub 这类站点拒绝被嵌入，走这条）">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
-      </button>
-      <button class="icon-btn" id="bp-close" type="button" aria-label="关闭预览面板" title="关闭（Esc）">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-      </button>
     </header>
-    <div class="bp-quick" id="bp-quick" role="group" aria-label="常用地址"></div>
-    <div class="bp-stage">
-      <!-- 空态先画着，第一次导航后才换 iframe：一个空白 iframe 看起来像坏了 -->
-      <div class="bp-empty" id="bp-empty">
-        <p class="bp-empty-title">还没有地址</p>
-        <p class="bp-empty-sub">上面输一个本机地址，或点上面常用端口。<br>很多站点（Google、GitHub、需要登录的页面）拒绝被嵌在这里，一直空白就是被拒了——用「在系统浏览器打开」。</p>
+    <div class="dock-body">
+      <div class="dock-pane" data-dpane="browser">
+        <!-- 浏览器预览：非模态，不锁焦点——开着它照样能发消息、看进度。 -->
+        <div class="browser-pane" id="browser-pane" role="region" aria-label="浏览器预览" hidden>
+          <!-- 标签条：只有一个标签时整条藏起来（单个标签不需要标签条），
+               坞头的 ＋ 新建，标签上的 ✕ 关闭 -->
+          <div class="bp-tabs" id="bp-tabs" role="tablist" aria-label="浏览器标签" hidden></div>
+          <header class="bp-bar">
+            <div class="bp-nav" role="group" aria-label="页面导航">
+              <button class="icon-btn" id="bp-back" type="button" aria-label="上一页" title="上一页（只走我们自己的地址栈，跨站页面里我们控制不了它的历史）">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <button class="icon-btn" id="bp-fwd" type="button" aria-label="下一页" title="下一页">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+              </button>
+              <button class="icon-btn" id="bp-reload" type="button" aria-label="刷新" title="刷新（重新载入这一个地址）">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v5h-5"/></svg>
+              </button>
+            </div>
+            <form class="bp-addr" id="bp-form" autocomplete="off">
+              <label class="sr-only" for="bp-url">地址</label>
+              <input id="bp-url" name="url" type="text" inputmode="url" spellcheck="false" placeholder="127.0.0.1:5173 或完整地址">
+              <button class="btn btn-secondary btn-sm" type="submit">打开</button>
+            </form>
+            <button class="icon-btn" id="bp-external" type="button" aria-label="在系统浏览器打开" title="在系统浏览器打开（Google、GitHub 这类站点拒绝被嵌入，走这条）">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+            </button>
+          </header>
+          <div class="bp-quick" id="bp-quick" role="group" aria-label="常用地址"></div>
+          <div class="bp-stage">
+            <!-- 空态先画着，第一次导航后才换 iframe：一个空白 iframe 看起来像坏了 -->
+            <div class="bp-empty" id="bp-empty">
+              <p class="bp-empty-title">还没有地址</p>
+              <p class="bp-empty-sub">上面输一个本机地址，或点上面常用端口。<br>很多站点（Google、GitHub、需要登录的页面）拒绝被嵌在这里，一直空白就是被拒了——用「在系统浏览器打开」。</p>
+            </div>
+            <!-- sandbox 是刻意的：不给 allow-top-navigation，所以被嵌的页面不能把整个操作台拽走；
+                 给了 allow-same-origin，本机 dev server 才用得了 localStorage。 -->
+            <iframe class="bp-frame" id="bp-frame" title="预览页面" hidden
+              referrerpolicy="no-referrer"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+          </div>
+          <p class="bp-status" id="bp-status" role="status"></p>
+        </div>
       </div>
-      <!-- sandbox 是刻意的：不给 allow-top-navigation，所以被嵌的页面不能把整个操作台拽走；
-           给了 allow-same-origin，本机 dev server 才用得了 localStorage。 -->
-      <iframe class="bp-frame" id="bp-frame" title="预览页面" hidden
-        referrerpolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+      <div class="dock-pane" data-dpane="review" id="dock-review" hidden></div>
     </div>
-    <p class="bp-status" id="bp-status" role="status"></p>
   </aside>
+  </div>
 
   <!-- 我的：右侧抽屉 -->
   <div class="drawer-overlay" id="me-overlay" hidden>
@@ -1435,7 +1420,7 @@
             <span class="me-row-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v5h-5"/></svg></span><span class="me-row-label">检查更新</span><span class="me-row-arrow me-version" id="me-version">—</span>
           </button>
           <button class="me-row" id="me-help">
-            <span class="me-row-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg></span><span class="me-row-label">帮助与反馈</span><span class="me-row-arrow">›</span>
+            <span class="me-row-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg></span><span class="me-row-label">帮助</span><span class="me-row-arrow">›</span>
           </button>
         </section>
       </div>
@@ -1561,7 +1546,7 @@
     </div>
     <button class="menu-item" role="menuitem" data-me="growth"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg><span>使用统计与成长</span></button>
     <button class="menu-item" role="menuitem" data-me="update"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v5h-5"/></svg><span>检查更新</span></button>
-    <button class="menu-item" role="menuitem" data-me="help"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg><span>帮助与反馈</span></button>
+    <button class="menu-item" role="menuitem" data-me="help"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg><span>帮助</span></button>
     <button class="menu-item" role="menuitem" data-me="account"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg><span>账号与本地数据</span></button>
     <div class="menu-sep" role="separator" data-me-signout-sep hidden></div>
     <button class="menu-item menu-item--danger" role="menuitem" data-me="signout" hidden><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg><span>退出登录</span></button>
@@ -1582,55 +1567,8 @@
     </div>
   </div>
 
-  <!-- 右下角帮助按钮：问题反馈 -->
-  <button class="help-fab" id="help-fab" type="button" aria-label="问题反馈" data-tip="问题反馈" data-tip-key="system.feedback" data-tip-side="left">
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.4-2.7 4"/><path d="M12 17.6v.1"/></svg>
-  </button>
   <div class="chrome-tip" id="chrome-tip" role="tooltip" hidden></div>
 
-  <!-- 问题反馈对话框：提交走 POST /api/feedback（先存本机，配了远端才投递） -->
-  <div class="fbd-overlay" id="fbd-overlay" hidden>
-    <form class="fbd" id="fbd" role="dialog" aria-modal="true" aria-labelledby="fbd-title" novalidate>
-      <header class="fbd-head">
-        <div>
-          <h2 class="fbd-title" id="fbd-title">有什么想反馈的</h2>
-          <p class="fbd-sub">告诉我们你遇到的问题或建议，这些信息将用于改进 Gleam。</p>
-        </div>
-        <button class="icon-btn fbd-x" type="button" id="fbd-close" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-      </header>
-      <div class="fbd-body">
-        <div class="fbd-field">
-          <div class="fbd-label-row">
-            <label class="fbd-label" for="fbd-text">问题或建议（必填）</label>
-            <div class="fbd-kind" role="radiogroup" aria-label="反馈类型">
-              <button type="button" role="radio" data-kind="bug" aria-checked="true">问题</button>
-              <button type="button" role="radio" data-kind="suggestion" aria-checked="false">建议</button>
-            </div>
-          </div>
-          <textarea class="fbd-input fbd-text" id="fbd-text" rows="3" placeholder="描述你看到了什么、期望发生什么，以及可以稳定复现的操作步骤"></textarea>
-        </div>
-        <div class="fbd-field">
-          <span class="fbd-label">屏幕截图</span>
-          <div class="fbd-shots" id="fbd-shots">
-            <label class="fbd-add" id="fbd-add" tabindex="0">
-              <input type="file" accept="image/*" id="fbd-file" hidden multiple>
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-              <span>添加或粘贴截图</span>
-            </label>
-          </div>
-        </div>
-        <div class="fbd-field">
-          <label class="fbd-label" for="fbd-email">联系邮箱（可选）</label>
-          <input class="fbd-input" id="fbd-email" type="email" autocomplete="email" placeholder="便于我们联系你进一步了解问题">
-        </div>
-        <p class="fbd-note" id="fbd-note"></p>
-      </div>
-      <footer class="fbd-foot">
-        <button class="btn btn-ghost btn-sm" type="button" id="fbd-cancel">取消</button>
-        <button class="btn btn-primary btn-sm" type="submit" id="fbd-send"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>发送反馈</button>
-      </footer>
-    </form>
-  </div>
 
   <!-- 页内查找（搜索当前任务） -->
   <div class="findbar" id="findbar" role="search" hidden>
@@ -1654,5 +1592,6 @@
   <script src="/assets/settings2.js"></script>
   <script src="/assets/settings2-models.js"></script>
   <script src="/assets/settings2-pages.js"></script>
+  <script src="/assets/importer.js"></script>
 </body>
 </html>

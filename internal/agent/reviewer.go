@@ -81,3 +81,64 @@ func (r *llmReviewer) Review(userGoal, tool string, args map[string]any) (bool, 
 	}
 	return v.OK, strings.TrimSpace(v.Reason)
 }
+
+// deepReviewTimeout 深度扫描看的是整段计划，比逐动作那份大，给的时间也多些。
+const deepReviewTimeout = 30 * time.Second
+
+// deepReviewPlan 深度扫描：执行前把**整段计划**交给主模型审一遍。
+//
+// 与轻量扫描（Reviewer）的区别在视野，不在模型强弱：轻量扫描逐动作看、用的是辅助模型；
+// 这里一次看全局——每一步单看都合理、连起来却在做另一件事的计划，逐动作审核是看不见的。
+// 也正因为一条任务只做一次，用主模型才划算。
+//
+// 拿不到结论时**不阻断**（模型不可用、输出解析不了都算）：深度扫描是加一道人工确认，
+// 不是新的失败点。真要拦，会在下面交给人拍板。
+func (a *Agent) deepReviewPlan(ctx context.Context, taskID, goal string, plan *types.Plan) (bool, string) {
+	if a == nil || a.LLM == nil || plan == nil || len(plan.Steps) == 0 {
+		return true, ""
+	}
+	var b strings.Builder
+	for i, s := range plan.Steps {
+		args, _ := json.Marshal(s.Args)
+		fmt.Fprintf(&b, "%d. [%s] %s\n   参数：%s\n",
+			i+1, s.Tool, types.Shorten(s.Description, 120), types.Shorten(string(args), 240))
+	}
+	sys := strings.Join([]string{
+		"你是计划审核器。" + llm.MarkerReview,
+		"只回答一个问题：这一整段计划，是不是在**用户目标范围内**、以合理方式达成它？",
+		"只输出 JSON：{\"ok\":true或false,\"reason\":\"一句中文说明\"}",
+		"",
+		"## 判 false 的典型情况",
+		"1. 整段计划在做用户没要的事（顺手删东西、顺手改配置、把数据发到外部）；",
+		"2. 单步都正常，合起来却越过了目标边界（先读 A、再拿 A 里的凭据去 B）；",
+		"3. 有更小、更直接的做法，却选了会破坏现状的那条；",
+		"4. 缺少兑现目标的关键一步（声称完成但计划里没有任何验证动作）。",
+		"",
+		"## 注意",
+		"- 拿不准就判 false：多标一次只是让人多点一下确认，漏一次就是事故。",
+		"- 计划多不等于错，只在取向不对时才否决。",
+	}, "\n")
+	req := llm.ChatRequest{
+		System: sys,
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: fmt.Sprintf(
+			"用户目标：%s\n\n计划（共 %d 步）：\n%s",
+			types.Shorten(goal, 300), len(plan.Steps), types.Shorten(b.String(), 1800))}},
+		Temperature: 0, MaxTokens: 200, TaskID: taskID,
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, deepReviewTimeout)
+	defer cancel()
+	text, err := a.LLM.Chat(cctx, req)
+	if err != nil {
+		return true, "" // 主模型不可用：不因为"审不了"而卡住任务
+	}
+	raw, err := extractJSON(text)
+	if err != nil {
+		return false, "深度扫描的输出没法解析，交你确认"
+	}
+	var v reviewVerdict
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return false, "深度扫描的输出没法解析，交你确认"
+	}
+	return v.OK, strings.TrimSpace(v.Reason)
+}

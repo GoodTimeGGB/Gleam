@@ -94,8 +94,16 @@ func (s *Server) handleNetworkInfo(w http.ResponseWriter, _ *http.Request) {
 	if u, err := url.Parse(s.Agent.Cfg.LLM.BaseURL); err == nil {
 		host = u.Host
 	}
+	// 生效方式：设置页选的那一项优先于环境变量，所以要说清楚"当前到底按哪个走"
+	netw := s.Agent.Cfg.Network
+	mode := netw.ProxyModeOrDefault()
+	manual := ""
+	if mode == "manual" {
+		manual = redactProxy(netw.ProxyURL)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"proxy_env": env, "proxy_keys": keys,
+		"proxy_mode": mode, "proxy_url": manual,
 		"llm_host": host, "llm_provider": s.Agent.Cfg.LLM.Provider,
 	})
 }

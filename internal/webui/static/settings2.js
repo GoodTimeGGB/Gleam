@@ -137,20 +137,65 @@ const S2 = (() => {
     });
     return input;
   }
+  // 自绘下拉：原生 <select> 的弹层是系统画的，改不动样式。这里用「胶囊按钮 + 浮层列表」，
+  // 选中项右侧打勾、底色加深。浮层挂到 body 上并按视口定位——卡片有 overflow:hidden，放里面会被裁掉。
   function select(options, value, onChange, { disabled, labelText } = {}) {
-    const s = h('select', { class: 's2-select', 'aria-label': labelText || '选择' });
-    for (const o of options) {
-      const opt = h('option', { value: o.value, text: o.label });
-      if (o.disabled) opt.disabled = true;
-      s.append(opt);
-    }
-    s.value = value;
-    s.disabled = !!disabled;
-    s.addEventListener('change', async () => {
-      const prev = value;
-      try { await onChange(s.value); value = s.value; } catch (err) { s.value = prev; toast(err.message || String(err), 'error'); }
-    });
-    return s;
+    const wrap = h('div', { class: 's2-dd' });
+    const valEl = h('span', { class: 's2-dd-val' });
+    const caret = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+    const btn = h('button', {
+      type: 'button', class: 's2-dd-btn', 'aria-haspopup': 'listbox', 'aria-expanded': 'false',
+      'aria-label': labelText || '选择', disabled: disabled || null,
+    }, valEl, h('span', { class: 's2-dd-caret', html: caret }));
+    let current = value;
+    const label = () => {
+      const o = options.find((x) => x.value === current);
+      valEl.textContent = o ? o.label : (options[0] ? options[0].label : '—');
+    };
+    label();
+
+    let pop = null;
+    const close = () => {
+      if (!pop) return;
+      pop.remove(); pop = null;
+      btn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('mousedown', onOut, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+    const onOut = (e) => { if (pop && !pop.contains(e.target) && !btn.contains(e.target)) close(); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+    const open = () => {
+      if (pop) return;
+      pop = h('div', { class: 's2-dd-pop', role: 'listbox', 'aria-label': labelText || '选择' });
+      for (const o of options) {
+        const on = o.value === current;
+        const item = h('button', {
+          type: 'button', class: 's2-dd-item' + (on ? ' is-on' : ''), role: 'option',
+          'aria-selected': String(on), disabled: o.disabled || null,
+        }, h('span', { class: 's2-dd-item-label', text: o.label }),
+          on ? h('span', { class: 's2-dd-check', html: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg>' }) : null);
+        item.addEventListener('click', async () => {
+          const prev = current;
+          current = o.value; label(); close();
+          try { await onChange(o.value); } catch (err) { current = prev; label(); toast(err.message || String(err), 'error'); }
+        });
+        pop.append(item);
+      }
+      document.body.append(pop);
+      btn.setAttribute('aria-expanded', 'true');
+      const r = btn.getBoundingClientRect();
+      const w = pop.offsetWidth, ph = pop.offsetHeight;
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+      let top = r.bottom + 6;
+      if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - 6 - ph);
+      pop.style.left = Math.round(left) + 'px';
+      pop.style.top = Math.round(top) + 'px';
+      document.addEventListener('mousedown', onOut, true);
+      document.addEventListener('keydown', onKey, true);
+    };
+    btn.addEventListener('click', (e) => { e.stopPropagation(); if (pop) close(); else open(); });
+    wrap.append(btn);
+    return wrap;
   }
   const btn = (text, onClick, cls = 'btn btn-secondary btn-sm', attrs = {}) => h('button', Object.assign({ type: 'button', class: cls, onclick: onClick }, attrs), text);
   function empty(iconName, title, desc, action) {

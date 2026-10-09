@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -119,7 +120,7 @@ func (a *Agent) MemorySearch(query string, k int) []types.MemoryHitView {
 	if a.Mem == nil {
 		return nil
 	}
-	hits := a.Mem.Relevant(query, k)
+	hits := a.Mem.RelevantScoped(query, k, a.MemoryScope())
 	out := make([]types.MemoryHitView, 0, len(hits))
 	for _, h := range hits {
 		out = append(out, types.MemoryHitView{ID: h.ID, Content: h.Content, Tags: h.Tags, Score: h.Score})
@@ -149,7 +150,16 @@ func (a *Agent) MemorySave(content string, tags []string) (string, error) {
 	if a.Mem == nil {
 		return "", errors.New("记忆系统未启用")
 	}
-	return a.Mem.Remember(content, tags)
+	return a.Mem.RememberScoped(content, "", a.MemoryScope(), tags)
+}
+
+// MemoryScope 当前记忆归属的工作区。开了「项目级记忆」才返回工作区路径，否则空串（全局）。
+// 读的是**当下**的配置与工作区：切换工作区、开关设置都即时生效，不用重启。
+func (a *Agent) MemoryScope() string {
+	if a.Cfg == nil || !a.Cfg.Memory.ProjectScope {
+		return ""
+	}
+	return strings.TrimSpace(a.Cfg.Workspace)
 }
 
 // SkillList 技能列表。
@@ -305,10 +315,20 @@ func (a *Agent) SettingsView() map[string]any {
 	apiKeySet := activeKey != ""
 	return map[string]any{
 		"persona": map[string]any{"name": cfg.Persona.Name, "style": cfg.Persona.Style},
+		"git": map[string]any{
+			"branch_prefix":       cfg.Git.BranchPrefix,
+			"force_push":          cfg.Git.ForcePush,
+			"commit_instructions": cfg.Git.CommitInstructions,
+		},
+		"network": map[string]any{
+			"proxy_mode": cfg.Network.ProxyModeOrDefault(),
+			"proxy_url":  cfg.Network.ProxyURL,
+		},
 		"safety": map[string]any{
 			"mode":                     cfg.Safety.Mode,
 			"approval_timeout_seconds": cfg.Safety.ApprovalTimeoutSecs,
 			"ai_review":                cfg.Safety.AIReview,
+			"deep_review":              cfg.Safety.DeepReview,
 		},
 		"agent": map[string]any{
 			"max_replans":               cfg.Agent.MaxReplans,
@@ -333,6 +353,7 @@ func (a *Agent) SettingsView() map[string]any {
 			"short_term_capacity": cfg.Memory.ShortTermCap,
 			"vector_dim":          cfg.Memory.VectorDim,
 			"max_items":           cfg.Memory.MaxItems,
+			"project_scope":       cfg.Memory.ProjectScope,
 		},
 		"llm": map[string]any{
 			"provider":         cfg.LLM.Provider,
@@ -446,6 +467,9 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		if b, ok := sm["ai_review"].(bool); ok {
 			sub("safety")["ai_review"] = b
 		}
+		if b, ok := sm["deep_review"].(bool); ok {
+			sub("safety")["deep_review"] = b
+		}
 	}
 	if am, ok := patch["agent"].(map[string]any); ok {
 		// 上限是"配置还能叫配置"的边界：done_threshold>100 永不达标、max_replans 数百
@@ -512,6 +536,9 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		}
 		if v, ok := mm["max_items"]; ok {
 			posInt("memory", "max_items", v, 10, 100000)
+		}
+		if b, ok := mm["project_scope"].(bool); ok {
+			sub("memory")["project_scope"] = b
 		}
 	}
 	if lm, ok := patch["llm"].(map[string]any); ok {
@@ -584,6 +611,38 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 	if v, ok := patch["scheduler"].(map[string]any); ok {
 		if b, ok := v["enabled"].(bool); ok {
 			sub("scheduler")["enabled"] = b
+		}
+	}
+	if v, ok := patch["git"].(map[string]any); ok {
+		if s2, ok := v["branch_prefix"].(string); ok {
+			sub("git")["branch_prefix"] = strings.TrimSpace(s2)
+		}
+		if b, ok := v["force_push"].(bool); ok {
+			sub("git")["force_push"] = b
+		}
+		if s2, ok := v["commit_instructions"].(string); ok {
+			sub("git")["commit_instructions"] = strings.TrimSpace(s2)
+		}
+	}
+	if v, ok := patch["network"].(map[string]any); ok {
+		if mode, ok := v["proxy_mode"].(string); ok {
+			switch mode {
+			case "system", "manual", "none":
+				sub("network")["proxy_mode"] = mode
+			default:
+				return a.SettingsView(), fmt.Errorf("代理方式只能是 system / manual / none，收到 %q", mode)
+			}
+		}
+		if raw, ok := v["proxy_url"].(string); ok {
+			sub("network")["proxy_url"] = strings.TrimSpace(raw)
+		}
+		// 手动模式当场校验一次地址：保存成功却在启动时才发现填错了，等于把错误拖到下一次重启。
+		// 这里顺带把传输层换掉，之后新建的客户端就用新的；已经有连接的不会切，界面里写明了要重启。
+		if m := sub("network"); m["proxy_mode"] == "manual" {
+			raw, _ := m["proxy_url"].(string)
+			if err := llm.SetProxyMode("manual", raw); err != nil {
+				return a.SettingsView(), err
+			}
 		}
 	}
 	if len(outOfRange) > 0 {
@@ -1207,12 +1266,34 @@ func (a *Agent) PermissionOf(name string) types.Permission {
 
 // ---------- 工作区（任务文件夹） ----------
 
-// WorkspaceView 当前工作区视图（含最近列表）。
+// WorkspaceView 当前工作区视图（含最近列表与 Git 分支）。
 func (a *Agent) WorkspaceView() map[string]any {
 	return map[string]any{
-		"workspace": a.Cfg.Workspace,
-		"recents":   a.Cfg.WorkspaceRecents,
+		"workspace":  a.Cfg.Workspace,
+		"recents":    a.Cfg.WorkspaceRecents,
+		"git_branch": gitBranch(a.Cfg.Workspace),
 	}
+}
+
+// gitBranch 读取工作区当前 Git 分支名，供界面在工作区旁边亮一个分支标签。
+// 只读、超时两秒；不是 Git 仓库、没有 git 命令或处于游离 HEAD 时都返回空串——
+// 这些都不是错误，静默跳过，不要因为「这里没有仓库」把工作区选择卡住。
+func gitBranch(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "" || branch == "HEAD" { // 游离 HEAD 没有分支名
+		return ""
+	}
+	return branch
 }
 
 // WorkspaceBrowse 浏览文件系统供选择工作区：
@@ -1278,6 +1359,22 @@ func (a *Agent) WorkspaceBrowse(path string) (map[string]any, error) {
 func (a *Agent) WorkspaceSet(path string) (map[string]any, error) {
 	if err := a.applyWorkspace(path); err != nil {
 		return nil, err
+	}
+	return a.WorkspaceView(), nil
+}
+
+// WorkspaceClear 回到「不指定工作区」：文件工具与门控都不再绑定根目录，
+// 文件操作失去工作区边界（仍受安全门控逐条约束）。最近列表保留，方便再切回来。
+func (a *Agent) WorkspaceClear() (map[string]any, error) {
+	a.Cfg.Workspace = ""
+	if a.FileTools != nil {
+		a.FileTools.Roots = nil
+	}
+	if a.Gate != nil {
+		a.Gate.SetWorkspaceRoots(nil)
+	}
+	if err := a.Cfg.SaveOverlay(filepath.Join(a.Cfg.DataDir, config.OverlayFile)); err != nil {
+		return nil, fmt.Errorf("已取消但持久化失败: %w", err)
 	}
 	return a.WorkspaceView(), nil
 }

@@ -1,4 +1,4 @@
-/* Gleam Web UI — 窗口外壳（chrome）：应用菜单、前进后退、终端面板、右侧栏、问题反馈、
+/* Gleam Web UI — 窗口外壳（chrome）：应用菜单、前进后退、终端面板、右侧栏、
  * 全局键位表与「设置 → 快捷键」页。依赖 app.js 里的全局（$ / el / esc / api / toast /
  * Modal / UIPrefs / showView / BrowserPane / TaskSearch …），所以必须在它之后加载。
  *
@@ -33,7 +33,6 @@ const Keymap = (() => {
     { id: 'aux.terminal', group: 'panel', title: '打开终端', desc: '打开底部终端面板并聚焦命令行。', def: 'Ctrl+Shift+J', run: () => Terminal.open(true) },
     { id: 'terminal.toggle', group: 'system', title: '打开或关闭终端面板', desc: '切换底部终端面板。', def: 'Ctrl+J', run: () => Terminal.toggle() },
     { id: 'system.newWindow', group: 'system', title: '新建窗口', desc: '打开一个新的 Gleam 窗口。', def: 'Ctrl+Shift+N', run: newWindow, browserReserved: true },
-    { id: 'system.feedback', group: 'system', title: '问题反馈', desc: '打开问题反馈窗口，桌面版会自动附带当前截图。', def: 'Ctrl+Alt+F', run: () => FeedbackDialog.open() },
   ];
   const GROUPS = [
     ['nav', '导航'], ['task', '任务'], ['panel', '侧栏入口'], ['system', '系统'],
@@ -136,8 +135,8 @@ const Keymap = (() => {
     if (Desk && FIXED_DESKTOP[combo]) { e.preventDefault(); FIXED_DESKTOP[combo](); return; }
     const a = ACTIONS.find((x) => binding(x.id) === combo);
     if (!a) return;
-    // 模态 / 反馈框开着时，只放行反馈键本身以外的全局键会把界面叠成好几层——一律让路
-    if (document.querySelector('#modal-overlay:not([hidden]), #fbd-overlay:not([hidden]), #onboarding-overlay:not([hidden])') && a.id !== 'nav.settings') return;
+    // 模态开着时，只放行反馈键本身以外的全局键会把界面叠成好几层——一律让路
+    if (document.querySelector('#modal-overlay:not([hidden]), #onboarding-overlay:not([hidden])') && a.id !== 'nav.settings') return;
     e.preventDefault();
     e.stopPropagation();
     try { a.run(); } catch (err) { console.error(err); }
@@ -362,14 +361,102 @@ const MenuBar = (() => {
   return { open, close };
 })();
 
-async function checkUpdate() {
-  // 「检查更新」的诚实版本：Gleam 没有联网更新源，这里只报版本号，不编一个"已是最新"。
-  const btn = $('#me-update');
-  if (btn) { btn.click(); return; }
-  let v = '';
-  try { v = (await api('GET', '/api/info')).version || ''; } catch { /* 下面照样说明 */ }
-  alertModal('本机版本 ' + (v ? 'v' + v : '未知') + '。Gleam 目前没有联网更新源，无法判断是否有新版本。', '检查更新');
-}
+/* ============================================================
+ * 检查更新：本机服务端去问 GitHub 的 release，前端只把三种结果说人话。
+ *   · 有新版   → 摆出要下载的资产名与大小，用户点「立即更新」才下载并替换
+ *   · 已是最新 → 直接说（这句现在是问出来的结论，不是替本机下判断）
+ *   · 连不上   → 说清是网络/代理，别让人以为是版本问题
+ * 下载与替换都在服务端做（见 internal/webui/update.go），前端递不进地址。
+ * ============================================================ */
+const UpdateCheck = (() => {
+  const RELEASES = 'https://github.com/gleam-ai/Gleam/releases';
+
+  function openPage(url) {
+    const d = window.gleamDesktop;
+    if (d && typeof d.openExternal === 'function') { d.openExternal(url).catch(() => {}); return; }
+    window.open(url, '_blank', 'noopener');
+  }
+  function sizeMB(n) { return n > 0 ? (n / 1048576).toFixed(1) + ' MB' : '大小未知'; }
+
+  async function run() {
+    let r;
+    try { r = await api('GET', '/api/update/check'); }
+    catch (err) { return alertModal('没能问到更新情况：' + err.message + '。稍后再试一次。', '检查更新'); }
+    const cur = r.current ? 'v' + r.current : '未知版本';
+    if (r.error) return offline(r, cur);
+    if (!r.has_update) {
+      return alertModal('已是最新版本 ' + cur + '。\n\n发布页上还没有比它更新的版本，不用动它。', '检查更新');
+    }
+    newer(r, cur);
+  }
+
+  function offline(r, cur) {
+    const why = r.error === 'rate_limit'
+      ? '更新源说我们问得太频繁了，过几分钟再试。'
+      : r.error === 'no_release'
+        ? '发布页上还没有正式版本，暂时无从比较。'
+        : '没能连上更新源。检查一下网络；如果走代理，确认 Gleam 能出网。';
+    alertModal('本机版本 ' + cur + '。\n\n' + why, '检查更新');
+  }
+
+  function newer(r, cur) {
+    Modal.open('检查更新', (box) => {
+      const p = el('p', 'modal-text');
+      p.textContent = '发现新版本 v' + r.latest + '，你现在是 ' + cur + '。';
+      box.appendChild(p);
+
+      if (r.notes) {
+        box.appendChild(el('div', 'field-label', '这次更新了什么'));
+        const pre = el('div', 'update-notes');
+        pre.textContent = r.notes;
+        box.appendChild(pre);
+      }
+
+      const hint = el('p', 'field-hint');
+      hint.textContent = r.asset
+        ? '将下载 ' + r.asset.name + '（' + sizeMB(r.asset.size) + '）并覆盖当前程序本身。对话、技能、密钥都存在「本地数据」目录里，换程序不影响它们；旧版本会留一份 .old 备份，想退回去改回扩展名即可。'
+        : '最新版里没有这个平台的安装包，去发布页手动下载。';
+      box.appendChild(hint);
+
+      const actions = el('div', 'modal-actions');
+      const page = el('button', 'btn btn-secondary', '去发布页');
+      page.type = 'button';
+      page.addEventListener('click', () => openPage(r.notes_url || RELEASES));
+      const later = el('button', 'btn btn-secondary', r.asset ? '以后再说' : '知道了');
+      later.type = 'button';
+      later.addEventListener('click', Modal.close);
+      actions.appendChild(page);
+      actions.appendChild(later);
+      if (r.asset) {
+        const now = el('button', 'btn btn-primary', '立即更新');
+        now.type = 'button';
+        now.addEventListener('click', () => applyUpdate(now, r));
+        actions.appendChild(now);
+      }
+      box.appendChild(actions);
+    });
+  }
+
+  async function applyUpdate(btn, r) {
+    btn.disabled = true;
+    btn.textContent = '正在下载…';
+    try {
+      const res = await api('POST', '/api/update/apply', {});
+      Modal.close();
+      await alertModal('已更新到 v' + r.latest + '（下载的是 ' + (res.to || r.asset.name) + '）。\n\n' +
+        '把 Gleam 关掉再打开，新版本就生效了。原文件留在 ' + (res.backup || '同目录的 .old 文件') +
+        '，要退回旧版就把它的扩展名改回去。', '更新完成');
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '立即更新';
+      toast('更新失败：' + err.message, 'error');
+    }
+  }
+
+  return { run };
+})();
+
+async function checkUpdate() { return UpdateCheck.run(); }
 
 /* ============================================================
  * 关于 Gleam
@@ -720,125 +807,6 @@ const FindBar = (() => {
   $('#findbar-next').addEventListener('click', () => find(false));
   $('#findbar-prev').addEventListener('click', () => find(true));
   $('#findbar-close').addEventListener('click', close);
-  return { open, close };
-})();
-
-/* ============================================================
- * 问题反馈对话框：POST /api/feedback（先存本机；配了远端才投递，结果照实说）
- * ============================================================ */
-const FeedbackDialog = (() => {
-  const overlay = $('#fbd-overlay');
-  const form = $('#fbd');
-  const text = $('#fbd-text');
-  const email = $('#fbd-email');
-  const shotsBox = $('#fbd-shots');
-  const addTile = $('#fbd-add');
-  const fileIn = $('#fbd-file');
-  const noteEl = $('#fbd-note');
-  const MAX_SHOTS = 5;
-  const MAX_BYTES = 5 * 1024 * 1024;
-  let shots = [];
-  let kind = 'bug';
-  let lastFocus = null;
-
-  function paintShots() {
-    shotsBox.querySelectorAll('.fbd-shot').forEach((n) => n.remove());
-    shots.forEach((s, i) => {
-      const fig = el('figure', 'fbd-shot');
-      const img = el('img');
-      img.src = s.data; img.alt = s.name;
-      const rm = el('button', 'fbd-shot-x');
-      rm.type = 'button';
-      rm.setAttribute('aria-label', '移除这张截图');
-      rm.innerHTML = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-      rm.addEventListener('click', () => { shots.splice(i, 1); paintShots(); });
-      fig.append(img, rm);
-      shotsBox.insertBefore(fig, addTile);
-    });
-    addTile.hidden = shots.length >= MAX_SHOTS;
-  }
-  function addFile(file) {
-    if (!file || !/^image\//.test(file.type)) { toast('只收图片文件', 'warning'); return; }
-    if (shots.length >= MAX_SHOTS) { toast('截图最多 ' + MAX_SHOTS + ' 张', 'warning'); return; }
-    if (file.size > MAX_BYTES) { toast('这张超过 5MB 上限', 'warning'); return; }
-    const r = new FileReader();
-    r.onload = () => { shots.push({ data: String(r.result), name: file.name || '粘贴的截图' }); paintShots(); };
-    r.readAsDataURL(file);
-  }
-  function setKind(k) {
-    kind = k;
-    form.querySelectorAll('.fbd-kind [data-kind]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === k)));
-  }
-  async function open() {
-    if (!overlay.hidden) { text.focus(); return; }
-    lastFocus = document.activeElement;
-    shots = [];
-    // 桌面版：在对话框盖上去之前截一张当前窗口
-    if (deskHas('capture')) {
-      try {
-        const data = await Desk.capture();
-        if (data) shots.push({ data, name: '当前窗口截图' });
-      } catch { /* 截不到就不带，用户还能手动加 */ }
-    }
-    noteEl.textContent = '';
-    try {
-      const ctx = await api('GET', '/api/feedback/context');
-      noteEl.textContent = ctx.remote
-        ? `提交后先存在本机，再发送一份脱敏副本到 ${ctx.remote}。`
-        : '还没配置远端投递：反馈会存在这台电脑上（可在「反馈与建议」里查看），不会发出去。';
-    } catch { /* 预览拿不到不影响提交 */ }
-    paintShots();
-    overlay.hidden = false;
-    text.focus();
-  }
-  function close() {
-    if (overlay.hidden) return;
-    overlay.hidden = true;
-    if (lastFocus && lastFocus.focus && document.contains(lastFocus)) lastFocus.focus();
-  }
-  async function submit() {
-    const body = text.value.trim();
-    if (!body) { toast('先写一句描述：没有文字的截图，收到也不知道该改什么', 'warning'); text.focus(); return; }
-    const mail = email.value.trim();
-    if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) { toast('邮箱格式不对', 'warning'); email.focus(); return; }
-    const send = $('#fbd-send');
-    send.disabled = true;
-    try {
-      // 后端反馈结构里没有单独的联系方式字段：邮箱照原样附在正文末尾，提交前在说明里写明
-      const out = await api('POST', '/api/feedback', {
-        kind,
-        text: mail ? body + '\n\n联系邮箱：' + mail : body,
-        attachments: shots.map((s) => ({ data: s.data })),
-      });
-      const d = (typeof FB_DELIVERY !== 'undefined' && FB_DELIVERY[out.delivery]) || { text: '已存本机' };
-      toast('反馈已保存。' + d.text + (out.delivery_note ? '：' + out.delivery_note : ''), out.delivery === 'failed' ? 'warning' : 'success', 7000);
-      text.value = ''; email.value = ''; shots = [];
-      close();
-    } catch (err) {
-      toast('提交失败：' + ((err && err.message) || err), 'error');
-    } finally {
-      send.disabled = false;
-    }
-  }
-  form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
-  $('#fbd-close').addEventListener('click', close);
-  $('#fbd-cancel').addEventListener('click', close);
-  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
-  form.querySelectorAll('.fbd-kind [data-kind]').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.kind)));
-  fileIn.addEventListener('change', () => { [...fileIn.files].forEach(addFile); fileIn.value = ''; });
-  addTile.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileIn.click(); } });
-  form.addEventListener('paste', (e) => {
-    const items = [...((e.clipboardData && e.clipboardData.items) || [])].filter((it) => it.type.startsWith('image/'));
-    if (!items.length) return;
-    e.preventDefault();
-    items.forEach((it) => addFile(it.getAsFile()));
-  });
-  form.addEventListener('dragover', (e) => { e.preventDefault(); });
-  form.addEventListener('drop', (e) => { e.preventDefault(); [...(e.dataTransfer.files || [])].forEach(addFile); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !overlay.hidden) { e.stopPropagation(); close(); }
-  }, true);
-  $('#help-fab').addEventListener('click', open);
   return { open, close };
 })();
 

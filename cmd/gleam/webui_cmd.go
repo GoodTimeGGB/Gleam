@@ -24,7 +24,8 @@ func cmdWebUI(args []string) error {
 		return err
 	}
 
-	rt, err := buildRuntime(*configPath, *workspace, *dataDir, *mockLLM, *mockScript, nil)
+	// Web UI 同桌面应用：没选过工作区就不绑定，交由「工作区」选择器决定。
+	rt, err := buildRuntime(*configPath, *workspace, *dataDir, *mockLLM, *mockScript, nil, WithNoDefaultWorkspace())
 	if err != nil {
 		return err
 	}

@@ -397,6 +397,7 @@ plusMenu.addEventListener('click', (e) => {
   togglePlus(false);
   const act = item.dataset.plus;
   if (act === 'file') openFilePicker();
+  else if (act === 'folder') openWorkspaceDialog();
   else if (act === 'goal') openGoalPicker();
   else if (act === 'plan') setPerm(currentMode === 'plan_first' ? 'auto' : 'plan_first');
   else if (act === 'plugin') openPluginPicker();
@@ -1131,7 +1132,7 @@ async function refreshTaskResult(taskID) {
   }
 }
 
-/* Qoder 式过程呈现（借鉴其公开交互形态，不是照抄）：
+/* 过程呈现（渐进披露）：
    旧版把每条进度都刷成「45% · …」长流水，噪声大。现在：
    - 阶段推进（规划/复盘/预算等）各占一句里程碑短句，同阶段连续事件原地更新；
    - 执行步骤明细收进折叠块，汇总句为「执行工具 N 次，其中 M 次失败」，结束后自动收起。 */
@@ -4602,7 +4603,7 @@ async function runGEOAnalyze() {
  * ============================================================ */
 const UIPrefs = (() => {
   const KEY = 'gleam-ui';
-  let p = Object.assign({ themeMode: 'dark', accent: 'emerald' }, load());
+  let p = Object.assign({ themeMode: 'light', accent: 'emerald' }, load());
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* 隐私模式 */ } }
   function get() { return p; }

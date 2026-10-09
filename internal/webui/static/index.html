@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0B0D0E">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#F7F8F7">
   <title>Gleam · 微光</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,13 +15,13 @@
   (function () {
     try {
       var prefs = JSON.parse(localStorage.getItem('gleam-ui') || '{}');
-      var mode = prefs.themeMode || 'dark';
+      var mode = prefs.themeMode || 'light';
       var accent = prefs.accent || 'emerald';
       var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
       document.documentElement.setAttribute('data-accent', accent);
       var m = document.querySelector('meta[name="theme-color"]');
-      if (m) m.setAttribute('content', dark ? '#0B0D0E' : '#F4F6F5');
+      if (m) m.setAttribute('content', dark ? '#0B0D0E' : '#F7F8F7');
       var cs = document.querySelector('meta[name="color-scheme"]');
       if (cs) cs.setAttribute('content', dark ? 'dark' : 'light');
       // 现场栏的收展也在这里定：等 app.js 再设会让右栏在首帧闪一次。
@@ -36,105 +36,108 @@
 </head>
 <body>
   <div class="app">
-    <!-- 侧边导航 -->
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-logo" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 窄导航轨 + 次级列表（安静浅色壳层） -->
+    <aside class="nav-rail" aria-label="主导航">
+      <div class="nav-rail-brand" aria-hidden="true" title="Gleam">
+        <div class="brand-logo brand-logo--rail">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M15 4L7 12L15 20"/>
           </svg>
         </div>
+      </div>
+
+      <nav class="nav nav-core" aria-label="核心功能">
+        <button class="nav-item" data-view="goals" aria-current="page" title="目标">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>
+          <span class="nav-label">目标</span>
+          <span class="nav-badge" id="approval-badge" hidden>0</span>
+        </button>
+        <button class="nav-item" data-view="schedules" title="定时任务">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          <span class="nav-label">定时任务</span>
+        </button>
+        <button class="nav-item" data-view="skills" title="技能">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg>
+          <span class="nav-label">技能</span>
+        </button>
+        <button class="nav-item" data-view="tools" title="工具">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M14.7 6.3a4.5 4.5 0 0 0-6 6L3 18l3 3 5.7-5.7a4.5 4.5 0 0 0 6-6L14 13l-3-3 3.7-3.7z"/></svg>
+          <span class="nav-label">工具</span>
+        </button>
+      </nav>
+
+      <div class="nav-rail-spacer" aria-hidden="true"></div>
+
+      <div class="nav-more" id="nav-more">
+        <button class="nav-item nav-more-toggle" id="nav-more-toggle" type="button" aria-expanded="false" title="更多">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+          <span class="nav-label">更多</span>
+          <svg class="nav-more-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="nav-more-body" id="nav-more-body" hidden>
+          <button class="nav-item" data-view="memory" title="记忆">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/><path d="M4 12v6.5c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V12"/></svg>
+            <span>记忆</span>
+          </button>
+          <button class="nav-item" data-view="market" title="市场">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 9h18M3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2M3 9l1.5 10.2A2 2 0 0 0 6.5 21h11a2 2 0 0 0 2-1.8L21 9M9 13v4M15 13v4"/></svg>
+            <span>市场</span>
+          </button>
+          <button class="nav-item" data-view="growth" title="成长">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+            <span>成长</span>
+          </button>
+          <button class="nav-item" data-view="geo" title="GEO">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M12 12 19 5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4"/><path d="M16.2 16.2a6 6 0 0 0 0-8.4"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2"/><path d="M19.1 19.1a10 10 0 0 0 0-14.2"/></svg>
+            <span>GEO</span>
+          </button>
+          <button class="nav-item" data-view="readiness" title="就绪体检">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l2.2 2.2L15.5 9"/><path d="M12 3l7.5 3.2v5.4c0 4.4-3 8.1-7.5 9.4-4.5-1.3-7.5-5-7.5-9.4V6.2z"/></svg>
+            <span>就绪体检</span>
+          </button>
+          <button class="nav-item" data-view="feedback" title="反馈与建议">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8.2L4 22.5V18a8 8 0 1 1 17-6.5z"/><path d="M9 10.5h7M9 13.5h4"/></svg>
+            <span>反馈与建议</span>
+          </button>
+          <button class="nav-item" data-view="settings" title="设置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.99 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.99a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.23a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.62.68 1.03 1.31 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03z"/></svg>
+            <span>设置</span>
+          </button>
+        </div>
+      </div>
+
+      <button class="nav-item nav-me" id="open-me" type="button" aria-label="我的" title="我的">
+        <span class="me-avatar" id="me-avatar" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
+        </span>
+        <span class="me-meta"><strong id="me-name">我的</strong><small id="me-sub">本地模式 · 功能完整</small></span>
+      </button>
+    </aside>
+
+    <aside class="sidebar" id="sidebar" aria-label="工作区列表">
+      <div class="sidebar-head">
         <div class="brand-text">
           <div class="brand-name">Gleam</div>
           <div class="brand-sub">微光 · 本地智能体</div>
         </div>
       </div>
 
-      <!-- 左上固定核心区 -->
       <div class="sidebar-top">
         <button class="convo-new" id="convo-new" type="button">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          <span>新对话</span>
+          <span>新任务</span>
         </button>
-
-        <nav class="nav nav-core" aria-label="核心功能">
-          <button class="nav-item" data-view="goals" aria-current="page">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>
-            <span>目标</span>
-            <span class="nav-badge" id="approval-badge" hidden>0</span>
-          </button>
-          <button class="nav-item" data-view="schedules">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-            <span>定时任务</span>
-          </button>
-          <button class="nav-item" data-view="skills">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg>
-            <span>技能</span>
-          </button>
-          <button class="nav-item" data-view="tools">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M14.7 6.3a4.5 4.5 0 0 0-6 6L3 18l3 3 5.7-5.7a4.5 4.5 0 0 0 6-6L14 13l-3-3 3.7-3.7z"/></svg>
-            <span>工具</span>
-          </button>
-        </nav>
-
-        <!-- 更多：次要功能折叠合并，保持精简 -->
-        <div class="nav-more" id="nav-more">
-          <button class="nav-item nav-more-toggle" id="nav-more-toggle" type="button" aria-expanded="false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
-            <span>更多</span>
-            <svg class="nav-more-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
-          <div class="nav-more-body" id="nav-more-body" hidden>
-            <button class="nav-item" data-view="memory">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/><path d="M4 12v6.5c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V12"/></svg>
-              <span>记忆</span>
-            </button>
-            <button class="nav-item" data-view="market">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9h18M3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2M3 9l1.5 10.2A2 2 0 0 0 6.5 21h11a2 2 0 0 0 2-1.8L21 9M9 13v4M15 13v4"/></svg>
-              <span>市场</span>
-            </button>
-            <button class="nav-item" data-view="growth">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
-              <span>成长</span>
-            </button>
-            <button class="nav-item" data-view="geo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M12 12 19 5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4"/><path d="M16.2 16.2a6 6 0 0 0 0-8.4"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2"/><path d="M19.1 19.1a10 10 0 0 0 0-14.2"/></svg>
-              <span>GEO</span>
-            </button>
-            <button class="nav-item" data-view="readiness">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l2.2 2.2L15.5 9"/><path d="M12 3l7.5 3.2v5.4c0 4.4-3 8.1-7.5 9.4-4.5-1.3-7.5-5-7.5-9.4V6.2z"/></svg>
-              <span>就绪体检</span>
-            </button>
-            <button class="nav-item" data-view="feedback">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8.2L4 22.5V18a8 8 0 1 1 17-6.5z"/><path d="M9 10.5h7M9 13.5h4"/></svg>
-              <span>反馈与建议</span>
-            </button>
-            <button class="nav-item" data-view="settings">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.99 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.99a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.23a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.15.62.68 1.03 1.31 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03z"/></svg>
-              <span>设置</span>
-            </button>
-          </div>
-        </div>
       </div>
 
-      <!-- 左下：微光空间 + 历史对话（按空间分组折叠，内部滚动） -->
       <div class="convo-pane">
         <div class="space-pane-head">
-          <span class="convo-pane-label">微光空间</span>
+          <span class="convo-pane-label">工作区</span>
           <button type="button" class="space-add-btn" id="space-new" title="新建微光空间">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
           </button>
         </div>
         <div class="convo-scroll" id="convo-list" aria-label="微光空间与会话"></div>
       </div>
-
-      <!-- 我的 -->
-      <button class="nav-item nav-me" id="open-me" type="button" aria-label="我的" title="我的">
-        <span class="me-avatar" id="me-avatar" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
-        </span>
-        <span class="me-meta"><strong id="me-name">我的</strong><small id="me-sub">本地模式 · 功能完整</small></span>
-      </button>
     </aside>
 
     <!-- 主区 -->
@@ -174,9 +177,9 @@
 
           <div class="command-deck" aria-label="工作台概览">
             <div class="deck-intro">
-              <span class="eyebrow">TODAY'S WORKSPACE</span>
-              <h2>把想法交给微光，<em>把时间留给重要的事。</em></h2>
-              <p>从模板开始，或直接描述一个目标。Gleam 会记住上下文，持续推进。</p>
+              <span class="eyebrow">本地工作台</span>
+              <h2>不止于对话，<em>把事做完。</em></h2>
+              <p>描述一个目标，或从下方快捷入口开始。上下文留在本机，持续推进。</p>
             </div>
             <div class="deck-metrics" aria-label="工作统计">
               <div class="metric"><span class="metric-value" id="metric-active">0</span><span>进行中</span></div>
@@ -218,9 +221,11 @@
         <div class="chat-scroll" id="chat-scroll">
           <div class="row-list" id="goal-feed" aria-live="polite">
             <div class="empty" id="goals-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/><circle cx="12" cy="12" r="3"/></svg>
+              <div class="empty-hero" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M15 4L7 12L15 20"/></svg>
+              </div>
               <div class="empty-title">从一个小目标开始</div>
-              <p class="empty-desc">在下方输入你想完成的事，Gleam 会规划步骤、调用工具、反思结果，并在高风险操作前征求你的批准。</p>
+              <p class="empty-desc">在下方描述你想完成的事。Gleam 会规划、调用工具、复盘结果，并在高风险操作前征求批准。</p>
             </div>
           </div>
           <div class="empty empty--filtered" id="goals-filtered-empty" hidden>
@@ -232,7 +237,7 @@
         <div class="card card--glass composer" id="composer">
           <div class="composer-refs" id="composer-refs" hidden></div>
           <textarea class="composer-input" id="goal-input" rows="1"
-            placeholder="描述任务，输入 @ 引用文件/目标/插件/记忆"
+            placeholder="一切从这里开始… 描述任务，或输入 @ 引用"
             aria-label="任务输入" aria-describedby="goal-hint"></textarea>
           <div class="composer-bar">
             <div class="composer-left">
@@ -244,6 +249,10 @@
                   <button class="plus-item" data-plus="file" role="menuitem">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.4 11.5 12.5 20.4a5 5 0 0 1-7-7l8.9-8.9a3 3 0 0 1 4.2 4.2l-8.9 8.9a1 1 0 0 1-1.4-1.4l8.2-8.2"/></svg>
                     <span>添加文件</span><span class="plus-sub">从工作区选择</span>
+                  </button>
+                  <button class="plus-item" data-plus="folder" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+                    <span>添加文件夹</span><span class="plus-sub">选择或切换工作区</span>
                   </button>
                   <button class="plus-item" data-plus="goal" role="menuitem">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>

@@ -107,7 +107,7 @@
         icon: 'hooks', title: j.name, desc: `POST ${base}/api/hooks/${encodeURIComponent(j.name)}${j.enabled ? '' : ' · 任务已暂停'}`,
         control: h('div', { class: 's2-icon-btns' },
           h('button', { type: 'button', class: 's2-icon-btn', title: '复制 curl 命令', 'aria-label': '复制 curl 命令', html: ico('copy', 15),
-            onclick: () => copy(`curl -X POST ${base}/api/hooks/${encodeURIComponent(j.name)}`) }),
+            onclick: () => copy(`curl -X POST -H "X-Gleam-Token: $(cat ~/.gleam/webui.token)" ${base}/api/hooks/${encodeURIComponent(j.name)}`) }),
           btn('触发一次', async () => {
             const r = await api('POST', `/api/hooks/${encodeURIComponent(j.name)}`).catch((e) => ({ error: e.message }));
             toast(r.error ? `触发失败：${r.error}` : (r.triggered ? `已触发「${j.name}」` : `「${j.name}」没有触发（可能正在运行）`), r.error ? 'error' : 'success');

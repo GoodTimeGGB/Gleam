@@ -46,14 +46,15 @@ func TestBranchAndCommit(t *testing.T) {
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	run("init")
+	// 身份写进仓库本地配置：工具自己起 git 进程（见 git.go 的 run），测试进程的环境变量
+	// 与它无关；干净 CI 上没有全局身份，提交会以「Author identity unknown」失败——真发生过。
+	run("config", "user.email", "test@example.invalid")
+	run("config", "user.name", "Gleam Test")
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -105,15 +106,15 @@ func TestPushArgvForceWithLease(t *testing.T) {
 	mk := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	mk(bare, "init", "--bare")
 	mk(work, "init")
+	// 同上：身份落在仓库本地配置里，别依赖 runner 的全局配置。
+	mk(work, "config", "user.email", "test@example.invalid")
+	mk(work, "config", "user.name", "Gleam Test")
 	mk(work, "remote", "add", "origin", bare)
 	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)

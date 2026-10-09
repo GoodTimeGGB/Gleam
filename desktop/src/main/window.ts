@@ -1,13 +1,11 @@
 import { BrowserWindow, nativeTheme } from 'electron';
 import { join } from 'node:path';
+import { forwardWindowState } from './security';
 
-// Must match --topbar-h in internal/webui/static/style.css: the window controls overlay sits on the topbar.
-const TOPBAR_HEIGHT = 44;
-
-// The topbar paddings in style.css are not aware of the macOS traffic lights. Rather than touch the
-// shared UI, the shell injects this one rule on macOS only (decision D4). Unverified on macOS.
-const MAC_TRAFFIC_LIGHT_CSS = '.topbar { padding-left: 78px !important; }';
-
+// Frameless on Windows / Linux: the web UI draws its own menu bar (文件 / 编辑 / 视图 / 帮助) and the
+// minimise / maximise / close buttons in the 44px top bar (--topbar-h in style.css), and marks the
+// rest of the top bar as a drag region. macOS keeps the system traffic lights (hidden title bar);
+// the UI pads the top bar for them via html[data-platform="darwin"] (unverified on macOS).
 export function createMainWindow(opts: { width?: number; height?: number } = {}): BrowserWindow {
   const isMac = process.platform === 'darwin';
   const win = new BrowserWindow({
@@ -17,13 +15,9 @@ export function createMainWindow(opts: { width?: number; height?: number } = {})
     minHeight: 480,
     show: false,
     title: 'Gleam',
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f1412' : '#f6f7f5',
-    // No menu bar on Windows/Linux (decision D4); the app menu on macOS is the default one for now.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#161615' : '#f5f5f2',
     autoHideMenuBar: true,
-    titleBarStyle: 'hidden',
-    ...(isMac
-      ? { trafficLightPosition: { x: 14, y: 14 } }
-      : { titleBarOverlay: { height: TOPBAR_HEIGHT, color: '#00000000', symbolColor: '#7a7f7c' } }),
+    ...(isMac ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 14, y: 14 } } : { frame: false }),
     webPreferences: {
       preload: join(__dirname, '..', 'preload', 'index.js'),
       contextIsolation: true,
@@ -35,12 +29,9 @@ export function createMainWindow(opts: { width?: number; height?: number } = {})
       // devTools stay available in the spike; Phase 1 gates them on !app.isPackaged.
     },
   });
-  if (!isMac) win.setMenuBarVisibility(false);
-  if (isMac) {
-    win.webContents.on('did-finish-load', () => {
-      void win.webContents.insertCSS(MAC_TRAFFIC_LIGHT_CSS);
-    });
-  }
+  // No native menu: its accelerators would fight the in-app keymap (Ctrl+N, Ctrl+T, Ctrl+J …).
+  win.setMenu(null);
+  forwardWindowState(win);
   win.once('ready-to-show', () => win.show());
   return win;
 }

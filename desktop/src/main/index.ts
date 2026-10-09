@@ -74,9 +74,16 @@ function run(): void {
 
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => app.quit());
 
+  const w = Number(process.env.GLEAM_DESKTOP_WIDTH) || undefined;
+  const h = Number(process.env.GLEAM_DESKTOP_HEIGHT) || undefined;
+
   app.whenReady().then(async () => {
     hardenSession(session.defaultSession);
-    installIpc(() => ({ sidecarVersion: sidecar?.ready?.version ?? null }));
+    installIpc(() => ({ sidecarVersion: sidecar?.ready?.version ?? null }), () => {
+      // File ▸ New window (Ctrl+Shift+N): another window on the same sidecar / app:// origin.
+      const extra = createMainWindow({ width: w, height: h });
+      void extra.loadURL(`${APP_ORIGIN}/`);
+    });
     installAppProtocol(() => (sidecar?.ready ? { addr: sidecar.ready.addr, token: sidecar.token } : null));
 
     const spec = sidecarSpec();
@@ -104,8 +111,6 @@ function run(): void {
       return;
     }
 
-    const w = Number(process.env.GLEAM_DESKTOP_WIDTH) || undefined;
-    const h = Number(process.env.GLEAM_DESKTOP_HEIGHT) || undefined;
     win = createMainWindow({ width: w, height: h });
     win.on('closed', () => (win = null));
     win.webContents.once('did-finish-load', () => log('renderer did-finish-load'));

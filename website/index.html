@@ -24,6 +24,7 @@
         <a href="#demo">演示</a>
         <a href="#download">下载</a>
         <a href="#quickstart">快速开始</a>
+        <a href="#faq">问答</a>
         <a href="https://github.com/gleam-ai/Gleam" target="_blank" rel="noopener">GitHub</a>
       </nav>
     </div>
@@ -36,7 +37,7 @@
       <p class="hero-sub reveal">Gleam 就是放在你电脑里的一个小工具。<br>
       你说"帮我整理下桌面照片"，它真的会去干——<br>
       先规划、再执行、做完还会看看做得好不好。<br>
-      <strong>而且这一切都在你的电脑上完成，数据不往外传。</strong></p>
+      <strong>对话与任务数据默认留在本机；接入真实模型时仍会走你配置的 API（Mock 可离线体验）。</strong></p>
       <div class="hero-actions reveal">
         <a class="btn btn-primary" href="#download">下载试试</a>
         <a class="btn btn-secondary" href="https://github.com/gleam-ai/Gleam" target="_blank" rel="noopener">
@@ -57,7 +58,7 @@
   <section class="section" id="screenshots">
     <div class="section-inner">
       <h2 class="reveal">界面一览</h2>
-      <p class="section-sub reveal">深色玻璃拟态风格，所有数据留在本地。</p>
+      <p class="section-sub reveal">深色玻璃拟态风格。对话、记忆与任务状态默认落本机；真实 LLM 仍走你配置的 API。</p>
       <div class="screenshot-grid reveal">
         <figure class="screenshot-card">
           <img src="images/gleam-desktop-01.png" alt="Gleam 桌面版主界面" loading="lazy">
@@ -92,7 +93,7 @@
         <article class="card pillar reveal">
           <div class="pillar-no">02</div>
           <h3>数据留在本地</h3>
-          <p>不用注册、不用联网、不用把文件传到别人的服务器。你的东西就在你电脑上，放心。</p>
+          <p>不用注册账号。对话、记忆与任务状态默认存在你电脑上，不会把工作文件上传到我们的服务器。接入真实模型时才会向你配置的厂商 API 出网；Mock 演示可不联网。</p>
         </article>
         <article class="card pillar reveal">
           <div class="pillar-no">03</div>
@@ -122,7 +123,7 @@
         <article class="card mod reveal">
           <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/><path d="M4 12v6.5c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V12"/></svg></div>
           <h4>三层记忆</h4>
-          <p>短期记对话，中期记任务，长期记你的习惯偏好。全部本地存储，自研词法索引。</p>
+          <p>短期记对话，中期记任务，长期记你的习惯偏好。记忆默认本地存储，自研词法索引。</p>
         </article>
         <article class="card mod reveal">
           <div class="mod-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div>
@@ -386,7 +387,7 @@
   <section class="section" id="quickstart">
     <div class="section-inner">
       <h2 class="reveal">快速开始</h2>
-      <p class="section-sub reveal">三步搞定。断网也能玩。</p>
+      <p class="section-sub reveal">三步搞定。下面 Mock 步骤可不联网；接真实模型再配 API Key。</p>
       <div class="qs reveal">
         <div class="qs-step">
           <span class="qs-no">1</span>
@@ -418,6 +419,18 @@
 ./bin/gleam.exe serve     # JSON-RPC stdio（编辑器插件入口）</code></pre>
           </div>
         </div>
+      </div>
+    </div>
+  </section>
+
+
+  <section class="section" id="faq">
+    <div class="section-inner">
+      <h2 class="reveal">常见问题</h2>
+      <p class="section-sub reveal">本地优先不等于离线大模型。</p>
+      <div class="card reveal" style="padding:1.25rem 1.5rem;">
+        <h4 style="margin:0 0 0.5rem;">本地优先是不是完全不联网？</h4>
+        <p style="margin:0;opacity:0.9;">不是。对话、记忆、任务与审计默认留在本机；使用真实 LLM 时仍会请求你配置的 API。官网演示是 Mock 流程，可离线播放。详见仓库 <a href="https://github.com/gleam-ai/Gleam/blob/master/docs/known-limits.md" target="_blank" rel="noopener" style="color:var(--color-accent)">已知限制</a>。</p>
       </div>
     </div>
   </section>

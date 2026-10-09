@@ -22,20 +22,19 @@ import (
 //
 // We therefore:
 //   - Enumerate top-level windows by title ("Gleam · 微光") for activate / close
-//   - Use a dedicated --user-data-dir under ~/.gleam/browser-profile
+//   - Prefer Edge; use a versioned --user-data-dir under ~/.gleam/browser-profile/<ver>
 //   - Never spawn a second --app while that profile is still locked (blank white
 //     shells are the usual Chromium SingletonLock symptom)
 //   - After close: wait until titled windows are gone, kill tracked process trees,
 //     then clear stale lock files before the next open
-//   - If --app fails to produce a titled window, fall back to the system default browser
+//   - Relax readiness: titled HWNDs count even when not yet IsWindowVisible; ShowWindow
+//   - On --app paint failure: retry once with GPU soft-fallback flags + alternate
+//     profile. Do NOT silently open the system browser — tray "在浏览器中打开" is
+//     the explicit last resort
 //
-// a81cbb8 regression (corrected here):
-//   closeWindowPlatform waited for WM_CLOSE then returned early without finishing
-//   process-tree / profile-lock cleanup, and taskkill'ed PIDs from
-//   GetWindowThreadProcessId (often a renderer, not the profile-owning browser).
-//   That left SingletonLock held → tray Open / show-window spawned another --app
-//   against a locked profile → blank white window while http://127.0.0.1:8787/ still
-//   worked in a normal browser tab.
+// a81cbb8 / #16 context:
+//   close-path early return left SingletonLock held → blank --app on reopen.
+//   Silent default-browser fallback weakened standalone-shell UX (#17).
 
 var (
 	user32   = syscall.NewLazyDLL("user32.dll")
@@ -45,7 +44,9 @@ var (
 	pEnumWindows              = user32.NewProc("EnumWindows")
 	pGetWindowTextW           = user32.NewProc("GetWindowTextW")
 	pGetWindowTextLengthW     = user32.NewProc("GetWindowTextLengthW")
+	pIsWindow                 = user32.NewProc("IsWindow")
 	pIsWindowVisible          = user32.NewProc("IsWindowVisible")
+	pIsIconic                 = user32.NewProc("IsIconic")
 	pGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
 	pGetForegroundWindow      = user32.NewProc("GetForegroundWindow")
 	pAttachThreadInput        = user32.NewProc("AttachThreadInput")
@@ -105,6 +106,15 @@ func browserPaths() []string {
 
 func profileDir() string { return profileDirPath() }
 
+func resolveBrowserExe() string {
+	for _, p := range browserPaths() {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
 func openWindowPlatform(target string, onClose func()) bool {
 	if hwnds := findGleamWindows(); len(hwnds) > 0 {
 		for _, h := range hwnds {
@@ -127,8 +137,11 @@ func openWindowPlatform(target string, onClose func()) bool {
 	}
 
 	profile := profileDir()
-	// Profile still locked with no titled window: a previous Chromium tree is alive
-	// (classic post-a81cbb8 reopen failure). Do not spawn a second --app.
+	_ = os.MkdirAll(profile, 0o755)
+
+	// Profile still locked with no titled window: wait briefly, activate if a
+	// titled HWND appears, otherwise clear stale markers. Never open the system
+	// browser here — that is tray "在浏览器中打开" only.
 	if anyProfileLockPresent(profile) {
 		if !waitUntil(2*time.Second, pollInterval, func() bool {
 			return !anyProfileLockPresent(profile) || len(findGleamWindows()) > 0
@@ -140,8 +153,6 @@ func openWindowPlatform(target string, onClose func()) bool {
 				clearLaunching()
 				return true
 			}
-			clearLaunching()
-			return openDefaultBrowser(target)
 		}
 		if hwnds := findGleamWindows(); len(hwnds) > 0 {
 			for _, h := range hwnds {
@@ -150,30 +161,65 @@ func openWindowPlatform(target string, onClose func()) bool {
 			clearLaunching()
 			return true
 		}
-		// Lock cleared or stale — drop markers before spawn.
 		if !anyProfileLockPresent(profile) || len(findGleamWindows()) == 0 {
 			removeStaleProfileLocks(profile)
 		}
 	}
 
-	exe := ""
-	for _, p := range browserPaths() {
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			exe = p
-			break
-		}
-	}
+	exe := resolveBrowserExe()
 	if exe == "" {
 		clearLaunching()
-		return openDefaultBrowser(target)
+		return false
 	}
 
-	args := chromeAppArgs(target, profile, windowTitle)
+	// Attempt 0: primary versioned profile + normal flags.
+	ok, pid := launchAppAttempt(exe, chromeAppArgs(target, profile, windowTitle), onClose)
+	if ok {
+		ready := waitUntil(appLaunchReadyTimeout, pollInterval, func() bool {
+			return len(findGleamWindows()) > 0
+		})
+		hwnds := findGleamWindows()
+		if appShellReady(len(hwnds), ready) {
+			clearLaunching()
+			return true
+		}
+		teardownAppSpawn(pid, profile)
+		if !shouldRetryAppLaunch(0, len(hwnds), ready) {
+			clearLaunching()
+			return false
+		}
+	} else if pid > 0 {
+		teardownAppSpawn(pid, profile)
+	}
+
+	// Attempt 1 (once): alternate profile + GPU soft-fallback flags.
+	alt := alternateProfileDir(profile)
+	_ = os.MkdirAll(alt, 0o755)
+	removeStaleProfileLocks(alt)
+	ok, pid = launchAppAttempt(exe, chromeAppArgsWithGPUFallback(target, alt, windowTitle), onClose)
+	if !ok {
+		clearLaunching()
+		return false
+	}
+	ready := waitUntil(appLaunchReadyTimeout, pollInterval, func() bool {
+		return len(findGleamWindows()) > 0
+	})
+	hwnds := findGleamWindows()
+	if appShellReady(len(hwnds), ready) {
+		clearLaunching()
+		return true
+	}
+	teardownAppSpawn(pid, alt)
+	clearLaunching()
+	return false
+}
+
+// launchAppAttempt starts Chromium --app with the given args. Returns (started, pid).
+func launchAppAttempt(exe string, args []string, onClose func()) (bool, int) {
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
-		clearLaunching()
-		return openDefaultBrowser(target)
+		return false, 0
 	}
 	mu.Lock()
 	procs = append(procs, cmd)
@@ -195,35 +241,22 @@ func openWindowPlatform(target string, onClose func()) bool {
 			go onClose()
 		}
 	}()
-
-	ready := waitUntil(appLaunchReadyTimeout, pollInterval, func() bool {
-		return len(findGleamWindows()) > 0
-	})
-	hwnds := findGleamWindows()
-	if shouldFallbackAfterAppLaunch(len(hwnds), ready) {
-		// Blank / unpainted --app: tear down this spawn and open the real browser.
-		killProcessTree(uint32(pid))
-		mu.Lock()
-		for i, p := range procs {
-			if p.Process != nil && p.Process.Pid == pid {
-				procs = append(procs[:i], procs[i+1:]...)
-				break
-			}
-		}
-		mu.Unlock()
-		removeStaleProfileLocks(profile)
-		clearLaunching()
-		return openDefaultBrowser(target)
-	}
-	clearLaunching()
-	return true
+	return true, pid
 }
 
-func openDefaultBrowser(target string) bool {
-	if err := openURLPlatform(target); err != nil {
-		return false
+func teardownAppSpawn(pid int, profile string) {
+	if pid > 0 {
+		killProcessTree(uint32(pid))
 	}
-	return true
+	mu.Lock()
+	for i, p := range procs {
+		if p.Process != nil && p.Process.Pid == pid {
+			procs = append(procs[:i], procs[i+1:]...)
+			break
+		}
+	}
+	mu.Unlock()
+	removeStaleProfileLocks(profile)
 }
 
 func closeWindowPlatform() {
@@ -232,14 +265,10 @@ func closeWindowPlatform() {
 		pPostMessageW.Call(h, wmClose, 0, 0)
 	}
 
-	// Always wait until titled Gleam windows are gone before tearing down the HTTP
-	// server / allowing a reopen — otherwise the shell paints white against a dead backend.
 	_ = waitUntil(appCloseWaitTimeout, pollInterval, func() bool {
 		return len(findGleamWindows()) == 0
 	})
 
-	// Force-kill anything still showing a Gleam title (best-effort). Prefer tracked
-	// launcher PIDs for /T trees; window PIDs alone are unreliable (often renderers).
 	for _, h := range findGleamWindows() {
 		var pid uint32
 		pGetWindowThreadProcessId.Call(h, uintptr(unsafe.Pointer(&pid)))
@@ -263,10 +292,10 @@ func closeWindowPlatform() {
 		return len(findGleamWindows()) == 0
 	})
 
-	// With no titled window left, Chromium lock files are stale or about to be —
-	// clear them so the next Open Gleam does not hit SingletonLock → blank shell.
 	if len(findGleamWindows()) == 0 {
-		removeStaleProfileLocks(profileDir())
+		primary := profileDir()
+		removeStaleProfileLocks(primary)
+		removeStaleProfileLocks(alternateProfileDir(primary))
 	}
 }
 
@@ -308,8 +337,10 @@ func findGleamWindows() []uintptr {
 }
 
 func enumProc(hwnd uintptr, _ uintptr) uintptr {
-	vis, _, _ := pIsWindowVisible.Call(hwnd)
-	if vis == 0 {
+	// Relaxed readiness: do not require IsWindowVisible up front. Chromium --app
+	// can briefly own a titled but non-visible HWND; we ShowWindow and still count it.
+	alive, _, _ := pIsWindow.Call(hwnd)
+	if alive == 0 {
 		return 1
 	}
 	n, _, _ := pGetWindowTextLengthW.Call(hwnd)
@@ -322,10 +353,17 @@ func enumProc(hwnd uintptr, _ uintptr) uintptr {
 		return 1
 	}
 	title := syscall.UTF16ToString(buf[:got])
-	if strings.Contains(title, windowTitle) {
-		applyDarkTitlebar(hwnd)
-		enumFound = append(enumFound, hwnd)
+	if !strings.Contains(title, windowTitle) {
+		return 1
 	}
+	vis, _, _ := pIsWindowVisible.Call(hwnd)
+	iconic, _, _ := pIsIconic.Call(hwnd)
+	if vis == 0 || iconic != 0 {
+		pShowWindow.Call(hwnd, swRestore)
+		pShowWindow.Call(hwnd, swShow)
+	}
+	applyDarkTitlebar(hwnd)
+	enumFound = append(enumFound, hwnd)
 	return 1
 }
 

@@ -54,7 +54,7 @@ import (
 	"gleam/pkg/types"
 )
 
-const version = buildinfo.Version
+var version = buildinfo.Version
 
 func main() {
 	args := os.Args[1:]

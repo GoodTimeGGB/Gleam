@@ -4141,8 +4141,9 @@ function setThreadMode(on) {
   document.querySelector('.cue-deck').style.display = on ? 'none' : '';
 }
 
-// 首页 / 空任务的插图位：Gleam 官方折角标记（深色方块 + 黄绿 "<"），与 index.html 里的静态版保持一致
-const HERO_ART = `<div class="hero-art" aria-hidden="true"><img class="brand-tile" src="/assets/gleam-logo.svg" width="96" height="96" alt=""></div>`;
+// 首页 / 空任务的插图位：Gleam 软件内的线条标记（随主题强调色），与 index.html 里的静态版保持一致；
+// 官方折角 logo 只用于应用图标、favicon 和官网
+const HERO_ART = `<div class="hero-art" aria-hidden="true"><svg class="brand-mark" viewBox="0 0 96 96" width="96" height="96" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="18" width="60" height="60" rx="18" stroke-width="1.6" opacity=".35"/><g stroke-width="3"><circle cx="48" cy="48" r="7"/><path d="M48 30v6M48 60v6M30 48h6M60 48h6M35.3 35.3l4.2 4.2M56.5 56.5l4.2 4.2M35.3 60.7l4.2-4.2M56.5 39.5l4.2-4.2"/></g></svg></div>`;
 
 function resetFeedToEmpty(title, desc, opts = {}) {
   const feed = $('#goal-feed');

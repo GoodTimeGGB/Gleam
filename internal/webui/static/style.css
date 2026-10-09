@@ -4342,14 +4342,11 @@ html[data-theme="light"][data-accent="gleam"] .btn:focus-visible { box-shadow: 0
 html[data-theme="light"][data-accent="gleam"] .input:focus, html[data-theme="light"][data-accent="gleam"] .textarea:focus,
 html[data-theme="light"][data-accent="gleam"] .input:focus-visible, html[data-theme="light"][data-accent="gleam"] .textarea:focus-visible { border-color: var(--color-accent); }
 
-/* 品牌标记：始终是深色方块 + 黄绿折角，不随主题变色 */
-.brand-tile { display: block; flex: none; border-radius: 22%; }
-.topbar-brand { gap: 8px; }
-.topbar-brand .brand-tile { width: 18px; height: 18px; border-radius: 4px; }
-.hero-art .brand-tile { width: 96px; height: 96px; border-radius: 21px; }
-html[data-theme="dark"] .hero-art .brand-tile { box-shadow: 0 0 0 1px var(--line); }
-.onboarding-icon .brand-tile { width: 48px; height: 48px; border-radius: 11px; }
-.onboarding-icon:has(.brand-tile) { background: none; box-shadow: none; }
+/* 软件内的品牌标记：线条图形，stroke 用 currentColor，颜色跟随主题强调色
+ * （微光浅色 = 橄榄绿 #556812，深色 = 黄绿 #D7FB58）。官方折角 logo 只用于应用图标 / favicon / 官网。 */
+.brand-mark { display: block; flex: none; }
+.topbar-brand .brand-mark, .hero-art .brand-mark, .onboarding-icon .brand-mark { color: var(--color-accent); }
+.onboarding-icon { color: var(--color-accent); }
 .accent-swatch[data-accent="gleam"] span { box-shadow: inset 0 0 0 1px rgba(11 11 10 / 0.18); }
 
 /* ===================================================================

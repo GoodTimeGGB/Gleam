@@ -170,6 +170,7 @@ function showView(name) {
     b.toggleAttribute('aria-current', b.dataset.view === name);
   });
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+  document.documentElement.dataset.view = name;
   const view = $('#view-' + name);
   if (view) view.classList.add('active');
   (VIEW_LOADERS[name] || (() => {}))();
@@ -1712,7 +1713,7 @@ async function loadGoals() {
     const { goals } = await api('GET', '/api/goals');
     (goals || []).slice().reverse().forEach((info) => renderTaskCard(info, false));
     if (!goals || !goals.length) {
-      resetFeedToEmpty('还没有目标', '在上方写下你想让微光做成的一件事，它会把过程摊开给你看。');
+      resetFeedToEmpty('不止于对话，把事做完', '上下文留在本机，Gleam 帮你一步步推进', { home: true });
     }
   } catch { /* 首次为空 */ }
 }
@@ -2047,7 +2048,8 @@ async function loadSchedules() {
       setSchFormOpen(true);
       return;
     }
-    jobs.forEach((j) => list.appendChild(scheduleCard(j)));
+    jobs.forEach((j, i) => { const c = scheduleCard(j); c.dataset.order = String(i); list.appendChild(c); });
+    applySchView();
   } catch (err) { toast(err.message, 'error'); }
 }
 
@@ -2055,6 +2057,9 @@ async function loadSchedules() {
 // 定时任务卡片：开关 · 标题 + 状态 · 目标预览 · 时间胶囊 · 更多（删除）
 function scheduleCard(j) {
   const card = el('article', 'auto-card' + (j.enabled ? '' : ' is-off'));
+  card.dataset.enabled = String(!!j.enabled);
+  card.dataset.name = j.name || '';
+  card.dataset.next = j.next_run && j.enabled ? String(new Date(j.next_run).getTime()) : '';
   const head = el('div', 'auto-card-head');
   const sw = el('button', 'switch');
   sw.type = 'button';
@@ -2112,6 +2117,35 @@ function scheduleCard(j) {
   return card;
 }
 document.addEventListener('click', () => document.querySelectorAll('.auto-card-menu').forEach((m) => { m.hidden = true; }));
+
+// 定时任务列表的筛选（全部 / 已启用 / 已停用）与排序：只在前端重排已拉到的卡片
+let schFilter = 'all';
+function applySchView() {
+  const list = $('#schedules-list');
+  const cards = [...list.querySelectorAll(':scope > .auto-card')];
+  const by = $('#sch-sort').value;
+  cards.sort((a, b) => {
+    if (by === 'name') return a.dataset.name.localeCompare(b.dataset.name, 'zh-CN');
+    if (by === 'next') {
+      const x = Number(a.dataset.next) || Infinity; const y = Number(b.dataset.next) || Infinity;
+      if (x !== y) return x - y;
+    }
+    return Number(a.dataset.order) - Number(b.dataset.order);
+  });
+  cards.forEach((c) => {
+    c.hidden = schFilter !== 'all' && (c.dataset.enabled === 'true') !== (schFilter === 'on');
+    list.appendChild(c);
+  });
+}
+document.querySelectorAll('#sch-filter [data-sfilter]').forEach((b) => b.addEventListener('click', () => {
+  schFilter = b.dataset.sfilter;
+  document.querySelectorAll('#sch-filter [data-sfilter]').forEach((x) => {
+    x.classList.toggle('active', x === b);
+    x.setAttribute('aria-selected', String(x === b));
+  });
+  applySchView();
+}));
+$('#sch-sort').addEventListener('change', applySchView);
 
 function setSchFormOpen(open) {
   const form = $('#sch-form');
@@ -4032,13 +4066,16 @@ function setThreadMode(on) {
   document.querySelector('.cue-deck').style.display = on ? 'none' : '';
 }
 
-function resetFeedToEmpty(title, desc) {
+// 首页 / 空任务的插图位：Gleam 自己的折线标记，与 index.html 里的静态版保持一致
+const HERO_ART = `<div class="hero-art" aria-hidden="true"><svg viewBox="0 0 96 96" width="96" height="96" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="18" width="60" height="60" rx="18" stroke-width="1.6" opacity=".35"/><path d="M55 32 39 48l16 16" stroke-width="4"/><path d="M70 16v6M67 19h6M24 74v4M22 76h4" stroke-width="1.6" opacity=".55"/></svg></div>`;
+
+function resetFeedToEmpty(title, desc, opts = {}) {
   const feed = $('#goal-feed');
   feed.innerHTML = '';
-  const empty = el('div', 'empty');
+  const empty = el('div', opts.home ? 'empty home-hero' : 'empty home-hero home-hero--task');
   empty.id = 'goals-empty';
-  empty.innerHTML = `<div class="empty-hero" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M15 4L7 12L15 20"/></svg></div>
-    <div class="empty-title">${esc(title)}</div><p class="empty-desc">${esc(desc)}</p>`;
+  empty.innerHTML = `${HERO_ART}<div class="empty-title">${esc(title)}</div><p class="empty-desc">${esc(desc)}</p>`
+    + (opts.home ? '<section class="activity-card" aria-label="本机活动"></section>' : '');
   feed.appendChild(empty);
 }
 
@@ -4764,6 +4801,7 @@ function applyTheme() {
   de.setAttribute('data-text', prefs.text || 's');
   de.setAttribute('data-zoom', prefs.zoom || 'm');
   de.setAttribute('data-width', prefs.width || 'standard');
+  de.setAttribute('data-sidebar', prefs.sidebarCollapsed ? 'collapsed' : 'open');
   document.querySelectorAll('[data-pref]').forEach((b) => {
     const on = String(prefs[b.dataset.pref]) === b.dataset.val;
     if (b.getAttribute('role') === 'menuitemradio') b.setAttribute('aria-checked', String(on));
@@ -4776,7 +4814,8 @@ function applyTheme() {
 const I18N_EN = {
   '目标': 'Goals', '定时任务': 'Schedules', '技能': 'Skills', '工具': 'Tools', '更多': 'More', '记忆': 'Memory',
   '市场': 'Market', '成长': 'Growth', '就绪体检': 'Readiness', '反馈与建议': 'Feedback', '设置': 'Settings', '我的': 'Me',
-  '新任务': 'New task', '搜索': 'Search', '工作区': 'Workspaces', '微光 · 本地智能体': 'Gleam · local agent',
+  '新任务': 'New task', '不止于对话，把事做完': 'Beyond chat, get it done', '上下文留在本机，Gleam 帮你一步步推进': 'Context stays on this machine while Gleam moves the work forward',
+  '会话': 'Chats', '任务': 'Tasks', '收起侧栏': 'Collapse sidebar', '展开侧栏': 'Expand sidebar', '展开现场栏': 'Open live panel', '收起现场栏': 'Close live panel', '搜索': 'Search', '工作区': 'Workspaces', '微光 · 本地智能体': 'Gleam · local agent',
   '新对话': 'New chat', '选择工作区': 'Choose workspace', '选择工作区（可选）': 'Choose workspace (optional)',
   '准备就绪': 'Ready', '可以开始一个新目标': 'Start a new goal', '全部': 'All', '进行中': 'Active', '已完成': 'Done', '需处理': 'Needs you',
   '本地工作台': 'Local workbench', '不止于对话，': 'Beyond chat, ', '把事做完。': 'get it done.',
@@ -5354,7 +5393,7 @@ const LiveRail = (() => {
   // 用户没点过收展 = 默认跟着视口走，**每次现读**：init 时快照一份宽度，遇到布局还没
   // 落定的场合（内嵌帧、刚创建就 maximise 的窗口）会把按钮文案和画面锁成反的——
   // 第一下点击因此"看起来没反应"。点过了就只认他点的。
-  const folded = () => (userChose ? choice : midMQ.matches);
+  const folded = () => (userChose ? choice : true);
   // 窄屏浮层是**临时**状态，不进偏好：没人希望"下次打开窗口默认挡住对话"。
   let overlayOpen = false;
   let rows = 0;
@@ -5370,6 +5409,12 @@ const LiveRail = (() => {
     const expanded = narrow() ? overlayOpen : !folded();
     foldBtn.title = expanded ? '收起现场栏' : '展开现场栏';
     foldBtn.setAttribute('aria-expanded', String(expanded));
+    const openBtn = $('#rail-open');
+    if (openBtn) {
+      openBtn.setAttribute('aria-expanded', String(expanded));
+      openBtn.title = expanded ? '收起现场栏' : '展开现场栏';
+      openBtn.setAttribute('aria-label', openBtn.title);
+    }
   }
   function setFolded(next) {
     userChose = true;
@@ -5386,6 +5431,10 @@ const LiveRail = (() => {
   // 一条竖签在两种视口下含义不同：宽屏是"把栏放回来"，窄屏是"把浮层掀开"。
   foldBtn.addEventListener('click', () => (narrow() ? setOverlay(!overlayOpen) : setFolded(!folded())));
   stripBtn.addEventListener('click', () => (narrow() ? setOverlay(true) : setFolded(false)));
+  $('#rail-open').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (narrow()) setOverlay(!overlayOpen); else setFolded(!folded());
+  });
   if (narrowMQ.addEventListener) {
     narrowMQ.addEventListener('change', () => { overlayOpen = false; applyFold(); });
   }
@@ -5958,14 +6007,27 @@ const MeMenu = (() => {
     menu.querySelector('[data-me="signout"]').hidden = !signedIn;
     menu.querySelector('[data-me-signout-sep]').hidden = !signedIn;
   }
+  // 菜单贴在用户行正上方、与侧栏左缘对齐；侧栏收起时退回按钮右侧
   function place() {
-    const r = btn.getBoundingClientRect();
-    menu.style.left = Math.round(r.right + 8) + 'px';
-    menu.style.bottom = Math.max(8, Math.round(window.innerHeight - r.bottom)) + 'px';
+    const row = btn.closest('.user-row') || btn;
+    const r = row.getBoundingClientRect();
+    const collapsed = r.width === 0;
+    const anchor = collapsed ? $('#sidebar-toggle').getBoundingClientRect() : r;
+    menu.style.left = Math.round(collapsed ? anchor.left : r.left + 12) + 'px';
+    menu.style.bottom = Math.max(8, Math.round(window.innerHeight - r.top + 11)) + 'px';
+  }
+  // 子菜单顶边对齐触发项；超出视口底部时整体上移，留 16px 余量
+  function clampFlyout(fly) {
+    if (!fly) return;
+    fly.style.top = '';
+    const rect = fly.getBoundingClientRect();
+    const over = rect.bottom - (window.innerHeight - 16);
+    if (over > 0) fly.style.top = -Math.round(over) + 'px';
   }
   function setSub(open) {
     sub.classList.toggle('open', open);
     sub.querySelector('[data-me="appearance"]').setAttribute('aria-expanded', String(open));
+    if (open) clampFlyout(sub.querySelector(':scope > .menu-flyout'));
     if (!open) openLeaf(null);
   }
   // 三级子菜单：同一时刻只开一个
@@ -5974,6 +6036,7 @@ const MeMenu = (() => {
       const on = s === leaf;
       s.classList.toggle('open', on);
       s.querySelector('[data-sub]').setAttribute('aria-expanded', String(on));
+      if (on) clampFlyout(s.querySelector(':scope > .menu-flyout'));
     });
   }
   sub.querySelectorAll('.menu-flyout .menu-sub').forEach((s) => s.addEventListener('mouseenter', () => openLeaf(s)));
@@ -6105,6 +6168,110 @@ const TaskSearch = (() => {
   });
   $('#task-search-open').addEventListener('click', open);
   return { open, close };
+})();
+
+// 设置面板：分区标题挪到卡片上方，卡片只装设置行
+document.querySelectorAll('.settings-panel > .card > .section-title:first-child').forEach((h) => {
+  h.classList.add('settings-section-label');
+  h.parentElement.before(h);
+});
+
+/* ---------- 壳层：侧栏收展 / 底部快捷跳转 / 首页态 / 本机活动卡 ---------- */
+const ShellLayout = (() => {
+  const toggle = $('#sidebar-toggle');
+  function syncToggle() {
+    const collapsed = !!UIPrefs.get().sidebarCollapsed;
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.title = collapsed ? '展开侧栏' : '收起侧栏';
+    toggle.setAttribute('aria-label', toggle.title);
+  }
+  toggle.addEventListener('click', () => {
+    UIPrefs.set({ sidebarCollapsed: !UIPrefs.get().sidebarCollapsed });
+    syncToggle();
+  });
+  syncToggle();
+  document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.goto)));
+
+  // 本机活动：只用本机真实数据（会话最后活跃日、成长日志里完成的任务），没有就保持全空格子
+  const WEEKS = 52;
+  let tab = 'convo';
+  let cache = null;
+  const dayKey = (d) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  async function fetchData() {
+    const [cv, gr] = await Promise.all([
+      api('GET', '/api/conversations').catch(() => ({})),
+      api('GET', '/api/growth/recent?n=200').catch(() => ({})),
+    ]);
+    const convo = new Map();
+    (cv.conversations || []).forEach((c) => {
+      if (!c.count || !c.updated_at) return;
+      const k = dayKey(new Date(c.updated_at));
+      convo.set(k, (convo.get(k) || 0) + 1);
+    });
+    const task = new Map();
+    (gr.entries || []).forEach((e) => {
+      if (e.type !== 'task_completed' || !e.time) return;
+      const k = dayKey(new Date(e.time));
+      task.set(k, (task.get(k) || 0) + 1);
+    });
+    return { convo, task };
+  }
+  function level(n, max) {
+    if (!n) return 0;
+    if (max <= 1) return 4;
+    return Math.min(4, 1 + Math.floor((n - 1) / Math.max(1, max / 4)));
+  }
+  function render(card) {
+    const data = cache ? cache[tab] : new Map();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    start.setDate(start.getDate() - (WEEKS - 1) * 7 - today.getDay());
+    const max = Math.max(0, ...data.values());
+    let total = 0;
+    const cells = [];
+    const months = [];
+    let lastMonth = -1;
+    for (let w = 0; w < WEEKS; w++) {
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(start); day.setDate(start.getDate() + w * 7 + d);
+        if (d === 0 && day.getMonth() !== lastMonth) {
+          if (w > 0) months.push(`<span style="grid-column:${w + 1}">${day.getMonth() + 1}月</span>`);
+          lastMonth = day.getMonth();
+        }
+        if (day > today) { cells.push('<i class="heat-cell" data-future></i>'); continue; }
+        const n = data.get(dayKey(day)) || 0;
+        total += n;
+        cells.push(`<i class="heat-cell" data-l="${level(n, max)}" title="${day.getMonth() + 1}/${day.getDate()} · ${n}"></i>`);
+      }
+    }
+    card.innerHTML = `<div class="activity-tabs" role="tablist">
+        <button type="button" role="tab" data-act="convo" aria-selected="${tab === 'convo'}">会话</button>
+        <button type="button" role="tab" data-act="task" aria-selected="${tab === 'task'}">任务</button>
+      </div>
+      <div class="heat-grid" aria-label="过去一年的本机活动，共 ${total} 次">${cells.join('')}</div>
+      <div class="heat-months" aria-hidden="true">${months.join('')}</div>`;
+    card.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.act; render(card); }));
+  }
+  async function paintActivity() {
+    const card = document.querySelector('#goals-empty .activity-card');
+    if (!card) return;
+    if (!card.childElementCount) render(card);
+    try { cache = await fetchData(); } catch { cache = null; }
+    if (card.isConnected) render(card);
+  }
+
+  // 首页态：会话流里只有空态时，主区换成首页布局（插图位 + 活动卡 + 底部输入框）
+  const view = $('#view-goals');
+  const feed = $('#goal-feed');
+  function syncHome() {
+    const empty = $('#goals-empty');
+    const home = !!empty && feed.children.length === 1;
+    view.classList.toggle('is-home', home);
+    if (home && empty.querySelector('.activity-card') && !empty.querySelector('.activity-card').childElementCount) paintActivity();
+  }
+  new MutationObserver(syncHome).observe(feed, { childList: true });
+  syncHome();
+  return { paintActivity, syncHome };
 })();
 
 /* ---------- 启动（必须是本文件的最后一段，判据见 scripts/check-app-startup.py） ---------- */

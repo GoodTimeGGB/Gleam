@@ -16,9 +16,9 @@ desktop/
   src/main/index.ts       入口：单实例锁、生命周期、退出时关闭 sidecar
   src/main/sidecar.ts     启动 sidecar、等就绪行、探活、优雅关闭 / 超时强杀
   src/main/protocol.ts    app://gleam/ -> http://127.0.0.1:<随机端口>/ 代理，注入口令和 CSP
-  src/main/security.ts    导航 / 新窗口 / webview 拦截、权限默认拒绝、IPC 白名单
-  src/main/window.ts      BrowserWindow（隐藏标题栏 + 窗口控件覆盖层，高度 44 = --topbar-h）
-  src/preload/index.ts    沙箱 preload：只暴露 window.gleamDesktop.{isDesktop, info}
+  src/main/security.ts    导航 / 新窗口 / webview 拦截、权限默认拒绝、IPC 白名单与各通道的处理
+  src/main/window.ts      BrowserWindow（Windows/Linux 无边框，macOS 隐藏标题栏 + 红绿灯；不挂原生菜单）
+  src/preload/index.ts    沙箱 preload：暴露 window.gleamDesktop（见下方「应用内菜单与窗口控件」）
   spike/                  Xvfb 下的验证脚本（Python + Playwright 走 CDP）
 ```
 
@@ -28,6 +28,25 @@ Go 侧只加了一个隐藏子命令 `gleam desktop-sidecar`（`cmd/gleam/sideca
 - 口令由父进程经 `GLEAM_WEBUI_TOKEN` 预置，读完后从自身环境里抹掉；
 - 就绪后在 stdout 打一行 `GLEAM_READY {"addr":"127.0.0.1:PORT","pid":N,"version":"x.y.z"}`，其余日志都走 stderr；
 - stdin 关闭（包括 Electron 被强杀）或收到一行 `{"cmd":"shutdown"}` 即优雅退出：先断开 SSE 长连接，再 `Shutdown`。
+
+## 应用内菜单与窗口控件
+
+界面顶栏自己画「文件 / 编辑 / 视图 / 帮助」菜单和最小化 / 最大化 / 关闭按钮（`internal/webui/static/chrome.js`），
+桌面壳只负责把这些动作落到真实的 `webContents` / `BrowserWindow` 上：
+
+- 窗口：Windows / Linux `frame: false`，macOS `titleBarStyle: 'hidden'` + `trafficLightPosition`；`win.setMenu(null)`，不再用 `titleBarOverlay`。
+- preload 暴露 `window.gleamDesktop`：`isDesktop`、`platform`、`info()`、`edit(action)`、`view(action)`、`window(action)`、
+  `windowState()`、`onWindowState(cb)`、`openExternal(url)`、`capture()`、`newWindow()`。
+- IPC 通道固定白名单：`desktop:info / edit / view / window / windowState / openExternal / capture / newWindow`，事件 `desktop:window-state`。
+  每个处理函数先校验发送方是 `app://gleam` 的主框架，再按固定的动作表分派（`undo/redo/cut/copy/paste/selectAll`、
+  `reload/forceReload/toggleDevTools/zoomIn/zoomOut/resetZoom/toggleFullScreen`、`minimize/toggleMaximize/close`），表外的值直接拒绝。
+- 缩放步进 0.5，夹在 −3…4；`capture()` 截当前页面并缩到 ≤1600px 宽，供反馈对话框附图。
+- `openExternal(url)` 只接受 http(s)，经 `shell.openExternal` 交给系统浏览器——内置预览「在浏览器打开」不再走 `window.open`，
+  所以不会再被新窗口拦截误报成「弹窗被拦截」。
+- 浏览器（非桌面壳）下同一套菜单会隐藏「关闭窗口 / 强制刷新 / 缩放」，编辑类动作退回 `execCommand` / Clipboard API。
+
+已在 Xvfb 上验证：菜单四组、撤销 / 剪切 / 粘贴、缩放 1→1.095→1、反馈自动截图、关于（版本 / Electron / Chromium / 平台）、
+外部打开、Ctrl+J / Ctrl+Shift+B。Xvfb 没有窗口管理器，最大化状态切换在那里观察不到，需要实机验证。
 
 ## 开发
 
@@ -71,7 +90,7 @@ SPIKE_DISPLAY=:77 SPIKE_OUT=/tmp/gspike/out python3 spike/sse-leak.py   # SSE �
 
 ## Phase 1 待办
 
-- **Windows / macOS 实机验证**（都没做过）：窗口控件覆盖层、macOS 红绿灯位置（目前是平台判断后注入一条 CSS）、
+- **Windows / macOS 实机验证**（都没做过）：无边框窗口的拖拽区与自绘窗口按钮、最大化状态同步、macOS 红绿灯位置、
   `taskkill /T` 强杀路径、杀毒软件对 sidecar 的拦截。
 - **升级 Electron 到 44.x**（37 已出支持期），并重跑上面的验证。
 - **签名 / 公证**（Authenticode、Apple notarization）、安装包（NSIS / dmg）、自动更新、Electron fuses。

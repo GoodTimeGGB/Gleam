@@ -30,7 +30,7 @@ jobs:
               '2. Optionally install [CodeRabbit](https://github.com/apps/coderabbitai) as a GitHub App (org admin UI).',
               '',
               'Human review from `@gleam-ai/maintainers` remains required on protected branches.',
-            ].join('\\n');
+            ].join('\n');
             try {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
@@ -41,3 +41,4 @@ jobs:
             } catch (err) {
               core.warning(`Could not comment: ${err.message}`);
             }
+

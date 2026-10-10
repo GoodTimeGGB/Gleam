@@ -3,14 +3,20 @@ import { app, BrowserWindow, dialog, session } from 'electron';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { systemLang } from './locale';
 import { APP_ORIGIN, installAppProtocol, registerAppScheme } from './protocol';
 import { hardenContents, hardenSession, installIpc } from './security';
 import { Sidecar, type SidecarSpec } from './sidecar';
 import { createMainWindow } from './window';
 import { installGlobalShortcut } from './shortcut';
+import { probeRuntimes, runtimeBinDirs } from './runtimes';
+import { Splash } from './splash';
 
 const t0 = Date.now();
 const log = (msg: string) => console.log(`[desktop +${Date.now() - t0}ms] ${msg}`);
+
+/** 内置运行时没就绪时，启动屏停几秒让人看清原因（主界面同时在后面加载）。 */
+const SPLASH_HOLD_SECONDS = 5;
 
 // Dev/test knob: isolate Electron's profile (localStorage prefs, single-instance lock) from the real one.
 // Must be set before the single-instance lock, which is scoped to userData.
@@ -23,17 +29,18 @@ function sidecarSpec(): SidecarSpec {
   const exe = process.platform === 'win32' ? 'gleam.exe' : 'gleam';
   // Extra sidecar flags, e.g. "--mock-llm --data-dir /tmp/x". Dev/test knob; Phase 1 decides whether it ships.
   const args = (process.env.GLEAM_SIDECAR_ARGS || '').split(/\s+/).filter(Boolean);
+  const extraPath = runtimeBinDirs();
   if (process.env.GLEAM_SIDECAR_BIN) {
-    return { bin: resolve(process.env.GLEAM_SIDECAR_BIN), args, cwd: process.cwd() };
+    return { bin: resolve(process.env.GLEAM_SIDECAR_BIN), args, cwd: process.cwd(), extraPath };
   }
   if (app.isPackaged) {
-    return { bin: join(process.resourcesPath, 'bin', exe), args, cwd: homedir() };
+    return { bin: join(process.resourcesPath, 'bin', exe), args, cwd: homedir(), extraPath };
   }
   // Dev: desktop/dist/main/index.js -> desktop/.sidecar/<platform>-<arch>/gleam; run from the repo root
   // so the sidecar picks up configs/config.yaml exactly like `gleam webui` does.
   const desktopDir = resolve(__dirname, '..', '..');
   const bin = join(desktopDir, '.sidecar', `${process.platform}-${process.arch}`, exe);
-  return { bin, args, cwd: resolve(desktopDir, '..') };
+  return { bin, args, cwd: resolve(desktopDir, '..'), extraPath };
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -93,6 +100,37 @@ function run(): void {
       app.exit(1);
       return;
     }
+
+    // ---------- 环境准备 ----------
+    // 先亮这一屏，再起后端：用户双击之后看到的第一眼应该是"在准备"，而不是一段空白。
+    // 检查是真的（跑 node -v / uv --version / git --version），所以通常几百毫秒就完；
+    // 内置运行时跑不起来时才停下来说清楚——那时候让它自己消失，用户永远不知道哪里坏了。
+    const lang = systemLang();
+    let splash: Splash | null = null;
+    if (!process.env.GLEAM_NO_SPLASH) {
+      splash = new Splash(lang);
+      splash.render({
+        status: lang === 'zh' ? '正在检查内置运行时…' : 'Checking bundled runtimes…',
+        items: [], total: 3, holdSeconds: 0,
+      });
+    }
+    const probes = await probeRuntimes(lang);
+    const broken = probes.filter((p) => p.bundled && !p.ok);
+    for (const p of probes) log(`runtime ${p.name}: ${p.ok ? 'ok' : 'missing'} ${p.version || ''}`);
+    // 有坏消息时留几秒让人看清原因，到点自己放行；一切正常就不留——这屏是给"坏消息"用的，
+    // 不是给"每次都看一遍"用的。
+    const holdSeconds = broken.length ? SPLASH_HOLD_SECONDS : 0;
+    splash?.render({
+      status: broken.length
+        ? (lang === 'zh'
+          ? `${broken.length} 项没就绪——可以继续，用到它的功能会提示`
+          : `${broken.length} item(s) not ready — you can continue; features that need them will tell you`)
+        : (lang === 'zh' ? '环境已就绪，正在启动…' : 'Environment ready — starting…'),
+      items: probes,
+      total: probes.length,
+      holdSeconds,
+    });
+
     sidecar = new Sidecar(spec);
     sidecar.on('unexpected-exit', (code, signal) => {
       // Phase 1: restart with backoff and show a reconnect state. The spike surfaces it and quits.
@@ -118,5 +156,8 @@ function run(): void {
     win.on('closed', () => (win = null));
     win.webContents.once('did-finish-load', () => log('renderer did-finish-load'));
     await win.loadURL(`${APP_ORIGIN}/`);
+    // 有坏消息时让那屏多留几秒（页面上有倒计时）；没坏消息时立刻收掉。
+    if (holdSeconds > 0) await new Promise((r) => setTimeout(r, holdSeconds * 1000));
+    splash?.close();
   });
 }

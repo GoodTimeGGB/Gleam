@@ -2,3 +2,8 @@ node_modules/
 dist/
 release/
 .sidecar/
+# fetch:runtimes 的产物与缓存：构建期下载并按官方 SHA256 校验，不该进仓库（几百 MB）。
+.runtimes/
+.cache/
+# 打包验证用的临时输出目录。
+release-verify/

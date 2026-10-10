@@ -1,13 +1,12 @@
-/* 设置 v2 · 模型：已配置模型卡片 + 「添加模型」对话框。
- * Gleam 只有一套主模型接入（+ 可选辅助模型 fast_model + 档位映射），所以这里的「模型列表」
- * 如实就是这两张卡；校验是一次真实的最小请求（POST /api/llm/test，带表单覆盖值）；
+/* 设置 v2 · 模型：多模型列表管理 + 添加/编辑对话框。
+ * Gleam 支持同时配置多个模型（不同厂商、不同协议），对话页下拉切换。
+ * 每条模型是独立的 ModelEntry（厂商/协议/地址/模型/密钥），CRUD 走 /api/models。
  * API Key 只往后端写，页面上永远只显示「已设置 / 未设置」，不回显、不打日志。 */
 'use strict';
 
 (() => {
   const { h, row, card, label, head, btn, badge, empty, ico, settings, save, openLink } = S2;
 
-  // 厂商控制台的密钥页（公开地址；没有把握的厂商就不给链接）
   const KEY_PAGES = {
     zhipu: 'https://open.bigmodel.cn/usercenter/apikeys',
     deepseek: 'https://platform.deepseek.com/api_keys',
@@ -43,67 +42,68 @@
     let root = panel.querySelector('.s2-page');
     if (root) return root;
     root = h('div', { class: 's2-page', id: 's2-llm' });
-    const adv = h('details', { class: 's2-adv' }, h('summary', {}, h('span', { html: ico('chevron', 14) }), '高级：接入参数、生成参数与模型档位'));
+    const adv = h('details', { class: 's2-adv' }, h('summary', {}, h('span', { html: ico('chevron', 14) }), '高级：生成参数与模型档位'));
     [...panel.children].forEach((c) => adv.append(c));
     panel.append(root, adv);
     return root;
   }
 
-  function describe(s, provs) {
-    const L = s.llm;
-    const p = provs.find((x) => x.id === L.provider_id);
+  function describeEntry(entry, provs) {
+    const p = provs.find((x) => x.id === entry.provider_id);
     if (p) {
-      const plan = (p.plans || []).find((x) => x.kind === L.plan) || (p.plans || [])[0];
+      const plan = (p.plans || []).find((x) => x.kind === entry.plan) || (p.plans || [])[0];
       return { name: p.name, sub: plan ? plan.label : '', id: p.id };
     }
-    const proto = L.protocol || 'openai_chat';
+    const proto = entry.protocol || 'openai_chat';
     return { name: proto === 'anthropic' ? 'Anthropic Compatible' : 'OpenAI Compatible', sub: (PROTO_LABEL[proto] || proto) + ' API', id: proto === 'anthropic' ? 'custom-anthropic' : 'custom-openai' };
   }
 
-  const isConfigured = (L) => !!(L.api_key_set || L.provider_id || L.protocol);
   async function render() {
     const root = ensureShell();
     const [s, provs] = await Promise.all([settings(true), providers()]);
     const L = s.llm;
-    const configured = isConfigured(L);
-    const add = btn('', () => openDialog(null), 'btn btn-primary btn-sm s2-add', {});
-    add.innerHTML = ico('plus', 14) + `<span>${configured ? '更换模型' : '添加模型'}</span>`;
-    const kids = [head('模型', 'Gleam 用一套主模型执行任务，可另配一个更快更便宜的辅助模型处理压缩、复核等高频小调用。', add)];
+    const models = L.models || [];
+    const addBtn = btn('', () => openDialog(null), 'btn btn-primary btn-sm s2-add', {});
+    addBtn.innerHTML = ico('plus', 14) + `<span>添加模型</span>`;
+    const kids = [head('模型', 'Gleam 支持同时配置多个模型，对话时下拉切换。可另配一个更快更便宜的辅助模型处理压缩、复核等高频小调用。', addBtn)];
     if (L.provider === 'mock') {
       kids.push(h('div', { class: 's2-notice' }, h('span', { html: ico('warn', 14) }),
         h('span', { text: '当前以离线演示模型运行（启动参数 --mock-llm）。这里保存的配置会写入本机，正常启动时生效；校验仍是真实网络请求。' })));
     }
-    if (!configured) {
+    if (!models.length) {
       kids.push(card(empty('llm', '暂未配置模型', '添加一个模型后，Gleam 才能真正执行任务。', btn('添加模型', () => openDialog(null), 'btn btn-primary btn-sm'))));
     } else {
-      const d = describe(s, provs);
-      const keyState = L.api_key_set ? `密钥已设置 · 仅发往 ${L.api_key_host_cur || hostOf(L.base_url)}` : (L.api_key_host ? `已存的密钥属于 ${L.api_key_host}，需重填` : '未设置密钥');
-      const actions = (onEdit, onDel, delTitle) => h('div', { class: 's2-icon-btns' },
-        h('button', { type: 'button', class: 's2-icon-btn', title: '编辑', 'aria-label': '编辑', html: ico('edit', 15), onclick: onEdit }),
-        h('button', { type: 'button', class: 's2-icon-btn s2-icon-btn--danger', title: delTitle, 'aria-label': delTitle, html: ico('trash', 15), onclick: onDel }));
-      const mainCard = h('div', { class: 's2-model' },
-        glyph(d.name),
-        h('div', { class: 's2-model-text' },
-          h('strong', {}, L.model || '（未填模型）', badge('主模型', 'accent')),
-          h('small', { text: `${d.name}${d.sub ? ' · ' + d.sub : ''}` }),
-          h('small', { class: L.api_key_set ? 's2-ok' : 's2-warn', text: `${hostOf(L.base_url)} · ${keyState}` })),
-        actions(() => openDialog(s), async () => {
-          if (!await confirmModal('删除后会清除这套接入的密钥与厂商选择，Gleam 需要重新添加模型才能执行任务。', '删除模型配置？', { okText: '删除', danger: true })) return;
-          await save({ llm: { clear_api_key: true, provider_id: '', plan: '', protocol: '', fast_model: '' } }, '模型配置已删除');
-          render();
-        }, '删除'));
-      const cards = [mainCard];
-      if (L.fast_model) {
-        cards.push(h('div', { class: 's2-model' }, glyph(d.name, 's2-glyph--soft'),
+      const cards = models.map((m) => {
+        const d = describeEntry(m, provs);
+        const keyState = m.api_key_set ? '密钥已设置' : '未设置密钥';
+        const badges = [];
+        if (m.is_default) badges.push(badge('默认', 'accent'));
+        if (m.is_fast) badges.push(badge('辅助', 'muted'));
+        const actions = h('div', { class: 's2-icon-btns' },
+          !m.is_default ? h('button', { type: 'button', class: 's2-icon-btn', title: '设为默认', 'aria-label': '设为默认', html: ico('check', 15),
+            onclick: async () => {
+              try { await api('POST', `/api/models/${encodeURIComponent(m.id)}/default`); toast('已设为默认模型', 'success', 1800); render(); }
+              catch (err) { toast(`操作失败：${err.message}`, 'error'); }
+            } }) : null,
+          h('button', { type: 'button', class: 's2-icon-btn', title: '编辑', 'aria-label': '编辑', html: ico('edit', 15),
+            onclick: () => openDialog(m) }),
+          h('button', { type: 'button', class: 's2-icon-btn s2-icon-btn--danger', title: '删除', 'aria-label': '删除', html: ico('trash', 15),
+            onclick: async () => {
+              if (!await confirmModal(`删除「${m.name}」后会清除这套接入的密钥与配置。`, '删除模型？', { okText: '删除', danger: true })) return;
+              try {
+                await api('DELETE', `/api/models/${encodeURIComponent(m.id)}`);
+                toast(`已删除 ${m.name}`, 'success', 1800);
+                render();
+              } catch (err) { toast(`删除失败：${err.message}`, 'error'); }
+            } }));
+        return h('div', { class: 's2-model' },
+          glyph(d.name),
           h('div', { class: 's2-model-text' },
-            h('strong', {}, L.fast_model, badge('辅助模型', 'muted')),
-            h('small', { text: `与主模型同一接入（${hostOf(L.base_url)}），用于上下文压缩、AI 复核、技能优化等辅助调用。` })),
-          actions(() => openDialog(s), async () => {
-            if (!await confirmModal('移除后辅助调用改用主模型。', '移除辅助模型？', { okText: '移除', danger: true })) return;
-            await save({ llm: { fast_model: '' } }, '已移除辅助模型');
-            render();
-          }, '移除')));
-      }
+            h('strong', {}, m.model || '（未填模型）', ...badges),
+            h('small', { text: `${m.name} · ${d.name}${d.sub ? ' · ' + d.sub : ''}` }),
+            h('small', { class: m.api_key_set ? 's2-ok' : 's2-warn', text: `${hostOf(m.base_url)} · ${keyState}` })),
+          actions);
+      });
       kids.push(label('已配置'), h('div', { class: 's2-card s2-card--list' }, ...cards));
       const tiers = Object.entries(L.tiers || {});
       if (tiers.length) {
@@ -114,17 +114,23 @@
   }
 
   /* ---------------- 添加 / 编辑对话框 ---------------- */
-  async function openDialog(cur) {
+  async function openDialog(entry) {
     const provs = await providers();
-    const SETL = (await settings()).llm;
-    const L = cur ? cur.llm : null;
+    const isEdit = !!entry;
     const st = {
-      prov: L ? describe(cur, provs).id : (provs[0] ? provs[0].id : 'custom-openai'),
-      plan: L ? L.plan : '', apiType: L ? (L.protocol || 'openai_chat') : 'openai_chat',
-      base: L ? L.base_url : '', key: '', models: L ? [L.model, L.fast_model].filter(Boolean) : [''],
-      editing: !!L, keySet: !!(L && L.api_key_set),
+      prov: isEdit ? describeEntry(entry, provs).id : (provs[0] ? provs[0].id : 'custom-openai'),
+      plan: isEdit ? (entry.plan || '') : '',
+      apiType: isEdit ? (entry.protocol || 'openai_chat') : 'openai_chat',
+      base: isEdit ? (entry.base_url || '') : '',
+      key: '',
+      modelName: isEdit ? (entry.model || '') : '',
+      displayName: isEdit ? (entry.name || '') : '',
+      isFast: isEdit ? !!entry.is_fast : false,
+      isDefault: isEdit ? !!entry.is_default : false,
+      editing: isEdit,
+      keySet: isEdit ? !!entry.api_key_set : false,
+      entryId: isEdit ? entry.id : '',
     };
-    if (!st.models.length) st.models = [''];
     let dirty = false;
     let busy = false;
     const touch = () => { dirty = true; };
@@ -134,11 +140,11 @@
     overlay.append(dlg);
     const body = h('div', { class: 's2-dialog-body' });
     const result = h('div', { class: 's2-dialog-result', role: 'status', 'aria-live': 'polite', hidden: true });
-    const submit = h('button', { type: 'button', class: 'btn btn-primary btn-sm' }, '校验并添加');
+    const submit = h('button', { type: 'button', class: 'btn btn-primary btn-sm' }, isEdit ? '校验并保存' : '校验并添加');
     const cancel = h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: '取消' });
     dlg.append(
       h('div', { class: 's2-dialog-head' },
-        h('strong', { id: 's2-dlg-title', text: st.editing ? '编辑模型' : '添加模型' }),
+        h('strong', { id: 's2-dlg-title', text: isEdit ? '编辑模型' : '添加模型' }),
         h('div', { class: 's2-dialog-head-btns' },
           h('button', { type: 'button', class: 's2-icon-btn', title: '接入说明', 'aria-label': '接入说明', html: ico('book', 15), onclick: () => openLink('https://github.com/gleam-ai/Gleam#readme') }),
           h('button', { type: 'button', class: 's2-icon-btn', title: '关闭', 'aria-label': '关闭', html: ico('x', 15), onclick: () => tryClose() }))),
@@ -160,8 +166,8 @@
         onclick: () => {
           if (id !== st.prov) {
             st.prov = id; st.plan = ''; touch();
-            if (CUSTOM[id]) { st.apiType = CUSTOM[id].types[0].value; st.base = ''; st.models = ['']; }
-            else { const pl = curPlan(); st.base = pl ? pl.base_url : ''; st.models = [pl ? pl.model : '']; }
+            if (CUSTOM[id]) { st.apiType = CUSTOM[id].types[0].value; st.base = ''; st.modelName = ''; }
+            else { const pl = curPlan(); st.base = pl ? pl.base_url : ''; st.modelName = pl ? pl.model : ''; }
           }
           close(); paint();
         } }, glyph(nm), h('span', { text: nm }), id === st.prov ? h('span', { class: 's2-picker-check', html: ico('check', 14) }) : null);
@@ -192,6 +198,9 @@
       i.addEventListener('input', () => { touch(); on(i.value); result.hidden = true; validate(); });
       return i;
     };
+    function nameField() {
+      return field('显示名称', input('s2-dlg-name', st.displayName, '例如：我的 DeepSeek', (v) => { st.displayName = v; }));
+    }
     function keyField() {
       const i = input('s2-dlg-key', st.key, st.keySet ? '已设置，留空表示不修改' : '请输入 API Key', (v) => { st.key = v; }, 'password');
       const eye = h('button', { type: 'button', class: 's2-eye', 'aria-label': '显示密钥', title: '显示密钥', html: ico('eye', 15) });
@@ -206,32 +215,19 @@
         : null;
       return field('API Key', h('div', { class: 's2-input-wrap' }, i, eye), link);
     }
-    function modelIdsField() {
-      const rows = h('div', { class: 's2-model-ids' });
-      st.models.forEach((m, idx) => {
-        const i = input('s2-dlg-model-' + idx, m, idx === 0 ? '例如 qwen3-max' : '辅助模型，例如一个更快的小模型', (v) => { st.models[idx] = v; });
-        const del = h('button', { type: 'button', class: 's2-icon-btn', title: '删除', 'aria-label': '删除这个 Model ID', html: ico('trash', 14), disabled: st.models.length === 1 ? true : null,
-          onclick: () => { st.models.splice(idx, 1); touch(); paint(); } });
-        rows.append(h('div', { class: 's2-model-id-row' }, idx === 1 ? h('span', { class: 's2-model-id-tag', text: '辅助' }) : null, i, del));
-      });
-      const addId = st.models.length < 2
-        ? h('button', { type: 'button', class: 's2-link', onclick: () => { st.models.push(''); touch(); paint(); } }, h('span', { html: ico('plus', 12) }), '添加 Model ID')
-        : h('span', { class: 's2-field-hint', text: '第二个作为辅助模型' });
-      return field('Model ID', rows, addId);
-    }
-    function namedModelField() {
+    function modelField() {
       const pl = curPlan();
       const listId = 's2-dlg-models-list';
-      const i = input('s2-dlg-model-0', st.models[0] || (pl ? pl.model : ''), pl ? pl.model : '', (v) => { st.models[0] = v; });
+      const i = input('s2-dlg-model', st.modelName || (pl ? pl.model : ''), pl ? pl.model : '', (v) => { st.modelName = v; });
       i.setAttribute('list', listId);
-      if (!st.models[0] && pl) st.models[0] = pl.model;
+      if (!st.modelName && pl) st.modelName = pl.model;
       const dl = h('datalist', { id: listId }, pl ? h('option', { value: pl.model }) : null);
       const fetchBtn = h('button', { type: 'button', class: 's2-link' }, h('span', { html: ico('refresh', 12) }), '拉取可用模型');
       fetchBtn.addEventListener('click', async () => {
         fetchBtn.disabled = true;
         showResult('pending', '正在向厂商拉取模型列表…');
         try {
-          const r = await api('POST', '/api/llm/models', target(st.models[0]));
+          const r = await api('POST', '/api/llm/models', target());
           if (r.ok && Array.isArray(r.models) && r.models.length) {
             dl.replaceChildren(...r.models.map((m) => h('option', { value: m.id })));
             showResult('ok', `拉到 ${r.models.length} 个模型，点模型框即可选择`);
@@ -239,18 +235,37 @@
         } catch (err) { showResult('fail', err.message); }
         fetchBtn.disabled = false;
       });
-      return field('模型', h('div', {}, i, dl), fetchBtn);
+      return field('模型 ID', h('div', {}, i, dl), fetchBtn);
     }
-    function target(model) {
+    function fastToggle() {
+      const cb = h('input', { type: 'checkbox', class: 'switch', role: 'switch', 'aria-label': '辅助模型' });
+      cb.checked = st.isFast;
+      cb.addEventListener('change', () => { st.isFast = cb.checked; touch(); });
+      return field('辅助模型', h('div', { class: 's2-field-row' }, cb, h('span', { class: 's2-field-hint', text: '用于上下文压缩、AI 复核等高频小调用，选一个更快更便宜的模型' })));
+    }
+    function defaultToggle() {
+      const cb = h('input', { type: 'checkbox', class: 'switch', role: 'switch', 'aria-label': '设为默认' });
+      cb.checked = st.isDefault;
+      cb.addEventListener('change', () => { st.isDefault = cb.checked; touch(); });
+      return field('默认模型', h('div', { class: 's2-field-row' }, cb, h('span', { class: 's2-field-hint', text: '新对话默认使用这个模型' })));
+    }
+    function target() {
       const b = isCustom()
-        ? { provider_id: '', plan: '', protocol: st.apiType, base_url: st.base.trim(), model: (model || '').trim() }
-        : { provider_id: st.prov, plan: (curPlan() || {}).kind || '', protocol: (curPlan() || {}).protocol || '', base_url: (curPlan() || {}).base_url || '', model: (model || '').trim() };
+        ? { provider_id: '', plan: '', protocol: st.apiType, base_url: st.base.trim(), model: (st.modelName || '').trim() }
+        : { provider_id: st.prov, plan: (curPlan() || {}).kind || '', protocol: (curPlan() || {}).protocol || '', base_url: (curPlan() || {}).base_url || '', model: (st.modelName || '').trim() };
       if (st.key.trim()) b.api_key = st.key.trim();
+      b.name = (st.displayName || '').trim();
+      b.is_fast = st.isFast;
+      b.is_default = st.isDefault;
+      if (st.editing) {
+        b.id = st.entryId;
+        b.model_id = st.entryId; // 用于测试时查找现有模型的密钥
+      }
       return b;
     }
     function validate() {
       const needKey = !st.keySet && !st.key.trim();
-      const ok = (isCustom() ? !!st.base.trim() : true) && !!(st.models[0] || '').trim() && !needKey;
+      const ok = !!st.displayName.trim() && (isCustom() ? !!st.base.trim() : true) && !!(st.modelName || '').trim() && !needKey;
       submit.disabled = busy || !ok;
       return ok;
     }
@@ -259,52 +274,46 @@
       result.className = 's2-dialog-result is-' + kind;
       result.textContent = text;
     }
-    const replacing = !st.editing && SETL && isConfigured(SETL) ? SETL.model : '';
-    if (replacing) dlg.querySelector('#s2-dlg-title').textContent = '更换模型';
     function paint() {
       const kids = [];
-      if (replacing) kids.push(h('p', { class: 's2-dialog-desc', text: `Gleam 只有一套主模型接入：校验通过并保存后，会替换当前的 ${replacing}。` }));
       kids.push(field('供应商', providerPicker()));
       if (isCustom()) {
         const c = CUSTOM[st.prov];
         kids.push(field('API 类型', sel('s2-dlg-type', c.types, st.apiType, (v) => { st.apiType = v; })));
         kids.push(field('接口地址（Base URL）', input('s2-dlg-base', st.base, c.base, (v) => { st.base = v; })));
-        kids.push(keyField(), modelIdsField());
       } else {
         const p = curProv();
         if (!st.plan) st.plan = (p.plans[0] || {}).kind || '';
         kids.push(field('类型', sel('s2-dlg-plan', p.plans.map((x) => ({ value: x.kind, label: x.label })), st.plan, (v) => {
-          st.plan = v; const pl = curPlan(); st.models[0] = pl ? pl.model : ''; paint();
+          st.plan = v; const pl = curPlan(); st.modelName = pl ? pl.model : ''; paint();
         })));
-        kids.push(namedModelField(), keyField());
-        kids.push(modelIdsFieldNamed());
       }
+      kids.push(nameField(), modelField(), keyField());
+      kids.push(defaultToggle(), fastToggle());
       body.replaceChildren(...kids);
       validate();
-    }
-    function modelIdsFieldNamed() {
-      const i = input('s2-dlg-model-1', st.models[1] || '', '留空表示辅助调用也用主模型', (v) => { st.models[1] = v; });
-      return field('辅助模型（可选）', i);
     }
 
     async function submitNow() {
       if (!validate()) return;
       busy = true; validate();
-      const models = st.models.map((m) => (m || '').trim()).filter(Boolean);
+      const t = target();
       try {
-        for (let i = 0; i < models.length; i++) {
-          showResult('pending', `正在校验 ${models[i]}（一次真实的最小请求）…`);
-          const r = await api('POST', '/api/llm/test', target(models[i]));
-          if (!r.ok) {
-            showResult('fail', `${models[i]}：${TEST_HINTS[r.kind] || '校验失败'}${r.http_status ? `（HTTP ${r.http_status}）` : ''}`);
-            return;
-          }
+        showResult('pending', `正在校验 ${t.model}（一次真实的最小请求）…`);
+        const r = await api('POST', '/api/llm/test', t);
+        if (!r.ok) {
+          showResult('fail', `${t.model}：${TEST_HINTS[r.kind] || '校验失败'}${r.http_status ? `（HTTP ${r.http_status}）` : ''}`);
+          return;
         }
-        const t = target(models[0]);
-        const patch = { llm: Object.assign({}, t, { fast_model: models[1] || '' }) };
-        await save(patch, null);
-        dirty = false;
-        toast(`已添加模型 ${models[0]}`, 'success', 2200);
+        if (st.editing) {
+          await api('PUT', `/api/models/${encodeURIComponent(st.entryId)}`, t);
+          dirty = false;
+          toast(`已保存 ${t.name}`, 'success', 2200);
+        } else {
+          await api('POST', '/api/models', t);
+          dirty = false;
+          toast(`已添加模型 ${t.name}`, 'success', 2200);
+        }
         close();
         render();
       } catch (err) {
@@ -338,7 +347,7 @@
       keep.addEventListener('click', () => { layer.remove(); document.removeEventListener('keydown', off, true); });
       drop.addEventListener('click', () => { document.removeEventListener('keydown', off, true); close(); });
     }
-    if (!st.editing && !isCustom()) { const pl = curPlan(); st.base = pl ? pl.base_url : ''; st.models = [pl ? pl.model : '']; }
+    if (!st.editing && !isCustom()) { const pl = curPlan(); st.base = pl ? pl.base_url : ''; st.modelName = pl ? pl.model : ''; }
     paint();
     document.body.append(overlay);
     setTimeout(() => $('#s2-dlg-prov') && $('#s2-dlg-prov').focus(), 0);

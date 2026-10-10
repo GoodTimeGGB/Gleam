@@ -48,7 +48,7 @@ func refFixture(work, resolved string, called *bool) (*registry.Registry, *safet
 		}})
 	r.MustRegister(&funcTool{
 		name: "writer", perm: types.PermissionUserApproved,
-		paths: func(args map[string]any) []string {
+		paths: func(_ context.Context, args map[string]any) []string {
 			if p, ok := args["path"].(string); ok && p != "" {
 				return []string{p}
 			}

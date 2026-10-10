@@ -4,6 +4,7 @@ package safety
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"gleam/internal/tools/toolutil"
 	"gleam/pkg/types"
 )
 
@@ -111,19 +113,28 @@ type AuditEntry struct {
 const auditCap = 200
 
 // Evaluate 对"工具 + 参数"做裁决（无计划级预批准）。
+//
+// 这一对不带 ctx 的入口给的是**执行链之外的单发判定**（界面预览"这一步会不会被拦"、
+// 服务器 API 的干跑）。那种时候没有 per-task 边界，按全局工作区解析路径就是事实。
+// 执行链上的裁决走 EvaluateStepIn——它带着本次任务的边界，路径会按 worktree 解析。
 func (g *Gate) Evaluate(t types.Tool, args map[string]any) Decision {
-	return g.evaluate(t, args, false)
+	return g.evaluate(context.Background(), t, args, false)
 }
 
 // EvaluateStep 带计划级预批准标记的裁决：
 // plan_first 整计划获批后中风险步骤免重复审批，高风险仍需逐步确认。
 func (g *Gate) EvaluateStep(t types.Tool, args map[string]any, preApproved bool) Decision {
-	return g.evaluate(t, args, preApproved)
+	return g.evaluate(context.Background(), t, args, preApproved)
+}
+
+// EvaluateStepIn 执行链上的裁决：ctx 里带着本次任务的边界（见 toolutil.WithRoots）。
+func (g *Gate) EvaluateStepIn(ctx context.Context, t types.Tool, args map[string]any, preApproved bool) Decision {
+	return g.evaluate(ctx, t, args, preApproved)
 }
 
 // evaluate 核心裁决。只读自动放行；信任白名单放行；
 // 中风险且路径全部落在信任路径内放行；高风险始终需要批准。
-func (g *Gate) evaluate(t types.Tool, args map[string]any, preApproved bool) Decision {
+func (g *Gate) evaluate(ctx context.Context, t types.Tool, args map[string]any, preApproved bool) Decision {
 	perm := g.effectivePermission(t)
 	switch perm {
 	case types.PermissionReadOnly:
@@ -160,13 +171,19 @@ func (g *Gate) evaluate(t types.Tool, args map[string]any, preApproved bool) Dec
 	}
 
 	// auto 模式：涉及路径的操作若全部在信任路径内则放行
+	//
+	// "信任范围"要算上**本次任务自己的边界**：任务在 worktree 里跑时，它写的每一处
+	// 都落在那个目录下——那是 Gleam 自己为这次任务建的目录，属于本该放行的范围。
+	// 边界从 ctx 取（per-task），不是往全局信任列表里塞一条：塞进去的话，
+	// 任务 A 的 worktree 会在任务 B 跑的时候也算可信，那正是这次要消掉的串味。
 	if pa, ok := t.(types.PathAware); ok {
-		paths := pa.Paths(args)
+		paths := pa.Paths(ctx, args)
 		if len(paths) == 0 {
 			return Decision{NeedApproval: true, Risk: risk, Reason: "无法确认操作路径，需要人工确认"}
 		}
+		roots := toolutil.RootsFrom(ctx, nil)
 		for _, p := range paths {
-			if !g.pathTrusted(p) {
+			if !g.pathTrusted(p) && !pathInRoots(roots, p) {
 				return Decision{NeedApproval: true, Risk: risk, Reason: fmt.Sprintf("路径 %s 不在信任路径内", p)}
 			}
 		}
@@ -196,6 +213,27 @@ func (g *Gate) pathTrusted(p string) bool {
 	return false
 }
 
+// pathInRoots 路径是否落在其中某个根目录内（本次任务的边界）。
+// 判据与 toolutil.Within 同一套语义：用 Rel 而不是字符串前缀，免得 /ws2 被当成 /ws 的子路径。
+func pathInRoots(roots []string, path string) bool {
+	if path == "" || !filepath.IsAbs(path) {
+		return false
+	}
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+		if err != nil {
+			continue
+		}
+		if rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)) {
+			return true
+		}
+	}
+	return false
+}
+
 func pathWithin(root, path string) bool {
 	root = filepath.Clean(root)
 	rel, err := filepath.Rel(root, path)
@@ -205,10 +243,10 @@ func pathWithin(root, path string) bool {
 	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
 }
 
-// DescribePaths 生成审批卡片用的路径说明。
-func (g *Gate) DescribePaths(t types.Tool, args map[string]any) []string {
+// DescribePaths 生成审批卡片用的路径说明。ctx 决定按谁的边界解析（见 EvaluateStepIn）。
+func (g *Gate) DescribePaths(ctx context.Context, t types.Tool, args map[string]any) []string {
 	if pa, ok := t.(types.PathAware); ok {
-		return pa.Paths(args)
+		return pa.Paths(ctx, args)
 	}
 	return nil
 }

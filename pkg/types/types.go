@@ -49,8 +49,13 @@ type Tool interface {
 }
 
 // PathAware 由涉及文件路径的工具实现，供安全门控判断是否落在信任路径内。
+//
+// 为什么带 ctx：相对路径要按「本次任务的边界」解析，而边界挂在 ctx 上
+// （见 toolutil.WithRoots）。任务在自己的 worktree 里跑时，按静态工作区解析出来的
+// 绝对路径是个**别的文件**——门控会照着它批准，写前快照也会照着它存档，
+// 而真正被改的是 worktree 里那份。路径是这里唯一的产品，Cannot 错。
 type PathAware interface {
-	Paths(args map[string]any) []string
+	Paths(ctx context.Context, args map[string]any) []string
 }
 
 // StepOutcome 步骤的结果性质（业务层），与 Status（执行层状态机）正交。

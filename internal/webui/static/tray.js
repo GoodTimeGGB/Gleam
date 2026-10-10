@@ -15,12 +15,14 @@ const TrayLink = (() => {
 
   const MAX = 15; // 与 src/main/tray.ts 的 RECENT_TOP + RECENT_MORE 对齐
   let timer = null;
+  let seq = 0; // 两次 push 撞在一起时，只让最后出发的那次写菜单
 
   function lang() {
     return (document.documentElement.getAttribute('lang') || '').startsWith('en') ? 'en' : 'zh';
   }
 
   async function push() {
+    const mine = ++seq;
     let recents = [];
     try {
       const res = await api('GET', '/api/conversations');
@@ -32,6 +34,8 @@ const TrayLink = (() => {
       // 拉不到就推空列表：菜单里那一段显示成灰的，好过留上一批过期标题
       recents = [];
     }
+    // 期间又有一次 push 出发了（列表连着变），这次的结果已经旧了——推上去只会把新菜单盖回旧的
+    if (mine !== seq) return;
     try {
       await desk.tray.sync({ lang: lang(), recents });
     } catch {

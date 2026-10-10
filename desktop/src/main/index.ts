@@ -57,6 +57,8 @@ function run(): void {
   let win: BrowserWindow | null = null;
   let sidecar: Sidecar | null = null;
   let quitting = false;
+  // 更新安装要走"关掉所有窗口再 app.quit()"，不经过 before-quit；那一下得放开 ✕ 的拦截。
+  let allowWindowClose = false;
 
   app.on('second-instance', () => {
     log('second-instance: focusing the existing window');
@@ -159,9 +161,10 @@ function run(): void {
     installTray();
     win.on('closed', () => (win = null));
     // ✕ = 收进托盘，不是退出：常驻托盘的应用就是这个约定，用户要退出走托盘菜单里的「退出 Gleam」。
-    // 真退出时 before-quit 已经把 quitting 立起来了，这里放行让窗口真的关掉。
+    // 真退出时 before-quit 已把 quitting 立起来；更新安装前 updater 会调 allowClose——
+    // 那一下它要先关窗口再 app.quit()，两种都得放行，否则窗口永远关不掉。
     win.on('close', (e) => {
-      if (quitting) return;
+      if (quitting || allowWindowClose) return;
       e.preventDefault();
       win?.hide();
       trayHintOnce();
@@ -172,7 +175,7 @@ function run(): void {
     if (holdSeconds > 0) await new Promise((r) => setTimeout(r, holdSeconds * 1000));
     splash?.close();
 
-    if (app.isPackaged) installUpdater();
+    if (app.isPackaged) installUpdater({ allowClose: () => { allowWindowClose = true; } });
 
     // 测试/排障用（与 GLEAM_SIDECAR_ARGS 同类的 knob）：把若干托盘动作按序打一遍，
     // 好让"点菜单"这条链路在本机能被自动走一遍。形如

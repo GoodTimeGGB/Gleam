@@ -27,8 +27,13 @@ linux:
   icon: ../assets/icons/gleam-512.png
 win:
   target:
-    - dir
+    - nsis
   icon: ../assets/gleam.ico
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  deleteAppDataOnUninstall: true
 mac:
   target:
     - dir

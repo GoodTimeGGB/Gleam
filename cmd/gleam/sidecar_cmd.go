@@ -60,7 +60,7 @@ func cmdDesktopSidecar(args []string) error {
 	}
 
 	// 桌面应用：没选过工作区就停在「不指定工作区」，不用进程 CWD 兜底。
-	rt, err := buildRuntime(*configPath, *workspace, *dataDir, *mockLLM, *mockScript, nil, WithNoDefaultWorkspace())
+	rt, err := buildRuntime(*configPath, *workspace, *dataDir, *mockLLM, *mockScript, nil, WithNoDefaultWorkspace(), WithAsyncMCP())
 	if err != nil {
 		return err
 	}
@@ -76,6 +76,8 @@ func cmdDesktopSidecar(args []string) error {
 	_ = os.Unsetenv(webui.TokenEnv)
 	srv.BindAddr = ln.Addr().String()
 	announceToken(srv)
+	// MCP 连接放到就绪之后：慢的 MCP（npx 拉 Node 实测 ~2.2 s）不该挡住「已经能用」。
+	go rt.startMCP()
 	return runSidecar(srv.Handler(), ln, os.Stdin, os.Stdout)
 }
 

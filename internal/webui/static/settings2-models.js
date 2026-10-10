@@ -17,6 +17,7 @@
     openai: 'https://platform.openai.com/api-keys',
     anthropic: 'https://console.anthropic.com/settings/keys',
     openrouter: 'https://openrouter.ai/keys',
+    tokendance: 'https://tokendance.space/keys',
   };
   const CUSTOM = {
     'custom-openai': { name: 'OpenAI Compatible', types: [{ value: 'openai_chat', label: 'Chat Completions API' }, { value: 'openai_responses', label: 'Responses API' }], base: 'https://api.example.com/v1' },

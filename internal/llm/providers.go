@@ -105,6 +105,13 @@ var Providers = []ProviderPreset{
 			{Kind: PlanToken, Label: "按量 Token", BaseURL: "https://openrouter.ai/api/v1", Protocol: ProtocolOpenAIChat, Model: "openrouter/auto"},
 		},
 	},
+	{
+		ID: "tokendance", Name: "TokenDance 词元跳动（聚合）",
+		Plans: []PlanPreset{
+			{Kind: PlanToken, Label: "按量 Token（OpenAI 兼容）", BaseURL: "https://tokendance.space/gateway/v1", Protocol: ProtocolOpenAIChat, Model: "gpt-4.1-mini"},
+			{Kind: PlanAgent, Label: "Anthropic 兼容入口", BaseURL: "https://tokendance.space/gateway/v1", Protocol: ProtocolAnthropic, Model: "claude-sonnet-4-5"},
+		},
+	},
 }
 
 // KeyScope 把 base_url 归一成"密钥该认的那台主机"（小写 host:port，不含路径）。

@@ -9,7 +9,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/01-base.css">
+  <link rel="stylesheet" href="/assets/02-shell.css">
+  <link rel="stylesheet" href="/assets/03-align.css">
+  <link rel="stylesheet" href="/assets/04-composer.css">
+  <link rel="stylesheet" href="/assets/05-consistency.css">
+  <link rel="stylesheet" href="/assets/06-features.css">
   <link rel="stylesheet" href="/assets/chrome.css">
   <link rel="stylesheet" href="/assets/settings2.css">
   <script>
@@ -38,6 +43,9 @@
       // 没点过收展按钮 = 默认收起（主区右上角的按钮再打开），点过就只认他点的。
       var rf = prefs.railFolded;
       document.documentElement.setAttribute('data-rail', (rf == null || !!rf) ? 'folded' : 'open');
+      // 侧栏宽度同理：拖过就按拖的来，没拖过用样式里的默认值。等 app.js 再设首帧会跳一下。
+      var sw = Number(prefs.sidebarW);
+      if (sw >= 200) document.documentElement.style.setProperty('--side-w', sw + 'px');
     } catch (e) {}
   })();
   </script>
@@ -86,6 +94,8 @@
 
     <!-- 单列侧栏：品牌胶囊 / 新任务 / 搜索 / 工作区列表 / 底部导航 / 用户行 -->
     <aside class="sidebar" id="sidebar" aria-label="侧栏">
+      <!-- 拖窄时外面这层裁切、里面这层保持原宽度：内容不重排不折行，像拉帘子一样被右边盖住 -->
+      <div class="sidebar-inner">
       <div class="sidebar-head">
         <!-- 工作模式：编程 / 通用，对应 #task-seg 的 code / work（对话档在输入框的执行方式下拉里） -->
         <div class="mode-toggle" id="mode-toggle" role="radiogroup" aria-label="工作模式">
@@ -188,7 +198,11 @@
           </button>
         </div>
       </div>
+      </div>
     </aside>
+
+    <!-- 侧栏右缘的拖宽热区：按住拖动才亮出强调色，光跟着指针走。压着分隔线但平时全透明 -->
+    <div class="sidebar-resize" id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整侧栏宽度" tabindex="0"></div>
 
     <!-- 主区 -->
     <main class="main" id="main">
@@ -408,11 +422,11 @@
               <button class="btn btn-ghost btn-sm" id="cp-model-goto" type="button">手输 / 改厂商</button>
             </div>
           </div>
-          <div class="cp-pop" id="cp-context-pop" aria-label="上下文水位" hidden>
-            <div class="cp-pop-head">上下文水位</div>
+          <div class="cp-pop" id="cp-context-pop" aria-label="上下文窗口" hidden>
+            <div class="cp-pop-head">上下文窗口</div>
             <div class="usage-bar" aria-hidden="true"><span class="usage-bar-fill" id="cp-context-bar"></span></div>
             <div class="cp-pop-read" id="cp-context-read">加载中…</div>
-            <p class="cp-pop-note">满了不是坏事：窗口外的对话会被摘要带走，不会直接丢。待压缩一直攒着，只会让下一轮更贵。</p>
+            <p class="cp-pop-note" id="cp-context-note">占用是「最近一次请求的输入 ÷ 模型窗口」。溢出窗口的旧对话随时汇总成摘要，不会丢；占用到 90%（任务已结束）或 96%（任务进行中）时会自动收紧下一轮携带的对话，压完接着把任务做完。</p>
             <div class="cp-pop-foot">
               <button class="btn btn-secondary btn-sm" id="cp-context-compress" type="button">立即压缩</button>
               <button class="btn btn-primary btn-sm cp-pop-main" id="cp-context-goto" type="button">去设置查看</button>
@@ -446,7 +460,7 @@
           </span>
           <span class="foot-spacer"></span>
           <button class="composer-meta-btn cp-context" id="cp-context" type="button"
-            aria-expanded="false" aria-controls="cp-context-pop" title="上下文水位">
+            aria-expanded="false" aria-controls="cp-context-pop" title="上下文窗口">
                 <span class="cp-meter" aria-hidden="true"><span class="cp-meter-fill" id="cp-meter-fill"></span></span>
                 <span id="cp-context-pct">—</span>
                 <span class="cp-badge" id="cp-context-badge" hidden>0</span>
@@ -655,7 +669,7 @@
         </div>
         <div class="market-panel" data-mtab="skills" hidden>
           <div class="market-filter">
-            <div class="chip-row" aria-hidden="true"></div>
+            <div class="chip-row" id="skill-cats" role="group" aria-label="按分类筛选技能"></div>
             <div class="page-search">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
               <label class="sr-only" for="skill-search">搜索技能模板</label>
@@ -938,6 +952,15 @@
                   <option value="anthropic">Anthropic Messages</option>
                 </select></div>
               <div class="field"><label class="field-label" for="set-max-tokens">最大 tokens</label><input class="input" id="set-max-tokens" type="number" min="64" max="1000000"></div>
+              <div class="field"><label class="field-label" for="set-context-window">上下文窗口</label><select class="input" id="set-context-window">
+                <option value="0">自动（按内置表认，认不出按 128k）</option>
+                <option value="128000">128K</option>
+                <option value="200000">200K</option>
+                <option value="400000">400K</option>
+                <option value="1000000">1M</option>
+                <option value="custom">自定义…</option>
+              </select></div>
+              <div class="field" id="set-context-window-custom-wrap" hidden><label class="field-label" for="set-context-window-custom">自定义窗口（token）</label><input class="input" id="set-context-window-custom" type="number" min="4096" max="10000000" step="1024" placeholder="例如 32000"></div>
               <div class="field" style="grid-column: span 2;"><label class="field-label" for="set-base-url">API 地址（留空回落厂商官方入口）</label><input class="input" id="set-base-url"></div>
               <div class="field"><label class="field-label" for="set-temperature">温度</label><input class="input" id="set-temperature" type="number" step="0.1" min="0" max="2"></div>
               <div class="field"><label class="field-label" for="set-llm-timeout">请求超时（秒）</label><input class="input" id="set-llm-timeout" type="number" min="3" max="600"></div>
@@ -1144,6 +1167,8 @@
 
     <!-- 右侧栏：三张入口卡（工作区文件 / 内置浏览器 / 终端），点开的都是已有的面板 -->
     <aside class="aux" id="aux" aria-label="右侧栏" hidden>
+      <!-- 右侧栏左缘的拖宽热区：跟侧栏同一套手感（拖动时才亮出辉光，跟着指针走） -->
+      <div class="aux-resize" id="aux-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整右侧栏宽度" tabindex="0"></div>
       <div class="aux-cards">
         <button class="aux-card" type="button" id="aux-files" data-key="aux.files">
           <span class="aux-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></span>
@@ -1587,7 +1612,15 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" id="modal"></div>
   </div>
 
+  <script src="/assets/i18n.js"></script>
   <script src="/assets/app.js"></script>
+  <script src="/assets/geo.js"></script>
+  <script src="/assets/skills.js"></script>
+  <script src="/assets/memory.js"></script>
+  <script src="/assets/schedules.js"></script>
+  <script src="/assets/tools.js"></script>
+  <script src="/assets/market.js"></script>
+  <script src="/assets/growth.js"></script>
   <script src="/assets/chrome.js"></script>
   <script src="/assets/settings2.js"></script>
   <script src="/assets/settings2-models.js"></script>

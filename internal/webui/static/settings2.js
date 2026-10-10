@@ -116,11 +116,14 @@ const S2 = (() => {
   const label = (text) => h('div', { class: 's2-section-label', text });
   const card = (...rows) => h('div', { class: 's2-card' }, ...rows);
   /** 一行：图标 / 标题与说明 / 右侧控件。disabled 时整行灰掉并挂「暂不支持」。 */
-  function row({ icon, title, desc, control, disabled, note, cls }) {
+  function row({ icon, title, desc, control, disabled, note, cls, titleExtra }) {
+    // titleExtra 是标题行里的附加节点（例如一个"有改动"徽标）。它必须作为**子节点**传进来，
+    // 不能拼进 title 字符串里——那样渲染出来是一句 "[object HTMLSpanElement]"。
     const r = h('div', { class: 's2-row' + (disabled ? ' is-disabled' : '') + (cls ? ' ' + cls : '') },
       icon ? h('span', { class: 's2-row-ico', html: ico(icon) }) : null,
       h('div', { class: 's2-row-text' },
-        h('strong', { class: 's2-row-title' }, title, disabled ? badge(typeof disabled === 'string' ? disabled : '暂不支持') : null),
+        h('strong', { class: 's2-row-title' }, title, titleExtra || null,
+          disabled ? badge(typeof disabled === 'string' ? disabled : '暂不支持') : null),
         desc ? h('small', { class: 's2-row-desc' }, desc) : null,
         note || null),
       control ? h('div', { class: 's2-row-ctl' }, control) : null);

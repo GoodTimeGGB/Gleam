@@ -84,7 +84,8 @@ html[data-theme="dark"] .chrome-tip .tip-key { color: rgba(26 27 25 / 0.6); }
 
 /* ---------- 右侧栏 ---------- */
 .aux {
-  width: clamp(300px, 34vw, 460px); min-height: 0; box-sizing: border-box;
+  /* --aux-w 由拖宽热区写入；没拖过就按这个 clamp 自适应 */
+  width: var(--aux-w, clamp(300px, 34vw, 460px)); min-height: 0; box-sizing: border-box;
   margin: 0 4px 4px 0; border: 1px solid var(--line); border-radius: var(--row-r);
   display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;
   background:
@@ -92,6 +93,21 @@ html[data-theme="dark"] .chrome-tip .tip-key { color: rgba(26 27 25 / 0.6); }
     radial-gradient(rgba(var(--ink-rgb, 0 0 0) / 0.10) 1px, transparent 1.2px) 0 0 / 9px 9px,
     var(--panel);
 }
+/* 贴着主区那一侧不留边、不留圆角：分隔线只由主面板的右边框出，跟左侧栏那边一样是一条线 */
+.aux { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.aux-resize {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 9px; z-index: 2;
+  cursor: col-resize; background: transparent;
+}
+.aux-resize::before {
+  content: ""; position: absolute; left: 1px; width: 7px; height: 180px;
+  top: 0; transform: translateY(calc(var(--drag-y, 0px) - 90px));
+  background: radial-gradient(closest-side, rgba(var(--accent-rgb) / 0.55), rgba(var(--accent-rgb) / 0) 100%);
+  opacity: 0; pointer-events: none;
+  transition: opacity 160ms var(--ease-out);
+}
+.aux-resize.is-dragging::before { opacity: 1; }
+.aux-resize:focus-visible { outline: none; background: rgba(var(--accent-rgb) / 0.18); }
 .aux[hidden] { display: none; }
 .aux-cards { display: flex; flex-direction: column; gap: 8px; width: min(220px, 80%); }
 .aux-card {
@@ -146,6 +162,13 @@ html.is-resizing, html.is-resizing * { cursor: ns-resize !important; user-select
 .term-prompt { font: 600 12px var(--font-mono); color: var(--accent-ink, var(--color-accent)); }
 #term-input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--color-fg); font: 12px var(--font-mono); }
 #term-input::placeholder { color: var(--color-fg-faint); font-family: var(--font-sans); }
+/* 终端这一行不画那圈焦点环：它是一条连边框都没有的行内输入，全局那条
+   `:focus-visible { box-shadow: … }` 落到它身上会变成一个强调色方框套住整行，
+   形状上跟"这段被选中了"撞车，而且把一行终端提示符衬得像块按钮。
+   焦点改画在**整行**上——与输入卡片同一个做法：焦点从"框"挪到"线"。
+   不索性去掉：光靠光标，键盘用户看不出焦点在哪。 */
+#term-input:focus-visible { box-shadow: none; }
+.term-line:focus-within { border-top-style: solid; border-top-color: rgba(var(--accent-rgb) / 0.5); }
 
 
 /* ---------- 关于 ---------- */

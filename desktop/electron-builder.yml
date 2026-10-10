@@ -5,11 +5,15 @@
 # SmartScreen 会拦一次，安装包本身是干净的。
 appId: ai.gleam.desktop
 productName: Gleam
+publish:
+  provider: github
+  owner: gleam-ai
+  repo: Gleam
 directories:
   # 只是兜底默认值：npm run pack:win / pack:linux 会把它顶到系统临时目录
   # （scripts/pack-desktop.mjs）——放在工作区里会让索引器抓住新产物，
   # 打包前的清理步骤会以 EBUSY 失败。
-  output: release
+  output: dist
 files:
   - dist/**/*
   - "!dist/**/*.map"

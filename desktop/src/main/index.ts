@@ -11,6 +11,7 @@ import { createMainWindow } from './window';
 import { installGlobalShortcut } from './shortcut';
 import { probeRuntimes, runtimeBinDirs } from './runtimes';
 import { Splash } from './splash';
+import { installUpdater } from './updater';
 
 const t0 = Date.now();
 const log = (msg: string) => console.log(`[desktop +${Date.now() - t0}ms] ${msg}`);
@@ -159,5 +160,7 @@ function run(): void {
     // 有坏消息时让那屏多留几秒（页面上有倒计时）；没坏消息时立刻收掉。
     if (holdSeconds > 0) await new Promise((r) => setTimeout(r, holdSeconds * 1000));
     splash?.close();
+
+    if (app.isPackaged) installUpdater();
   });
 }

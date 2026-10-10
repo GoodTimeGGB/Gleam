@@ -308,11 +308,18 @@ var settingsModes = map[string]bool{"auto": true, "plan_first": true, "interacti
 // SettingsView 返回设置页所需的完整视图（api_key 掩码，不回传明文）。
 func (a *Agent) SettingsView() map[string]any {
 	cfg := a.Cfg
-	// 密钥状态必须按"当前生效主机"判，而不是"凭证文件里有没有一把 key"：
-	// 后者会在换厂商后依旧显示"已设置"，而实际发出去的却是别家的凭证。
-	// keyHost 是这把 key 归属的主机，界面用它区分"没配"与"配给了别家"。
-	activeKey, keyHost := a.llmKeyFor(cfg.LLM.BaseURL, "")
-	apiKeySet := activeKey != ""
+	// 多模型时代：api_key_set 看默认模型有没有密钥，不再看旧的全局凭证文件。
+	var apiKeySet bool
+	var keyHost string
+	if def := a.defaultModelEntry(); def != nil {
+		apiKeySet = strings.TrimSpace(def.APIKey) != ""
+		keyHost = llm.KeyScope(def.BaseURL)
+	} else {
+		// 没有多模型配置时回退到旧逻辑
+		activeKey, kh := a.llmKeyFor(cfg.LLM.BaseURL, "")
+		apiKeySet = activeKey != ""
+		keyHost = kh
+	}
 	return map[string]any{
 		"persona": map[string]any{"name": cfg.Persona.Name, "style": cfg.Persona.Style},
 		"git": map[string]any{
@@ -377,6 +384,7 @@ func (a *Agent) SettingsView() map[string]any {
 			"api_key_set":      apiKeySet,
 			"api_key_host":     keyHost,
 			"api_key_host_cur": llm.KeyScope(cfg.LLM.BaseURL),
+			"models":           modelsView(cfg.LLM.Models, keyHost),
 		},
 		"scheduler": map[string]any{"enabled": cfg.Scheduler.Enabled},
 		"workspace": cfg.Workspace,
@@ -392,6 +400,224 @@ func tiersView(tiers map[string]string) map[string]any {
 		out[name] = model
 	}
 	return out
+}
+
+// modelsView 把多模型列表转成前端可消费的形式：密钥掩码，不回传明文。
+func modelsView(models []config.ModelEntry, _ string) []map[string]any {
+	out := make([]map[string]any, 0, len(models))
+	for _, m := range models {
+		out = append(out, modelEntryView(m))
+	}
+	return out
+}
+
+// modelEntryView 单条模型条目转前端视图（密钥掩码）。
+func modelEntryView(m config.ModelEntry) map[string]any {
+	keySet := strings.TrimSpace(m.APIKey) != ""
+	return map[string]any{
+		"id": m.ID, "name": m.Name,
+		"provider_id": m.ProviderID, "protocol": m.Protocol,
+		"base_url": m.BaseURL, "model": m.Model, "plan": m.Plan,
+		"is_default": m.IsDefault, "is_fast": m.IsFast,
+		"api_key_set": keySet,
+	}
+}
+
+// maskAPIKey 密钥掩码：前 4 + **** + 后 2，过短则全遮。
+func maskAPIKey(key string) string {
+	n := len([]rune(key))
+	if n <= 6 {
+		return "****"
+	}
+	runes := []rune(key)
+	return string(runes[:4]) + "****" + string(runes[n-2:])
+}
+
+// ---------- 多模型 CRUD ----------
+
+// modelEntryFromMap 从前端 JSON 解析一条模型条目（校验必填字段）。
+func modelEntryFromMap(m map[string]any) (config.ModelEntry, error) {
+	e := config.ModelEntry{}
+	str := func(k string) string {
+		if v, ok := m[k].(string); ok {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	e.ID = str("id")
+	e.Name = str("name")
+	e.ProviderID = str("provider_id")
+	e.Protocol = str("protocol")
+	e.BaseURL = str("base_url")
+	e.Model = str("model")
+	e.Plan = str("plan")
+	e.APIKey = str("api_key")
+	if b, ok := m["is_default"].(bool); ok {
+		e.IsDefault = b
+	}
+	if b, ok := m["is_fast"].(bool); ok {
+		e.IsFast = b
+	}
+	if e.Name == "" {
+		return e, fmt.Errorf("显示名不能为空")
+	}
+	if e.Model == "" {
+		return e, fmt.Errorf("模型 ID 不能为空")
+	}
+	return e, nil
+}
+
+// modelIndex 按 ID 查找模型条目在列表中的位置，未找到返回 -1。
+func (a *Agent) modelIndex(id string) int {
+	for i, m := range a.Cfg.LLM.Models {
+		if m.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// defaultModelEntry 返回标记为默认的模型条目，没有则返回列表第一条。
+func (a *Agent) defaultModelEntry() *config.ModelEntry {
+	for i := range a.Cfg.LLM.Models {
+		if a.Cfg.LLM.Models[i].IsDefault {
+			return &a.Cfg.LLM.Models[i]
+		}
+	}
+	if len(a.Cfg.LLM.Models) > 0 {
+		return &a.Cfg.LLM.Models[0]
+	}
+	return nil
+}
+
+// ModelsList 返回当前多模型列表（密钥掩码）。
+func (a *Agent) ModelsList() []map[string]any {
+	return modelsView(a.Cfg.LLM.Models, "")
+}
+
+// ModelAdd 添加一条模型配置。ID 为空时自动生成。
+func (a *Agent) ModelAdd(raw map[string]any) (map[string]any, error) {
+	entry, err := modelEntryFromMap(raw)
+	if err != nil {
+		return nil, err
+	}
+	if entry.ID == "" {
+		entry.ID = fmt.Sprintf("model-%d", time.Now().UnixNano()%100000)
+	}
+	if a.modelIndex(entry.ID) >= 0 {
+		return nil, fmt.Errorf("模型 ID %q 已存在", entry.ID)
+	}
+	if entry.IsDefault {
+		for i := range a.Cfg.LLM.Models {
+			a.Cfg.LLM.Models[i].IsDefault = false
+		}
+	}
+	a.Cfg.LLM.Models = append(a.Cfg.LLM.Models, entry)
+	if err := a.saveModelsOverlay(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"model": modelEntryView(entry), "models": a.ModelsList()}, nil
+}
+
+// ModelUpdate 修改一条模型配置（按 ID 匹配，字段覆盖）。
+func (a *Agent) ModelUpdate(id string, raw map[string]any) (map[string]any, error) {
+	idx := a.modelIndex(id)
+	if idx < 0 {
+		return nil, fmt.Errorf("模型 %q 不存在", id)
+	}
+	entry, err := modelEntryFromMap(raw)
+	if err != nil {
+		return nil, err
+	}
+	entry.ID = id
+	// 没带 api_key 字段时保留原密钥（前端编辑对话框留空表示不修改）。
+	if _, hasKey := raw["api_key"]; !hasKey {
+		entry.APIKey = a.Cfg.LLM.Models[idx].APIKey
+	}
+	if entry.IsDefault {
+		for i := range a.Cfg.LLM.Models {
+			a.Cfg.LLM.Models[i].IsDefault = false
+		}
+	}
+	a.Cfg.LLM.Models[idx] = entry
+	if err := a.saveModelsOverlay(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"model": modelEntryView(entry), "models": a.ModelsList()}, nil
+}
+
+// ModelDelete 删除一条模型配置。
+func (a *Agent) ModelDelete(id string) (map[string]any, error) {
+	idx := a.modelIndex(id)
+	if idx < 0 {
+		return nil, fmt.Errorf("模型 %q 不存在", id)
+	}
+	a.Cfg.LLM.Models = append(a.Cfg.LLM.Models[:idx], a.Cfg.LLM.Models[idx+1:]...)
+	if err := a.saveModelsOverlay(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"deleted": id, "models": a.ModelsList()}, nil
+}
+
+// ModelSetDefault 把某条模型设为新对话默认。
+func (a *Agent) ModelSetDefault(id string) (map[string]any, error) {
+	idx := a.modelIndex(id)
+	if idx < 0 {
+		return nil, fmt.Errorf("模型 %q 不存在", id)
+	}
+	for i := range a.Cfg.LLM.Models {
+		a.Cfg.LLM.Models[i].IsDefault = (i == idx)
+	}
+	if err := a.saveModelsOverlay(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"model": modelEntryView(a.Cfg.LLM.Models[idx]), "models": a.ModelsList()}, nil
+}
+
+// SetActiveModel 切换当前对话使用的模型（运行时热生效，不改配置列表）。
+func (a *Agent) SetActiveModel(id string) (map[string]any, error) {
+	idx := a.modelIndex(id)
+	if idx < 0 {
+		return nil, fmt.Errorf("模型 %q 不存在", id)
+	}
+	entry := a.Cfg.LLM.Models[idx]
+	if err := a.applyModelEntry(entry); err != nil {
+		return nil, err
+	}
+	return map[string]any{"active": modelEntryView(entry)}, nil
+}
+
+// ActiveModel 返回当前激活的模型条目视图（对话页下拉框高亮用）。
+func (a *Agent) ActiveModel() map[string]any {
+	for _, m := range a.Cfg.LLM.Models {
+		if m.IsDefault {
+			return modelEntryView(m)
+		}
+	}
+	return nil
+}
+
+// applyModelEntry 用一条 ModelEntry 重建主模型客户端（运行时热切换）。
+func (a *Agent) applyModelEntry(entry config.ModelEntry) error {
+	if a.Cfg.LLM.Provider == "mock" {
+		return nil
+	}
+	baseURL, model, protocol := llm.ResolveTarget(entry.ProviderID, entry.Plan, entry.BaseURL, entry.Model, entry.Protocol)
+	key := strings.TrimSpace(entry.APIKey)
+	if key == "" {
+		key, _ = a.llmKeyFor(baseURL, "")
+	}
+	a.LLM = llm.New(protocol, baseURL, key, model,
+		a.Cfg.LLM.Temperature, a.Cfg.LLM.MaxTokens, a.Cfg.LLM.TimeoutSecs)
+	return nil
+}
+
+// saveModelsOverlay 把多模型列表持久化到覆盖层（重启后仍生效）。
+func (a *Agent) saveModelsOverlay() error {
+	if err := a.Cfg.SaveOverlay(filepath.Join(a.Cfg.DataDir, config.OverlayFile)); err != nil {
+		return fmt.Errorf("已生效但保存失败: %w", err)
+	}
+	return nil
 }
 
 // ApplySettings 校验并把设置补丁应用到运行时（模型/风格/安全模式等即改即用），
@@ -759,10 +985,20 @@ func probeHasExplicitTarget(override map[string]any) bool {
 
 // TestLLMConnection 连通性探测：用当前生效配置（或表单覆盖值）发一次最小请求，
 // 把失败分类成人能看懂的结论。设置页"测试连接"用——配错不必等任务失败才暴露。
-// override 可带 protocol/provider_id/plan/base_url/model/api_key；api_key 留空表示用已保存的。
+// override 可带 protocol/provider_id/plan/base_url/model/api_key/model_id；
+// api_key 留空表示用已保存的；model_id 用于编辑时查找现有模型的密钥。
 func (a *Agent) TestLLMConnection(override map[string]any) map[string]any {
 	if a.Cfg.LLM.Provider == "mock" && !probeHasExplicitTarget(override) {
 		return map[string]any{"ok": true, "kind": "mock", "message": "当前为离线 Mock 模型，未发起真实网络调用"}
+	}
+	// 如果提供了 model_id 且没带 api_key，尝试从现有模型中获取密钥
+	if _, hasKey := override["api_key"]; !hasKey {
+		if mid, ok := override["model_id"].(string); ok && mid != "" {
+			idx := a.modelIndex(mid)
+			if idx >= 0 && strings.TrimSpace(a.Cfg.LLM.Models[idx].APIKey) != "" {
+				override["api_key"] = a.Cfg.LLM.Models[idx].APIKey
+			}
+		}
 	}
 	base, model, protocol, key := a.llmFormTarget(override)
 	if strings.TrimSpace(base) == "" || strings.TrimSpace(model) == "" {
@@ -800,6 +1036,15 @@ func (a *Agent) TestLLMConnection(override map[string]any) map[string]any {
 func (a *Agent) ListLLMModels(override map[string]any) map[string]any {
 	if a.Cfg.LLM.Provider == "mock" && !probeHasExplicitTarget(override) {
 		return map[string]any{"ok": true, "kind": "mock", "models": []llm.ModelInfo{}, "message": "离线 Mock 模型没有在线模型列表"}
+	}
+	// 如果提供了 model_id 且没带 api_key，尝试从现有模型中获取密钥
+	if _, hasKey := override["api_key"]; !hasKey {
+		if mid, ok := override["model_id"].(string); ok && mid != "" {
+			idx := a.modelIndex(mid)
+			if idx >= 0 && strings.TrimSpace(a.Cfg.LLM.Models[idx].APIKey) != "" {
+				override["api_key"] = a.Cfg.LLM.Models[idx].APIKey
+			}
+		}
 	}
 	base, _, protocol, key := a.llmFormTarget(override)
 	if strings.TrimSpace(base) == "" {

@@ -5,7 +5,7 @@
 //   node scripts/build-sidecar.mjs                 # host platform
 //   node scripts/build-sidecar.mjs win32 x64       # cross-compile (pure Go, no cgo)
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,15 +22,20 @@ if (!goos || !goarch) {
   process.exit(2);
 }
 
+// Read version from package.json so the sidecar reports the same version as the Electron shell.
+const pkg = JSON.parse(readFileSync(join(desktopDir, 'package.json'), 'utf8'));
+const version = pkg.version || '0.0.0';
+
 const outDir = join(desktopDir, '.sidecar', `${platform}-${arch}`);
 mkdirSync(outDir, { recursive: true });
 const out = join(outDir, goos === 'windows' ? 'gleam.exe' : 'gleam');
 
-const args = ['build', '-trimpath', '-ldflags', '-s -w', '-o', out, './cmd/gleam'];
+const ldflags = `-s -w -X gleam/internal/buildinfo.Version=${version}`;
+const args = ['build', '-trimpath', '-ldflags', ldflags, '-o', out, './cmd/gleam'];
 console.log(`[build-sidecar] GOOS=${goos} GOARCH=${goarch} go ${args.join(' ')}`);
 execFileSync('go', args, {
   cwd: repoRoot,
   stdio: 'inherit',
   env: { ...process.env, GOOS: goos, GOARCH: goarch, CGO_ENABLED: '0' },
 });
-console.log(`[build-sidecar] -> ${out}`);
+console.log(`[build-sidecar] -> ${out} (v${version})`);

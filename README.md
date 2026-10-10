@@ -254,6 +254,7 @@ Web UI 的 REST 接口与代码里注册的路由一一对应；清单与实现�
 | `GET /api/onboarding` · `POST /api/onboarding` | 首次引导的状态与提交 |
 | `GET /api/providers` | 厂商预设清单（官方入口 × 套餐形态） |
 | `POST /api/llm/models` · `POST /api/llm/test` | 拉取厂商模型列表 / 按表单当前值做一次最小连通测试 |
+| `GET /api/models` · `POST /api/models` · `PUT /api/models/{id}` · `DELETE /api/models/{id}` · `POST /api/models/{id}/default` · `POST /api/models/{id}/activate` | 多模型管理：列出 / 新增 / 修改 / 删除，切换默认模型与启用状态 |
 | `GET /api/account` · `POST /api/account/configure` · `POST /api/account/signup` · `POST /api/account/signin` · `POST /api/account/signout` · `POST /api/account/oauth` | 云端账号：状态、配置项目连接、注册 / 登录 / 退出 / OAuth |
 | `GET /api/local-data` | 本机数据目录的规模与构成 |
 | `GET /api/network` · `GET /api/connections` | 网络连接检测 / 出网与连接的常驻边界台账 |

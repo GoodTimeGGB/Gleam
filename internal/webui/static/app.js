@@ -2929,8 +2929,10 @@ const ComposerMeta = (() => {
   const ctxRead = $('#cp-context-read');
   const compressBtn = $('#cp-context-compress');
 
-  // 候选清单要用的三份本机数据。各自到齐时补画一次，不等最慢的那个。
-  let llmCfg = null;     // /api/settings 的 llm 段
+  // 多模型列表（/api/models）+ 运行时状态。modelsList 是用户配置的所有模型，
+  // liveModel 是当前真正在跑的模型 ID（/api/info），llmCfg 保留向后兼容（mock 检测等）。
+  let modelsList = [];   // GET /api/models 返回的 ModelEntry[]
+  let llmCfg = null;     // /api/settings 的 llm 段（mock 检测、旧字段兼容）
   let fetched = [];      // 最近一次「拉取厂商模型」的结果
   let liveModel = '';    // /api/info 的 model：当前**真的在跑**的模型
   let lastCtx = null;    // 最近一次 /api/context，供弹层重开时立刻画
@@ -2961,8 +2963,13 @@ const ComposerMeta = (() => {
     e.stopPropagation();
     const show = modelPop.hidden;
     closeAll();
-    // 列表是打开后才画的：画完再贴一次，否则量到的是空壳高度，弹层会压住按钮
-    if (show) { setOpen(modelBtn); paintModelList(); anchorPopover(modelPop, modelBtn); }
+    if (show) {
+      setOpen(modelBtn);
+      // 打开时拉最新模型列表，画完再贴一次定位
+      loadModels().then(() => { paintModelList(); anchorPopover(modelPop, modelBtn); });
+      paintModelList();
+      anchorPopover(modelPop, modelBtn);
+    }
   });
   ctxBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2973,33 +2980,30 @@ const ComposerMeta = (() => {
 
   /* ---------- 模型 ---------- */
 
-  // candidateModels 列出**能一键切**的模型：全部来自本机已有配置，不联网。
-  // 只给当前套餐的厂商默认模型——别的套餐要连 base_url 与协议一起换，
-  // 在这里点一下就会把 key 的绑定主机和入口对不上（F4 刚修过的那类错）。
-  function candidateModels() {
-    const out = [];
-    const seen = new Set();
-    const push = (id, kind) => {
-      const m = String(id || '').trim();
-      if (!m || seen.has(m)) return;
-      seen.add(m);
-      out.push({ id: m, kind });
-    };
-    const cur = liveModel || (llmCfg && llmCfg.model) || '';
-    push(cur, '当前');
-    if (llmCfg) {
-      push(llmCfg.fast_model, '辅助模型');
-      const tiers = llmCfg.tiers || {};
-      Object.keys(tiers).sort().forEach((k) => push(tiers[k], (TIER_CN[k] || k) + '档'));
+  // 从 /api/models 拉取完整列表，首次调用后缓存。
+  async function loadModels() {
+    try {
+      const r = await api('GET', '/api/models');
+      modelsList = (r && Array.isArray(r.models)) ? r.models : [];
+    } catch { modelsList = []; }
+    return modelsList;
+  }
+
+  // 当前激活的模型条目：优先 liveModel（真正在跑的），其次标记为默认的条目。
+  function activeEntry() {
+    const id = liveModel || '';
+    if (id) {
+      const m = modelsList.find((x) => x.model === id || x.id === id);
+      if (m) return m;
     }
-    fetched.forEach((m) => push(m, '厂商列表'));
-    return out;
+    return modelsList.find((x) => x.is_default) || modelsList[0] || null;
   }
 
   function paintModelChip() {
-    const m = liveModel || (llmCfg && llmCfg.model) || '';
+    const entry = activeEntry();
+    const m = entry ? (entry.model || entry.id) : '';
     const isMock = (llmCfg && llmCfg.provider === 'mock') || PROVIDER === 'mock';
-    const noKey = !isMock && !!llmCfg && llmCfg.api_key_set === false;
+    const noKey = !isMock && entry && entry.api_key_set === false;
     const unusable = !isMock && (!m || noKey);
     if (llmUnusable !== unusable) {
       llmUnusable = unusable;
@@ -3009,67 +3013,78 @@ const ComposerMeta = (() => {
     modelName.title = isMock ? '离线演示模型：不发起真实网络调用'
       : unusable ? '还没有可用的模型：去「设置 → 模型」选一个厂商并填入密钥'
         : (noKey ? m + ' · 没填密钥，现在跑不了' : m);
-    // 小标签只写本机配置里真有的东西：mock 档，或当前模型恰好是某个档位的模型
     const tagEl = $('#cp-model-tag');
     if (tagEl) {
       let tag = '';
       if (isMock) tag = 'mock';
-      else if (llmCfg && llmCfg.tiers && m) {
-        const k = Object.keys(llmCfg.tiers).find((key) => llmCfg.tiers[key] === m);
-        if (k) tag = TIER_CN[k] || k;
-      }
+      else if (entry && entry.is_default) tag = '默认';
+      else if (entry && entry.is_fast) tag = '辅助';
       tagEl.textContent = tag;
       tagEl.hidden = !tag;
     }
     modelCur.textContent = m || '未配置';
     const bits = [];
-    if (llmCfg && llmCfg.provider) {
-      // 显示名取 /api/providers 那一份（与设置页下拉同一个来源）；厂商表还没到齐时退回 id
-      const pv = PROVIDERS.find((x) => x.id === llmCfg.provider);
-      bits.push(pv ? pv.name : llmCfg.provider);
+    if (entry) {
+      const pv = PROVIDERS.find((x) => x.id === entry.provider_id);
+      bits.push(pv ? pv.name : (entry.provider_id || '自定义'));
     }
-    if (llmCfg && llmCfg.plan) bits.push(PLAN_CN[llmCfg.plan] || llmCfg.plan);
-    if (llmCfg && llmCfg.api_key_set === false) bits.push('无密钥');
+    if (entry && entry.plan) bits.push(PLAN_CN[entry.plan] || entry.plan);
+    if (entry && entry.api_key_set === false) bits.push('无密钥');
     modelProv.textContent = bits.join(' · ');
-    // 无密钥不是"能选个模型就好"：切了也调不通，所以芯片要自己红一下。
-    modelBtn.dataset.tone = unusable ? 'warn' : ''; // 没模型或没密钥：整颗按钮标黄，别让人以为能跑
+    modelBtn.dataset.tone = unusable ? 'warn' : '';
   }
 
   function paintModelList() {
     modelList.replaceChildren();
-    const items = candidateModels();
-    const cur = liveModel || (llmCfg && llmCfg.model) || '';
-    if (!items.length) {
-      modelList.appendChild(el('div', 'cp-pop-note', '本机还没有可选模型。拉取一份，或去设置里手输模型名。'));
+    if (!modelsList.length) {
+      modelList.appendChild(el('div', 'cp-pop-note', '本机还没有已配置的模型。去设置里添加一个，或拉取厂商模型列表。'));
       return;
     }
-    items.forEach((it) => {
+    const active = activeEntry();
+    const activeId = active ? active.id : '';
+    modelsList.forEach((entry) => {
       const b = el('button', 'plus-item');
       b.type = 'button';
-      const isCur = it.id === cur;
+      const isCur = entry.id === activeId;
       if (isCur) b.setAttribute('aria-current', 'true');
-      b.appendChild(el('span', null, it.id));
-      b.appendChild(el('span', 'plus-sub', isCur ? '使用中' : it.kind));
+      const pv = PROVIDERS.find((x) => x.id === entry.provider_id);
+      const vendorName = pv ? pv.name : (entry.provider_id || '自定义');
+      b.appendChild(el('span', null, entry.model || entry.id));
+      const subParts = [vendorName];
+      if (entry.is_default) subParts.push('默认');
+      if (entry.is_fast) subParts.push('辅助');
+      if (entry.api_key_set === false) subParts.push('无密钥');
+      b.appendChild(el('span', 'plus-sub', isCur ? '使用中' : subParts.join(' · ')));
       b.disabled = isCur;
-      b.addEventListener('click', () => switchModel(it.id));
+      b.addEventListener('click', () => switchModel(entry.id));
       modelList.appendChild(b);
     });
   }
 
   async function switchModel(id) {
     closeAll();
-    const prev = liveModel || (llmCfg && llmCfg.model) || '';
-    liveModel = id;          // 先乐观改名：下一行就要发请求，别让用户等一个来回才看到反馈
+    const prev = liveModel || (activeEntry() ? activeEntry().model : '');
+    const entry = modelsList.find((x) => x.id === id);
+    if (entry) liveModel = entry.model || id;
     paintModelChip();
     paintModelList();
     try {
-      const s = await api('POST', '/api/settings', { llm: { model: id } });
-      llmCfg = s.llm || llmCfg;
-      liveModel = (s.llm && s.llm.model) || id;
-      syncRuntimeState(s);   // 顺手把现场栏、密钥提示一起对上
+      const r = await api('POST', `/api/models/${encodeURIComponent(id)}/activate`);
+      const active = r && r.active;
+      if (active) {
+        liveModel = active.model || id;
+        // 同步更新 llmCfg 的关键字段，让 PROVIDER / API_KEY_SET 等全局量跟上
+        if (llmCfg) {
+          llmCfg.provider = active.provider_id || llmCfg.provider;
+          llmCfg.model = active.model || llmCfg.model;
+          llmCfg.api_key_set = active.api_key_set;
+        }
+        PROVIDER = active.provider_id || PROVIDER;
+        API_KEY_SET = !!active.api_key_set;
+      }
       toast(`已切到 ${liveModel}，下一个任务开始用它`, 'success');
     } catch (err) {
-      liveModel = prev;      // 失败要改回去：留着一个没生效的名字比报错更糟
+      liveModel = prev;
       paintModelChip();
       toast(`切换模型失败：${err.message}`, 'error');
     }
@@ -3179,8 +3194,8 @@ const ComposerMeta = (() => {
     // model(s)：/api/settings 到了就刷新（保存后也走这里）。
     model: (s) => {
       if (s && s.llm) llmCfg = s.llm;
-      paintModelChip();
-      if (!modelPop.hidden) paintModelList();
+      // 设置变了，模型列表可能也变了——静默刷新，等列表到了再画
+      loadModels().then(() => { paintModelChip(); if (!modelPop.hidden) paintModelList(); });
     },
     // context(ctx)：/api/context 到了就刷新（水位条的唯一画者）。
     context: (ctx) => {
@@ -3192,8 +3207,13 @@ const ComposerMeta = (() => {
     live: (id) => {
       if (!id) return;
       liveModel = id;
-      paintModelChip();
-      if (!modelPop.hidden) paintModelList();
+      // 如果模型列表还没加载，先拉一次再画
+      if (modelsList.length === 0) {
+        loadModels().then(() => { paintModelChip(); if (!modelPop.hidden) paintModelList(); });
+      } else {
+        paintModelChip();
+        if (!modelPop.hidden) paintModelList();
+      }
     },
   };
 })();
@@ -6522,9 +6542,98 @@ const ComposerControls = (() => {
   return { paint };
 })();
 
+/* ---------- 自动更新 ---------- */
+const Updater = (() => {
+  const desk = window.gleamDesktop;
+  if (!desk?.update) return { init() {} };
+
+  const btn = document.getElementById('cp-update-btn');
+  const btnText = document.getElementById('cp-update-text');
+  let state = 'idle'; // idle | available | downloading | downloaded
+  let version = '';
+
+  function showBtn() { if (btn) btn.hidden = false; }
+  function hideBtn() { if (btn) btn.hidden = true; }
+
+  function paintBtn(text, tone) {
+    if (!btnText) return;
+    btnText.textContent = text;
+    btn.dataset.tone = tone;
+    btn.title = tone === 'ready' ? `点击安装 Gleam ${version}` : `正在下载 Gleam ${version}`;
+  }
+
+  function openInstallDialog() {
+    if (state !== 'downloaded') return;
+    const overlay = document.createElement('div');
+    overlay.className = 'upd-overlay';
+    const dlg = document.createElement('div');
+    dlg.className = 'upd-dialog';
+    dlg.setAttribute('role', 'dialog');
+    dlg.setAttribute('aria-modal', 'true');
+    dlg.setAttribute('aria-labelledby', 'upd-dlg-title');
+    dlg.innerHTML = `
+      <h3 id="upd-dlg-title">安装 Gleam ${esc(version)}</h3>
+      <p>更新已经下载并验证。安装会退出并重新打开 Gleam。</p>
+      <div class="upd-actions">
+        <button type="button" class="btn btn-ghost btn-sm" data-act="later">稍后更新</button>
+        <button type="button" class="btn btn-primary btn-sm" data-act="restart">安装并重启应用</button>
+      </div>`;
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) { close(); return; }
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'later') close();
+      else if (act === 'restart') desk.update.restart();
+    });
+    dlg.querySelector('[data-act="restart"]').focus();
+
+    function close() { overlay.remove(); }
+  }
+
+  function init() {
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      if (state === 'downloaded') openInstallDialog();
+    });
+
+    desk.update.onStatus((s) => {
+      if (!s || !s.kind) return;
+      switch (s.kind) {
+        case 'checking':
+          break;
+        case 'available':
+          state = 'available'; version = s.version;
+          showBtn(); paintBtn('更新', 'available');
+          break;
+        case 'downloading':
+          state = 'downloading';
+          showBtn(); paintBtn(`更新 ${s.percent}%`, 'downloading');
+          break;
+        case 'downloaded':
+          state = 'downloaded'; version = s.version;
+          showBtn(); paintBtn('重启', 'ready');
+          break;
+        case 'not-available':
+          state = 'idle'; version = '';
+          hideBtn();
+          break;
+        case 'error':
+          state = 'idle'; version = '';
+          hideBtn();
+          break;
+      }
+    });
+  }
+
+  return { init };
+})();
+
 /* ---------- 启动（必须是本文件的最后一段，判据见 scripts/check-app-startup.py） ---------- */
 (async function init() {
   Onboarding.start();
+  Updater.init();
   fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
   connectSSE();
   setConn('up');

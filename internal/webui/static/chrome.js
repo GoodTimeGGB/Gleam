@@ -11,6 +11,39 @@ const deskHas = (fn) => !!(Desk && typeof Desk[fn] === 'function');
 document.documentElement.dataset.shell = Desk ? 'desktop' : 'browser';
 if (Desk && Desk.platform) document.documentElement.dataset.platform = Desk.platform;
 
+/* 简易 markdown → HTML：只处理 release notes 里用到的子集（标题、列表、粗体、换行）。
+ * 不做完整解析，够用就行。 */
+function renderNotes(md) {
+  if (!md) return '';
+  const lines = md.split('\n');
+  const out = [];
+  let inList = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('### ')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push('<h4>' + esc(trimmed.slice(4)) + '</h4>');
+    } else if (trimmed.startsWith('## ')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push('<h3>' + esc(trimmed.slice(3)) + '</h3>');
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      if (!inList) { out.push('<ul>'); inList = true; }
+      let content = trimmed.slice(2);
+      content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      out.push('<li>' + content + '</li>');
+    } else if (trimmed === '') {
+      if (inList) { out.push('</ul>'); inList = false; }
+    } else {
+      if (inList) { out.push('</ul>'); inList = false; }
+      let content = trimmed;
+      content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      out.push('<p>' + content + '</p>');
+    }
+  }
+  if (inList) out.push('</ul>');
+  return out.join('');
+}
+
 /* ============================================================
  * 键位表：动作 → 组合键。默认值写在这里，用户改过的存 localStorage('gleam-keys')。
  * ============================================================ */
@@ -408,7 +441,7 @@ const UpdateCheck = (() => {
       if (r.notes) {
         box.appendChild(el('div', 'field-label', '这次更新了什么'));
         const pre = el('div', 'update-notes');
-        pre.textContent = r.notes;
+        pre.innerHTML = renderNotes(r.notes);
         box.appendChild(pre);
       }
 

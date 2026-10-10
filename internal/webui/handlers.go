@@ -117,6 +117,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/settings", s.handleSettingsSave)
 	mux.HandleFunc("POST /api/llm/test", s.handleLLMTest)
 	mux.HandleFunc("POST /api/llm/models", s.handleLLMModels)
+	mux.HandleFunc("GET /api/models", s.handleModelsList)
+	mux.HandleFunc("POST /api/models", s.handleModelAdd)
+	mux.HandleFunc("PUT /api/models/{id}", s.handleModelUpdate)
+	mux.HandleFunc("DELETE /api/models/{id}", s.handleModelDelete)
+	mux.HandleFunc("POST /api/models/{id}/default", s.handleModelSetDefault)
+	mux.HandleFunc("POST /api/models/{id}/activate", s.handleModelActivate)
 	mux.HandleFunc("GET /api/ssh/hosts", s.handleSSHHosts)
 	mux.HandleFunc("DELETE /api/goals/{id}", s.handleGoalDelete)
 	mux.HandleFunc("GET /api/network", s.handleNetworkInfo)
@@ -862,6 +868,74 @@ func (s *Server) handleLLMModels(w http.ResponseWriter, r *http.Request) {
 		override = map[string]any{}
 	}
 	writeJSON(w, 200, s.Agent.ListLLMModels(override))
+}
+
+// ---------- 多模型 CRUD ----------
+
+func (s *Server) handleModelsList(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, map[string]any{
+		"models": s.Agent.ModelsList(),
+		"active": s.Agent.ActiveModel(),
+	})
+}
+
+func (s *Server) handleModelAdd(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, "参数解析失败")
+		return
+	}
+	view, err := s.Agent.ModelAdd(body)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
+func (s *Server) handleModelUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, "参数解析失败")
+		return
+	}
+	view, err := s.Agent.ModelUpdate(id, body)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
+func (s *Server) handleModelDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	view, err := s.Agent.ModelDelete(id)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
+func (s *Server) handleModelSetDefault(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	view, err := s.Agent.ModelSetDefault(id)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
+func (s *Server) handleModelActivate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	view, err := s.Agent.SetActiveModel(id)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, view)
 }
 
 func (s *Server) handleContextGet(w http.ResponseWriter, _ *http.Request) {

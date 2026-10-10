@@ -28,4 +28,14 @@ contextBridge.exposeInMainWorld('gleamDesktop', {
   /** 全局唤起快捷键：get() 读当前；set('') 取消。返回 { ok, accelerator, error? } */
   globalShortcut: (action: 'get' | 'set', accelerator?: string): Promise<{ ok: boolean; accelerator: string; error?: string }> =>
     ipcRenderer.invoke('desktop:globalShortcut', action, accelerator),
+  update: {
+    check: (): Promise<unknown> => ipcRenderer.invoke('desktop:update:check'),
+    status: (): Promise<unknown> => ipcRenderer.invoke('desktop:update:status'),
+    restart: (): Promise<unknown> => ipcRenderer.invoke('desktop:update:restart'),
+    onStatus: (cb: (s: unknown) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, s: unknown) => cb(s);
+      ipcRenderer.on('desktop:update-status', h);
+      return () => ipcRenderer.removeListener('desktop:update-status', h);
+    },
+  },
 });

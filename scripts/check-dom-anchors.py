@@ -68,7 +68,12 @@ SIDE_PREFIX = ("rail-", "ro-", "cp-", "bp-", "cx-", "cu-")
 # HTML 里指向 id 的无障碍属性（这些算"有人接"，只是接的人不是 JS）
 ARIA_TO = ("aria-controls", "aria-labelledby", "aria-describedby", "for")
 
-REF_RE = re.compile(r"""(?:\$\(\s*|getElementById\(\s*|querySelector\(\s*)['"]#([A-Za-z0-9_\-]+)['"]""")
+# getElementById 收的是裸 id（不带 #），$()/querySelector 才带。原来三者共用一条
+# "必须带 #" 的规则，于是 getElementById('cp-update-btn') 这种合法接线被判成"没人接"。
+REF_RE = re.compile(
+    r"""(?:\$\(\s*|querySelector\(\s*)['"]#([A-Za-z0-9_\-]+)['"]"""
+    r"""|getElementById\(\s*['"]([A-Za-z0-9_\-]+)['"]""")
+
 ID_ATTR_RE = re.compile(r'id="([A-Za-z0-9_\-]+)"')
 ID_ASSIGN_RE = re.compile(r"""\.id\s*=\s*['"]([A-Za-z0-9_\-]+)['"]""")
 # 设置页用 h(tag, { id: 'x' }) 这种属性对象建 DOM：只认 id="…" 会把这类定义
@@ -111,7 +116,7 @@ def refs_of(js_text):
         tail = js_text[m.end():m.end() + 8].lstrip()
         if tail.startswith("+"):
             continue
-        out.add(m.group(1))
+        out.add(m.group(1) or m.group(2))
     return out
 
 
@@ -140,7 +145,13 @@ def judge(js_text, html_text, label_js, label_html, say):
         say("index.html 里找不到任何 %s 锚点：现场栏被删了还是改了前缀？判据失效，请先修本脚本。"
             % "/".join(SIDE_PREFIX))
         return 1
-    orphans = [i for i in side_ids if ("#" + i) not in js_text and i not in aria_targets]
+        # 「有人接」有两种合法写法：$('#id') 里的 '#id'，与 getElementById('id') 的裸 id。
+    # 早先只查字面 "#id"，于是 getElementById 这种接线被误判成"没人接"。
+    def wired(name):
+        return (("#" + name) in js_text
+                or ("getElementById('" + name + "')") in js_text
+                or ('getElementById("' + name + '")') in js_text)
+    orphans = [i for i in side_ids if not wired(i) and i not in aria_targets]
     if orphans:
         say("这些锚点没有任何生产者（界面画出来了，那一格永远是占位）：")
         for o in orphans:

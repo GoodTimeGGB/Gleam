@@ -8,6 +8,7 @@ import { hardenContents, hardenSession, installIpc } from './security';
 import { Sidecar, type SidecarSpec } from './sidecar';
 import { createMainWindow } from './window';
 import { installGlobalShortcut } from './shortcut';
+import { installUpdater } from './updater';
 
 const t0 = Date.now();
 const log = (msg: string) => console.log(`[desktop +${Date.now() - t0}ms] ${msg}`);
@@ -118,5 +119,7 @@ function run(): void {
     win.on('closed', () => (win = null));
     win.webContents.once('did-finish-load', () => log('renderer did-finish-load'));
     await win.loadURL(`${APP_ORIGIN}/`);
+
+    if (app.isPackaged) installUpdater();
   });
 }

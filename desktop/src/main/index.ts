@@ -11,6 +11,7 @@ import { createMainWindow } from './window';
 import { installGlobalShortcut } from './shortcut';
 import { probeRuntimes, runtimeBinDirs } from './runtimes';
 import { Splash } from './splash';
+import { installTray, dispatchTrayAction, trayHintOnce } from './tray';
 import { installUpdater } from './updater';
 
 const t0 = Date.now();
@@ -67,7 +68,7 @@ function run(): void {
 
   app.on('web-contents-created', (_e, contents) => hardenContents(contents));
 
-  // Spike behaviour: closing the window quits (close-to-tray needs the tray, which is Phase 1).
+  // 窗口关掉不等于应用退出：✕ 收进托盘（见下面的 close 处理），所以这一条只在真退出时生效。
   app.on('window-all-closed', () => app.quit());
 
   app.on('before-quit', (e) => {
@@ -154,7 +155,17 @@ function run(): void {
     win = createMainWindow({ width: w, height: h });
     // 全局唤起快捷键：装在这一个窗口上（它才是"那个 Gleam"）
     installGlobalShortcut(win);
+    // 托盘：图标常驻通知区域，右键菜单见 tray.ts（菜单里的界面动作会回到渲染层执行）
+    installTray();
     win.on('closed', () => (win = null));
+    // ✕ = 收进托盘，不是退出：常驻托盘的应用就是这个约定，用户要退出走托盘菜单里的「退出 Gleam」。
+    // 真退出时 before-quit 已经把 quitting 立起来了，这里放行让窗口真的关掉。
+    win.on('close', (e) => {
+      if (quitting) return;
+      e.preventDefault();
+      win?.hide();
+      trayHintOnce();
+    });
     win.webContents.once('did-finish-load', () => log('renderer did-finish-load'));
     await win.loadURL(`${APP_ORIGIN}/`);
     // 有坏消息时让那屏多留几秒（页面上有倒计时）；没坏消息时立刻收掉。
@@ -162,5 +173,22 @@ function run(): void {
     splash?.close();
 
     if (app.isPackaged) installUpdater();
+
+    // 测试/排障用（与 GLEAM_SIDECAR_ARGS 同类的 knob）：把若干托盘动作按序打一遍，
+    // 好让"点菜单"这条链路在本机能被自动走一遍。形如
+    //   GLEAM_TRAY_ACTION="settings,new-chat,open-convo:<id>"
+    // 不带这个变量时一行都不会跑。
+    const demo = (process.env.GLEAM_TRAY_ACTION || '').split(',').map((s) => s.trim()).filter(Boolean);
+    demo.forEach((spec, i) => {
+      const [action, id] = spec.split(':');
+      if (action !== 'new-chat' && action !== 'settings' && action !== 'open-convo') {
+        log(`tray demo: 不认的动作 ${spec}`);
+        return;
+      }
+      setTimeout(() => {
+        log(`tray demo: ${spec}`);
+        dispatchTrayAction(id ? { action, id } : { action });
+      }, 6000 * (i + 1));
+    });
   });
 }

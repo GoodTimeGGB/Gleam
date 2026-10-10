@@ -38,4 +38,15 @@ contextBridge.exposeInMainWorld('gleamDesktop', {
       return () => ipcRenderer.removeListener('desktop:update-status', h);
     },
   },
+  /** 托盘：把界面自己的数据（当前语言 + 最近会话）推给壳，壳按它重建菜单；
+   *  菜单里点了东西再从这里回到界面执行（动作名见 src/main/tray.ts）。 */
+  tray: {
+    sync: (state: { lang: string; recents: { id: string; title: string }[] }): Promise<unknown> =>
+      ipcRenderer.invoke('desktop:tray:sync', state),
+    onAction: (cb: (a: unknown) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, a: unknown) => cb(a);
+      ipcRenderer.on('desktop:tray-action', h);
+      return () => ipcRenderer.removeListener('desktop:tray-action', h);
+    },
+  },
 });

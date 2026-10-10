@@ -37,6 +37,12 @@ extraResources:
   # 下面各平台的 icon 是另一回事——那个是打进可执行文件、给文件管理器和安装包看的。
   - from: ../assets/icons/gleam-512.png
     to: icon.png
+  # 托盘图标：512 那张缩到托盘会糊，所以单独带一套——Windows 用它认的多尺寸 ico，
+  # 其它平台用 32px png（主进程 tray.ts 按平台挑，dev 下退回仓库 assets）。
+  - from: ../assets/gleam.ico
+    to: tray/gleam.ico
+  - from: ../assets/icons/gleam-32.png
+    to: tray/gleam-32.png
 linux:
   target:
     - dir

@@ -40,7 +40,16 @@ function fromAppFrame(e: IpcMainInvokeEvent): boolean {
   }
 }
 
-export function installUpdater(): void {
+export interface UpdaterHost {
+  /**
+   * 更新安装前先放开窗口关闭：quitAndInstall() 会**先关掉所有窗口**再调 app.quit()，
+   * 而不经过 before-quit。壳那边"✕ 收进托盘"的拦截若不放行，窗口永远关不掉，
+   * 安装器就一直等着——用户点了「安装并重启」却什么都没发生。
+   */
+  allowClose: () => void;
+}
+
+export function installUpdater(host: UpdaterHost): void {
   // 更新要能原地替换自己。Windows（NSIS）可以；纯 Linux 的 `dir` 构建不行——
   // 只有 AppImage 会自己报上 $APPIMAGE。
   const supported = process.platform !== 'linux' || !!process.env.APPIMAGE;
@@ -85,7 +94,9 @@ export function installUpdater(): void {
     if (!fromAppFrame(e)) throw new Error('forbidden');
     if (!supported || latest.kind !== 'downloaded') return { ok: false };
     log('restarting to install the downloaded update');
-    // 等这次 IPC 回完再退出，否则界面等不到回执就被带走了。
+    // 先放开关闭拦截，再让 quitAndInstall 去关窗口；等这次 IPC 回完再动手，
+    // 否则界面等不到回执就被带走了。
+    host.allowClose();
     setImmediate(() => autoUpdater.quitAndInstall());
     return { ok: true };
   });

@@ -81,9 +81,10 @@ export const IPC_CHANNELS = [
   'desktop:update:check',
   'desktop:update:status',
   'desktop:update:restart',
+  'desktop:tray:sync',
 ] as const;
 /** main -> renderer push channel (window maximised / full-screen state). */
-export const IPC_EVENTS = ['desktop:window-state', 'desktop:update-status'] as const;
+export const IPC_EVENTS = ['desktop:window-state', 'desktop:update-status', 'desktop:tray-action'] as const;
 
 const EDIT_ACTIONS = ['undo', 'redo', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'selectAll'] as const;
 type EditAction = (typeof EDIT_ACTIONS)[number];

@@ -16,10 +16,7 @@ import (
 func worktreeFixture(t *testing.T) (srv *Server, dataDir, ws string) {
 	t.Helper()
 	srv, dataDir = newArchiveFixture(t)
-	ws = t.TempDir()
-	// CI 把 TMPDIR 设在 checkout 里，自己不设这条时 t.TempDir() 会落在仓库内，
-	// git 向上就能找到外层仓库，于是「普通目录」被如实报成仓库、断言全反。
-	t.Setenv("GIT_CEILING_DIRECTORIES", ws)
+	ws = dirOutsideRepo(t)
 	srv.Agent.Cfg.Workspace = ws
 	srv.Agent.Cfg.Worktrees.Enabled = true
 	return srv, dataDir, ws
@@ -187,4 +184,24 @@ func TestWorktreeRemoveDirtyNeedsForce(t *testing.T) {
 	if _, err := os.Stat(meta.Path); !os.IsNotExist(err) {
 		t.Errorf("force 之后目录应当没了，stat err = %v", err)
 	}
+}
+
+// dirOutsideRepo 造一个**在仓库之外**的临时目录。
+//
+// GHA 的 Windows runner 把 TEMP 设成 <workspace>/.ci-tmp（见 .github/workflows/ci.yml，
+// 为躲开 RUNNER~1 短路径），于是 t.TempDir() 造出来的"普通目录"本身就在 git 仓库里——
+// git 向上就能找到外层仓库，"不是仓库"的断言于是全部反过来。改在缓存目录下建，
+// 就与 TEMP 怎么设无关了。
+func dirOutsideRepo(t *testing.T) string {
+	t.Helper()
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Skipf("没有可用的缓存目录，无法保证临时目录落在仓库之外：%v", err)
+	}
+	d, err := os.MkdirTemp(base, "gleam-norepo-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	return d
 }

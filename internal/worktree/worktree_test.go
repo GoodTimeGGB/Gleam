@@ -244,9 +244,7 @@ func TestCreateOutsideRepo(t *testing.T) {
 	}
 	dataDir := t.TempDir()
 	m := &Manager{DataDir: dataDir}
-	plain := t.TempDir() // 刻意不 git init
-	// 同上：把 git 的向上查找截在 plain，否则 CI 的 TMPDIR 落在 checkout 内会「找到」外层仓库。
-	t.Setenv("GIT_CEILING_DIRECTORIES", plain)
+	plain := dirOutsideRepo(t) // 刻意不 git init，且必须在仓库之外
 	if _, err := m.Create(context.Background(), "norepo", plain, ""); err == nil {
 		t.Fatal("不是仓库时必须失败")
 	} else if !strings.Contains(err.Error(), "仓库") {
@@ -361,4 +359,24 @@ func TestFetchRecordsEgress(t *testing.T) {
 	if got != 1 {
 		t.Errorf("fetch 尝试了就该记一笔，实际记了 %d 次", got)
 	}
+}
+
+// dirOutsideRepo 造一个**在仓库之外**的临时目录。
+//
+// GHA 的 Windows runner 把 TEMP 设成 <workspace>/.ci-tmp（见 .github/workflows/ci.yml，
+// 为躲开 RUNNER~1 短路径），于是 t.TempDir() 造出来的"普通目录"本身就在 git 仓库里——
+// git 向上就能找到外层仓库，"不是仓库"的断言于是全部反过来。改在缓存目录下建，
+// 就与 TEMP 怎么设无关了。
+func dirOutsideRepo(t *testing.T) string {
+	t.Helper()
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Skipf("没有可用的缓存目录，无法保证临时目录落在仓库之外：%v", err)
+	}
+	d, err := os.MkdirTemp(base, "gleam-norepo-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	return d
 }

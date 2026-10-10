@@ -19,7 +19,7 @@ func TestFileTools_WriteReadList(t *testing.T) {
 	ctx := context.Background()
 
 	// write（含子目录自动创建）
-	out, err := tools.requireResolve(map[string]any{}, "path")
+	out, err := tools.requireResolve(ctx, map[string]any{}, "path")
 	_ = out
 	if err == nil {
 		t.Error("空参数应报错")
@@ -180,7 +180,7 @@ func TestFileTools_LargeReadTruncates(t *testing.T) {
 
 func TestFileTools_PathAware(t *testing.T) {
 	tools, ws := newTools(t)
-	paths := tools.Paths(map[string]any{"path": "a.txt", "src": "b.txt"})
+	paths := tools.Paths(context.Background(), map[string]any{"path": "a.txt", "src": "b.txt"})
 	if len(paths) != 2 {
 		t.Fatalf("Paths = %v", paths)
 	}

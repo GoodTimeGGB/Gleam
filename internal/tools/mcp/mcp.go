@@ -1,17 +1,13 @@
 // Package mcp 实现轻量级 MCP（Model Context Protocol）连接器：
-// 通过 stdio JSON-RPC 2.0 与外部 MCP 服务器通信（initialize / tools/list / tools/call），
-// 并把远端工具适配为 Gleam 的 types.Tool 注册进注册表。纯标准库实现。
+// 以 stdio 或 streamable-http 两种传输做 JSON-RPC 2.0（initialize / tools/list / tools/call），
+// 并把对端工具适配为 Gleam 的 types.Tool 注册进注册表。纯标准库实现。
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"gleam/internal/buildinfo"
@@ -25,8 +21,14 @@ type ServerConfig struct {
 	Name    string   `json:"name"`
 	Command string   `json:"command"`
 	Args    []string `json:"args,omitempty"`
-	Trust   string   `json:"trust,omitempty"` // readonly | user_approved | full_access
-	Enabled bool     `json:"enabled,omitempty"`
+	// Env 追加到子进程环境（在继承的父环境之上）。API_KEY 这类凭据就走它。
+	Env map[string]string `json:"env,omitempty"`
+	// URL 非空 = 远端 streamable-http 服务器（不起进程）；此时 Command/Args/Env 都不看。
+	URL string `json:"url,omitempty"`
+	// Headers 远端请求头。凭据（Authorization 之类）走这里，只进请求头，不写日志。
+	Headers map[string]string `json:"headers,omitempty"`
+	Trust   string            `json:"trust,omitempty"` // readonly | user_approved | full_access
+	Enabled bool              `json:"enabled,omitempty"`
 }
 
 // ToolDef MCP 远端工具定义。
@@ -50,65 +52,34 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// Client 与单个 MCP 服务器进程的连接。
+// Client 与一个 MCP 服务器的连接（本机 stdio 子进程，或远端 streamable-http）。
+//
+// 握手、工具列表、工具调用对两种形态完全一样，差异都在 transport 里。
 type Client struct {
 	Name  string
 	Info  map[string]any // initialize 返回的 serverInfo/capabilities
 	Tools []ToolDef
 
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	stderr io.ReadCloser
-
-	mu      sync.Mutex
-	nextID  int64
-	pending map[int64]chan rpcMessage
-	closed  bool
-
+	tr   transport
 	logf func(format string, args ...any)
 }
 
-// Start 启动 MCP 服务器进程并完成 initialize 握手。
+// Start 连上 MCP 服务器（按 cfg.URL 是否为空选择远端 / 本机）并完成 initialize 握手。
 func Start(ctx context.Context, cfg ServerConfig, logf func(string, ...any)) (*Client, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	cmd := exec.Command(cfg.Command, cfg.Args...)
-	stdin, err := cmd.StdinPipe()
+	var tr transport
+	var err error
+	if strings.TrimSpace(cfg.URL) != "" {
+		tr, err = newHTTPTransport(cfg, logf)
+	} else {
+		tr, err = newStdioTransport(cfg, logf)
+	}
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	stderr, _ := cmd.StderrPipe()
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("mcp: 启动服务器 %q 失败: %w", cfg.Name, err)
-	}
-	c := &Client{
-		Name:    cfg.Name,
-		cmd:     cmd,
-		stdin:   stdin,
-		stdout:  bufio.NewReaderSize(stdout, 1024*1024),
-		stderr:  stderr,
-		pending: map[int64]chan rpcMessage{},
-		logf:    logf,
-	}
-	// 丢弃 stderr 日志（避免阻塞子进程）
-	if stderr != nil {
-		go func() {
-			buf := make([]byte, 4096)
-			for {
-				if _, err := stderr.Read(buf); err != nil {
-					return
-				}
-			}
-		}()
-	}
-	go func() { _ = cmd.Wait() }() // 回收子进程，避免僵尸
-	go c.readLoop()
+	c := &Client{Name: cfg.Name, tr: tr, logf: logf}
 
 	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -124,7 +95,7 @@ func Start(ctx context.Context, cfg ServerConfig, logf func(string, ...any)) (*C
 	var info map[string]any
 	_ = json.Unmarshal(initResult, &info)
 	c.Info = info
-	c.notify("notifications/initialized", nil)
+	_ = c.notify("notifications/initialized", nil)
 
 	var list struct {
 		Tools []ToolDef `json:"tools"`
@@ -139,113 +110,12 @@ func Start(ctx context.Context, cfg ServerConfig, logf func(string, ...any)) (*C
 	return c, nil
 }
 
-// readLoop 读取子进程的 JSON-RPC 消息并分发。
-func (c *Client) readLoop() {
-	for {
-		line, err := c.stdout.ReadString('\n')
-		if err != nil {
-			c.failPending(fmt.Errorf("mcp: %s 连接关闭", c.Name))
-			return
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var msg rpcMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
-		}
-		if len(msg.ID) > 0 {
-			var id int64
-			if err := json.Unmarshal(msg.ID, &id); err == nil {
-				c.mu.Lock()
-				ch := c.pending[id]
-				delete(c.pending, id)
-				c.mu.Unlock()
-				if ch != nil {
-					ch <- msg
-				}
-				continue
-			}
-		}
-		// 服务器发起的通知/请求：MVP 只记录日志
-		if msg.Method != "" {
-			c.logf("mcp[%s] 收到 %s", c.Name, msg.Method)
-		}
-	}
+func (c *Client) notify(method string, params any) error {
+	return c.tr.notify(method, params)
 }
 
-func (c *Client) failPending(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.closed = true
-	for id, ch := range c.pending {
-		ch <- rpcMessage{Error: &rpcError{Code: -32000, Message: err.Error()}}
-		delete(c.pending, id)
-	}
-}
-
-func (c *Client) notify(method string, params any) {
-	c.send(rpcMessage{JSONRPC: "2.0", Method: method, Params: paramsRaw(params)})
-}
-
-func paramsRaw(p any) json.RawMessage {
-	if p == nil {
-		return nil
-	}
-	b, _ := json.Marshal(p)
-	return b
-}
-
-func (c *Client) send(msg rpcMessage) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return fmt.Errorf("mcp: %s 已关闭", c.Name)
-	}
-	b, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	_, err = c.stdin.Write(append(b, '\n'))
-	return err
-}
-
-// call 发送请求并等待响应。
 func (c *Client) call(ctx context.Context, method string, params any, out any) error {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return fmt.Errorf("mcp: %s 已关闭", c.Name)
-	}
-	c.nextID++
-	id := c.nextID
-	ch := make(chan rpcMessage, 1)
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	idRaw, _ := json.Marshal(id)
-	if err := c.send(rpcMessage{JSONRPC: "2.0", ID: idRaw, Method: method, Params: paramsRaw(params)}); err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return err
-	}
-	select {
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return ctx.Err()
-	case msg := <-ch:
-		if msg.Error != nil {
-			return fmt.Errorf("mcp: %s %s 错误(%d): %s", c.Name, method, msg.Error.Code, msg.Error.Message)
-		}
-		if out != nil && len(msg.Result) > 0 {
-			return json.Unmarshal(msg.Result, out)
-		}
-		return nil
-	}
+	return c.tr.call(ctx, method, params, out)
 }
 
 // CallTool 调用远端工具，拼接文本内容返回。
@@ -282,20 +152,11 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 	return map[string]any{"text": text}, nil
 }
 
-// Close 关闭连接并结束子进程。
+// Close 关掉这条连接（本机进程会被杀掉；远端只丢弃会话）。
 func (c *Client) Close() {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return
+	if c.tr != nil {
+		_ = c.tr.close()
 	}
-	c.closed = true
-	c.mu.Unlock()
-	_ = c.stdin.Close()
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-	}
-	c.failPending(fmt.Errorf("mcp: %s 已关闭", c.Name))
 }
 
 // ---------- Gleam 工具适配 ----------

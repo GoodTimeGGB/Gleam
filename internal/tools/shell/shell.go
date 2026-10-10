@@ -61,7 +61,7 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 
 	// cwd 走与文件工具同一套边界校验（P5-1）：命令的工作目录不能是"任何地方"，
 	// 否则模型可以用 `cd /` 把后续相对路径操作带到工作区之外。
-	cwd, err := t.resolveCWD(toolutil.Str(args, "cwd"))
+	cwd, err := t.resolveCWD(ctx, toolutil.Str(args, "cwd"))
 	if err != nil {
 		return nil, err
 	}
@@ -137,11 +137,13 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 }
 
 // resolveCWD 校验工作目录：空值放行（继承进程当前目录）；非空必须落在工作区内。
-func (t *Tool) resolveCWD(cwd string) (string, error) {
+//
+// 边界优先取 ctx 里那份（本次任务的边界，例如它自己的 worktree），没有才回落构造时的 Roots。
+func (t *Tool) resolveCWD(ctx context.Context, cwd string) (string, error) {
 	if strings.TrimSpace(cwd) == "" {
 		return "", nil
 	}
-	abs, err := toolutil.ResolveInRoots(cwd, t.Roots)
+	abs, err := toolutil.ResolveInRoots(cwd, toolutil.RootsFrom(ctx, t.Roots))
 	if err != nil {
 		return "", fmt.Errorf("工作目录不可用：%w", err)
 	}

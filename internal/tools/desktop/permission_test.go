@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -38,10 +39,10 @@ func TestScreenshotDeclaresWritePermission(t *testing.T) {
 	if tool.Permission() != types.PermissionUserApproved {
 		t.Errorf("应为中风险，实际 %v", tool.Permission())
 	}
-	if got := tool.Paths(map[string]any{"path": "/tmp/a.png"}); len(got) != 1 || got[0] != "/tmp/a.png" {
+	if got := tool.Paths(context.Background(), map[string]any{"path": "/tmp/a.png"}); len(got) != 1 || got[0] != "/tmp/a.png" {
 		t.Errorf("Paths 应透传目标路径，实际 %v", got)
 	}
-	if got := tool.Paths(map[string]any{}); got != nil {
+	if got := tool.Paths(context.Background(), map[string]any{}); got != nil {
 		t.Errorf("未指定路径应返回 nil（= 无法确认操作路径），实际 %v", got)
 	}
 }

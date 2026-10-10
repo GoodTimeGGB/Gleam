@@ -41,8 +41,12 @@ type Provider func() Config
 
 const defaultTimeout = 60 * time.Second
 
-// run 执行一条 git 命令。参数是分离的 argv，永不经过 shell。
-func (c Config) run(ctx context.Context, dir string, args ...string) (string, error) {
+// Run 执行一条 git 命令。参数是分离的 argv，永不经过 shell。
+//
+// 导出是给 worktree 用的：建/删 worktree 也是"以 argv 调 git"这同一件事。
+// 两边各写一份 run，超时、错误携带、stdout/stderr 的取舍迟早会漂开——
+// 而漂开的地方正是排障时最需要一致的地方。
+func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 	full := append([]string{"-C", dir}, args...)
@@ -65,16 +69,26 @@ func (c Config) run(ctx context.Context, dir string, args ...string) (string, er
 	return out, nil
 }
 
+// run 这一层保留：Config 上的动作都从它走，调用点不必每处都写包名。
+func (c Config) run(ctx context.Context, dir string, args ...string) (string, error) {
+	return Run(ctx, dir, args...)
+}
+
 // resolveDir 把工作目录收敛到工作区内。
-func (c Config) resolveDir(raw string) (string, error) {
-	if strings.TrimSpace(c.Roots[0]) == "" && strings.TrimSpace(raw) == "" {
-		return "", fmt.Errorf("没有工作区，也没有指定目录：git 动作需要一个仓库")
-	}
+//
+// 边界优先取 ctx 里那份（本次任务的边界，例如它自己的 worktree），没有才回落构造时的 Roots；
+// 取第一个根时先判空：Roots 空着而 ctx 也没给边界，应当报「没有工作区」，
+// 原来那句 c.Roots[0] 会在这种情形下直接 panic——桌面端没选工作区时就是这条路径。
+func (c Config) resolveDir(ctx context.Context, raw string) (string, error) {
+	roots := toolutil.RootsFrom(ctx, c.Roots)
 	base := strings.TrimSpace(raw)
 	if base == "" {
-		base = c.Roots[0]
+		if len(roots) == 0 || strings.TrimSpace(roots[0]) == "" {
+			return "", fmt.Errorf("没有工作区，也没有指定目录：git 动作需要一个仓库")
+		}
+		base = roots[0]
 	}
-	dir, err := toolutil.ResolveInRoots(base, c.Roots)
+	dir, err := toolutil.ResolveInRoots(base, roots)
 	if err != nil {
 		return "", err
 	}
@@ -89,9 +103,11 @@ func (c Config) isRepo(ctx context.Context, dir string) error {
 	return nil
 }
 
-// isValidRefName 拦掉注定失败、或会被 git 当成选项的名字。
+// ValidRefName 拦掉注定失败、或会被 git 当成选项的名字。
 // 允许中文与常见符号（git 支持），只挡住空白、控制字符、前导 - 与 git 明确禁止的字符。
-func isValidRefName(name string) bool {
+//
+// 导出是给 worktree 用的：它要拿任务 ID 现拼一条分支名，判据必须是同一份。
+func ValidRefName(name string) bool {
 	if name == "" || strings.HasPrefix(name, "-") || strings.HasPrefix(name, ".") {
 		return false
 	}
@@ -142,10 +158,10 @@ func (t *branchTool) Execute(ctx context.Context, args map[string]any) (any, err
 		return nil, err
 	}
 	name := c.withPrefix(strings.TrimSpace(raw))
-	if !isValidRefName(name) {
+	if !ValidRefName(name) {
 		return nil, fmt.Errorf("分支名 %q 不合法", name)
 	}
-	dir, err := c.resolveDir(toolutil.Str(args, "dir"))
+	dir, err := c.resolveDir(ctx, toolutil.Str(args, "dir"))
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +170,7 @@ func (t *branchTool) Execute(ctx context.Context, args map[string]any) (any, err
 	}
 
 	from := strings.TrimSpace(toolutil.Str(args, "from"))
-	if from != "" && !isValidRefName(from) {
+	if from != "" && !ValidRefName(from) {
 		return nil, fmt.Errorf("起点 %q 不合法", from)
 	}
 
@@ -203,7 +219,7 @@ func (t *commitTool) Execute(ctx context.Context, args map[string]any) (any, err
 	if strings.TrimSpace(msg) == "" {
 		return nil, fmt.Errorf("提交说明不能为空")
 	}
-	dir, err := c.resolveDir(toolutil.Str(args, "dir"))
+	dir, err := c.resolveDir(ctx, toolutil.Str(args, "dir"))
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +276,7 @@ func (t *pushTool) Schema() map[string]any {
 
 func (t *pushTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	c := t.p()
-	dir, err := c.resolveDir(toolutil.Str(args, "dir"))
+	dir, err := c.resolveDir(ctx, toolutil.Str(args, "dir"))
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +287,7 @@ func (t *pushTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if remote == "" {
 		remote = "origin"
 	}
-	if !isValidRefName(remote) {
+	if !ValidRefName(remote) {
 		return nil, fmt.Errorf("远端名 %q 不合法", remote)
 	}
 	branch := strings.TrimSpace(toolutil.Str(args, "branch"))
@@ -283,7 +299,7 @@ func (t *pushTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if branch == "HEAD" {
 		return nil, fmt.Errorf("当前是游离 HEAD，推之前先切到一个分支")
 	}
-	if !isValidRefName(branch) {
+	if !ValidRefName(branch) {
 		return nil, fmt.Errorf("分支名 %q 不合法", branch)
 	}
 

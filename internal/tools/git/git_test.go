@@ -12,12 +12,12 @@ func TestIsValidRefName(t *testing.T) {
 	ok := []string{"feature-x", "修复登录", "a/b/c", "v1.0"}
 	bad := []string{"", "-x", ".hidden", "a b", "a~b", "a^b", "a:b", "a?b", "a*b", "a..b", "a/", "a\\b"}
 	for _, s := range ok {
-		if !isValidRefName(s) {
+		if !ValidRefName(s) {
 			t.Errorf("%q 应合法", s)
 		}
 	}
 	for _, s := range bad {
-		if isValidRefName(s) {
+		if ValidRefName(s) {
 			t.Errorf("%q 应被拒绝", s)
 		}
 	}

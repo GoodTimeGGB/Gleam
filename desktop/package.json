@@ -2,19 +2,21 @@
   "name": "gleam-desktop",
   "productName": "Gleam",
   "version": "1.1.1",
-  "description": "Gleam desktop shell (Electron) - Phase 0 spike",
+  "description": "Gleam — a local-first desktop AI agent. Configuration and data stay on this machine.",
   "author": "Gleam",
   "license": "UNLICENSED",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
     "build:sidecar": "node scripts/build-sidecar.mjs",
+    "fetch:runtimes": "node scripts/fetch-runtimes.mjs",
     "build:ts": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "npm run build:sidecar && npm run build:ts",
     "dev": "npm run build && electron .",
     "start": "electron .",
-    "pack:linux": "npm run build && electron-builder --linux dir"
+    "pack:win": "npm run build && node scripts/fetch-runtimes.mjs win32 x64 && node scripts/pack-desktop.mjs --win nsis",
+    "pack:linux": "npm run build && node scripts/pack-desktop.mjs --linux dir"
   },
   "devDependencies": {
     "@types/node": "22.19.0",

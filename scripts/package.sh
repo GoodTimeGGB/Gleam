@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # 构建全平台二进制并打包发布物（纯 Go 交叉编译，零 cgo）：
 #
-#   dist/Gleam-Windows-x86_64-<date>.exe               Windows 控制台 CLI（含图标）
-#   dist/Gleam-Desktop-Windows-x86_64-<date>.exe       Windows 桌面版（无黑窗 + 托盘）
-#   dist/Gleam-macOS-Intel-x86_64-<date>               macOS Intel
-#   dist/Gleam-macOS-AppleSilicon-arm64-<date>         macOS Apple Silicon (M 系列)
-#   dist/Gleam-Linux-x86_64-<date>                     Linux x86_64
-#   dist/webui-static-<date>.zip                       内嵌前端三件套
-#   dist/website-<date>.zip                            官网静态站点
-#   dist/Gleam-release-<date>.zip                      全平台合集 + 说明 + 校验和
-#   dist/SHA256SUMS-<date>.txt                         今日产物校验和
+#   dist/gleam-windows-amd64-<date>.exe           Windows 控制台 CLI（含图标）
+#   dist/gleam-desktop-windows-amd64-<date>.exe   Windows 桌面版（无黑窗 + 托盘）
+#   dist/gleam-darwin-amd64-<date>                macOS Intel
+#   dist/gleam-darwin-arm64-<date>                macOS Apple Silicon (M 系列)
+#   dist/gleam-linux-amd64-<date>                 Linux x86_64
+#   dist/webui-static-<date>.zip                  内嵌前端三件套
+#   dist/website-<date>.zip                       官网静态站点
+#   dist/Gleam-release-<date>.zip                 全平台合集 + 说明 + 校验和
+#   dist/SHA256SUMS-<date>.txt                    今日产物校验和
 #
-# 同时同步一份「latest」无日期命名（dist/Gleam-Windows-x86_64.exe 等），便于官网固定链接。
+# 同时同步一份「latest」无日期命名（dist/gleam-windows-amd64.exe 等）——
+# **这些无日期名就是 Release 资产名**：官网的下载按钮指向
+# `releases/latest/download/<无日期名>`，所以上传时不需要再改名，版本号只活在 tag 里。
+# Electron 安装包的资产名（`Gleam-Setup.exe`）由 desktop/electron-builder.yml 的
+# artifactName 决定，同样是去版本号的固定名。
 #
 # 用法：
 #   bash scripts/package.sh            # 日期取今天
@@ -55,38 +59,34 @@ build_one() {
   return 1
 }
 
-build_one windows amd64 "$DIST/Gleam-Windows-x86_64-$DATE.exe" ""
-build_one windows amd64 "$DIST/Gleam-Desktop-Windows-x86_64-$DATE.exe" "-H=windowsgui"
-build_one darwin  amd64 "$DIST/Gleam-macOS-Intel-x86_64-$DATE" ""
-build_one darwin  arm64 "$DIST/Gleam-macOS-AppleSilicon-arm64-$DATE" ""
-build_one linux   amd64 "$DIST/Gleam-Linux-x86_64-$DATE" ""
+build_one windows amd64 "$DIST/gleam-windows-amd64-$DATE.exe" ""
+build_one windows amd64 "$DIST/gleam-desktop-windows-amd64-$DATE.exe" "-H=windowsgui"
+build_one darwin  amd64 "$DIST/gleam-darwin-amd64-$DATE" ""
+build_one darwin  arm64 "$DIST/gleam-darwin-arm64-$DATE" ""
+build_one linux   amd64 "$DIST/gleam-linux-amd64-$DATE" ""
 
 echo "[2/5] 同步 latest 命名（无日期）"
-cp -f "$DIST/Gleam-Windows-x86_64-$DATE.exe"            "$DIST/Gleam-Windows-x86_64.exe"
-cp -f "$DIST/Gleam-Desktop-Windows-x86_64-$DATE.exe"    "$DIST/Gleam-Desktop-Windows-x86_64.exe"
-cp -f "$DIST/Gleam-macOS-Intel-x86_64-$DATE"            "$DIST/Gleam-macOS-Intel-x86_64"
-cp -f "$DIST/Gleam-macOS-AppleSilicon-arm64-$DATE"      "$DIST/Gleam-macOS-AppleSilicon-arm64"
-cp -f "$DIST/Gleam-Linux-x86_64-$DATE"                  "$DIST/Gleam-Linux-x86_64"
+cp -f "$DIST/gleam-windows-amd64-$DATE.exe"         "$DIST/gleam-windows-amd64.exe"
+cp -f "$DIST/gleam-desktop-windows-amd64-$DATE.exe" "$DIST/gleam-desktop-windows-amd64.exe"
+cp -f "$DIST/gleam-darwin-amd64-$DATE"              "$DIST/gleam-darwin-amd64"
+cp -f "$DIST/gleam-darwin-arm64-$DATE"              "$DIST/gleam-darwin-arm64"
+cp -f "$DIST/gleam-linux-amd64-$DATE"               "$DIST/gleam-linux-amd64"
 
-echo "[3/5] 同步官网下载目录与前端/官网素材包"
-# 官网下载页固定引用 website/dist 下的无日期命名，随版本一起更新
-mkdir -p website/dist
-cp -f "$DIST/Gleam-Windows-x86_64.exe"            website/dist/Gleam-Windows-x86_64.exe
-cp -f "$DIST/Gleam-Desktop-Windows-x86_64.exe"    website/dist/Gleam-Desktop-Windows-x86_64.exe
-cp -f "$DIST/Gleam-macOS-Intel-x86_64"            website/dist/Gleam-macOS-Intel-x86_64
-cp -f "$DIST/Gleam-macOS-AppleSilicon-arm64"      website/dist/Gleam-macOS-AppleSilicon-arm64
-cp -f "$DIST/Gleam-Linux-x86_64"                  website/dist/Gleam-Linux-x86_64
+echo "[3/5] 打包前端与官网素材包"
+# 官网不引用本地二进制：下载按钮直指 GitHub 的 `releases/latest/download/<无日期名>`，
+# 由 .github/workflows/deploy-website.yml 直接发布 website/ 目录。所以这里不再往
+# website/dist/ 拷一份（那是死产物，还容易让人以为站点走本地下载）。
 go run scripts/make-zip.go "$DIST/webui-static-$DATE.zip" internal/webui/static
 go run scripts/make-zip.go "$DIST/website-$DATE.zip" \
   website/index.html website/style.css website/app.js
 
 echo "[4/5] 打包全平台发布合集"
 go run scripts/make-zip.go "$DIST/Gleam-release-$DATE.zip" \
-  "$DIST/Gleam-Windows-x86_64-$DATE.exe" \
-  "$DIST/Gleam-Desktop-Windows-x86_64-$DATE.exe" \
-  "$DIST/Gleam-macOS-Intel-x86_64-$DATE" \
-  "$DIST/Gleam-macOS-AppleSilicon-arm64-$DATE" \
-  "$DIST/Gleam-Linux-x86_64-$DATE" \
+  "$DIST/gleam-windows-amd64-$DATE.exe" \
+  "$DIST/gleam-desktop-windows-amd64-$DATE.exe" \
+  "$DIST/gleam-darwin-amd64-$DATE" \
+  "$DIST/gleam-darwin-arm64-$DATE" \
+  "$DIST/gleam-linux-amd64-$DATE" \
   README.md \
   LICENSE \
   "CHANGELOG.md=CHANGELOG.md" \
@@ -96,11 +96,11 @@ go run scripts/make-zip.go "$DIST/Gleam-release-$DATE.zip" \
 
 echo "[5/5] 生成校验和"
 (cd "$DIST" && sha256sum \
-  "Gleam-Windows-x86_64-$DATE.exe" \
-  "Gleam-Desktop-Windows-x86_64-$DATE.exe" \
-  "Gleam-macOS-Intel-x86_64-$DATE" \
-  "Gleam-macOS-AppleSilicon-arm64-$DATE" \
-  "Gleam-Linux-x86_64-$DATE" \
+  "gleam-windows-amd64-$DATE.exe" \
+  "gleam-desktop-windows-amd64-$DATE.exe" \
+  "gleam-darwin-amd64-$DATE" \
+  "gleam-darwin-arm64-$DATE" \
+  "gleam-linux-amd64-$DATE" \
   "webui-static-$DATE.zip" \
   "website-$DATE.zip" \
   "Gleam-release-$DATE.zip" > "SHA256SUMS-$DATE.txt")

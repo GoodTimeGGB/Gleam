@@ -1114,15 +1114,15 @@ func (a *Agent) ContextView() map[string]any {
 		"est_tokens_saved": st.SavedTokens,
 		// token 口径：最近一次请求的输入占模型上下文窗口的几成（见 ctxwindow.go）。
 		// 两套口径都给：轮数回答"攒了多少"，窗口回答"下一轮还能塞多少"，不是一回事。
-		"prompt_tokens":     rd.LastTokens,
-		"prompt_estimated":  rd.Estimated,
-		"window_tokens":     rd.Window,
-		"window_source":     rd.Source,
-		"window_note":       rd.Note,
-		"window_pct":        rd.Pct,
-		"carry_turns":       rd.CarryTurns,
-		"compress_end_pct":  compressAtEndPct,
-		"compress_mid_pct":  compressMidPct,
+		"prompt_tokens":    rd.LastTokens,
+		"prompt_estimated": rd.Estimated,
+		"window_tokens":    rd.Window,
+		"window_source":    rd.Source,
+		"window_note":      rd.Note,
+		"window_pct":       rd.Pct,
+		"carry_turns":      rd.CarryTurns,
+		"compress_end_pct": compressAtEndPct,
+		"compress_mid_pct": compressMidPct,
 	}
 }
 

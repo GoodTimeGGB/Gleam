@@ -72,16 +72,16 @@ func (n NetworkConfig) ProxyModeOrDefault() string {
 // 每个条目自带厂商、协议、地址、模型 ID 和密钥，互不依赖——
 // 用户可以在 DeepSeek、GLM、OpenAI 之间自由切换，也可以给同一厂商配多个模型。
 type ModelEntry struct {
-	ID         string  `yaml:"id" json:"id"`                         // 唯一标识（前端生成或用户填），如 "deepseek-chat"
-	Name       string  `yaml:"name" json:"name"`                     // 显示名，如 "DeepSeek Chat"
-	ProviderID string  `yaml:"provider_id" json:"provider_id"`       // 厂商预设 ID（zhipu/deepseek/openai/…，空为自定义）
-	Protocol   string  `yaml:"protocol" json:"protocol"`             // openai_chat | openai_responses | anthropic
-	BaseURL    string  `yaml:"base_url" json:"base_url"`             // 显式 API 地址（空则用厂商预设）
-	Model      string  `yaml:"model" json:"model"`                   // 模型 ID
-	Plan       string  `yaml:"plan" json:"plan"`                     // token | coding | agent
-	APIKey     string  `yaml:"api_key" json:"api_key"`               // 独立密钥（空则用全局凭证）
-	IsDefault  bool    `yaml:"is_default" json:"is_default"`         // 新对话默认用这个
-	IsFast     bool    `yaml:"is_fast" json:"is_fast"`               // 辅助模型（压缩/复核等高频小调用）
+	ID         string `yaml:"id" json:"id"`                   // 唯一标识（前端生成或用户填），如 "deepseek-chat"
+	Name       string `yaml:"name" json:"name"`               // 显示名，如 "DeepSeek Chat"
+	ProviderID string `yaml:"provider_id" json:"provider_id"` // 厂商预设 ID（zhipu/deepseek/openai/…，空为自定义）
+	Protocol   string `yaml:"protocol" json:"protocol"`       // openai_chat | openai_responses | anthropic
+	BaseURL    string `yaml:"base_url" json:"base_url"`       // 显式 API 地址（空则用厂商预设）
+	Model      string `yaml:"model" json:"model"`             // 模型 ID
+	Plan       string `yaml:"plan" json:"plan"`               // token | coding | agent
+	APIKey     string `yaml:"api_key" json:"api_key"`         // 独立密钥（空则用全局凭证）
+	IsDefault  bool   `yaml:"is_default" json:"is_default"`   // 新对话默认用这个
+	IsFast     bool   `yaml:"is_fast" json:"is_fast"`         // 辅助模型（压缩/复核等高频小调用）
 }
 
 type LLMConfig struct {
@@ -97,7 +97,7 @@ type LLMConfig struct {
 	// 不被单一模型绑死。档位没配就一律用主模型，所以留空是安全的。
 	Tiers  map[string]string
 	Models []ModelEntry // 多模型列表：每个条目是独立的模型接入，可在对话中切换
-	APIKey string // 生产环境建议经环境变量注入
+	APIKey string       // 生产环境建议经环境变量注入
 	// APIKeyScope 是 APIKey 被授权发往的接入主机（见 llm.KeyScope），运行时标记，
 	// **不序列化**：覆盖层里根本没有 api_key，这把 key 的落点在凭证文件里自带同一字段。
 	// 内存里留它，是为了让"当前生效的 key"始终是单一事实——每次要发请求都去翻磁盘，

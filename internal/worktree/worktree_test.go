@@ -245,6 +245,8 @@ func TestCreateOutsideRepo(t *testing.T) {
 	dataDir := t.TempDir()
 	m := &Manager{DataDir: dataDir}
 	plain := t.TempDir() // 刻意不 git init
+	// 同上：把 git 的向上查找截在 plain，否则 CI 的 TMPDIR 落在 checkout 内会「找到」外层仓库。
+	t.Setenv("GIT_CEILING_DIRECTORIES", plain)
 	if _, err := m.Create(context.Background(), "norepo", plain, ""); err == nil {
 		t.Fatal("不是仓库时必须失败")
 	} else if !strings.Contains(err.Error(), "仓库") {

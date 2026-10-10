@@ -17,6 +17,9 @@ func worktreeFixture(t *testing.T) (srv *Server, dataDir, ws string) {
 	t.Helper()
 	srv, dataDir = newArchiveFixture(t)
 	ws = t.TempDir()
+	// CI 把 TMPDIR 设在 checkout 里，自己不设这条时 t.TempDir() 会落在仓库内，
+	// git 向上就能找到外层仓库，于是「普通目录」被如实报成仓库、断言全反。
+	t.Setenv("GIT_CEILING_DIRECTORIES", ws)
 	srv.Agent.Cfg.Workspace = ws
 	srv.Agent.Cfg.Worktrees.Enabled = true
 	return srv, dataDir, ws

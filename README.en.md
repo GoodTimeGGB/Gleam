@@ -136,7 +136,7 @@ Binaries are not code-signed or Apple-notarized yet. On first run, Windows Smart
 
 ---
 
-## New in 1.1.1
+## New in 0.0.5
 
 - **Windows desktop installer**: Electron shell plus assisted NSIS setup, shortcuts created automatically, usable right after install. Node (with npx) and uv (with uvx) are bundled and **only injected into Gleam's own process tree PATH — your system PATH is never touched**.
 - **First-run “Preparing environment”**: real probes (`node -v` / `uv --version` / `git --version`) with no fake animation and no blocking; this screen follows the system region too.

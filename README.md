@@ -136,7 +136,7 @@ desktop/                Electron 桌面外壳（主进程 / preload / 打包配�
 
 ---
 
-## 1.1.1 新增
+## 0.0.5 新增
 
 - **Windows 桌面安装包**：Electron 外壳 + NSIS 辅助安装，自动建快捷方式，装完直接可用；内置 Node（含 npx）与 uv（含 uvx），**运行期只进 Gleam 自己的进程树 PATH，不动系统 PATH**。
 - **首启「环境准备中」**：真探测（`node -v` / `uv --version` / `git --version`），不排假动画、也不拦路；这一屏的语言跟着系统区域走。

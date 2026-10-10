@@ -17,6 +17,50 @@ type Param struct {
 	Label       string `json:"label"`
 	Placeholder string `json:"placeholder,omitempty"`
 	Required    bool   `json:"required,omitempty"`
+	// Secret 这个值是不是凭据。界面据此用密码框、并且不回显已保存的值。
+	Secret bool `json:"secret,omitempty"`
+	// Kind 这个值填到哪里去："arg"（替换命令参数里的 {key}，空=arg）| "env"（作为环境变量传给子进程）
+	// | "header"（替换远端请求头模板里的 {key}）。
+	// 为什么要有这一位：两种值的去处完全不同——把 API_KEY 当成参数塞进命令行，它就会出现在
+	// 进程列表和日志里；把路径当成环境变量传，服务器又收不到。
+	Kind string `json:"kind,omitempty"`
+}
+
+// SplitParams 按 Kind 把用户填的值分成两组：替换命令参数的、与作为环境变量的。
+// 分组的判据只有这一处，安装的两个入口（内置目录 / 远端目录）共用它。
+func SplitParams(p []Param, values map[string]string) (argVals, envVals map[string]string) {
+	argVals, envVals = map[string]string{}, map[string]string{}
+	for _, pm := range p {
+		v, ok := values[pm.Key]
+		if !ok {
+			continue
+		}
+		if pm.Kind == "env" {
+			envVals[pm.Key] = v
+			continue
+		}
+		argVals[pm.Key] = v
+	}
+	return argVals, envVals
+}
+
+// BuildEnv 校验必填的环境变量并返回它们。
+func BuildEnv(p MCPPreset, envVals map[string]string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, pm := range p.Params {
+		if pm.Kind != "env" {
+			continue
+		}
+		v := strings.TrimSpace(envVals[pm.Key])
+		if v == "" {
+			if pm.Required {
+				return nil, fmt.Errorf("缺少必填环境变量 %q（%s）", pm.Key, pm.Label)
+			}
+			continue
+		}
+		out[pm.Key] = v
+	}
+	return out, nil
 }
 
 // MCPPreset 常见 MCP 服务器预设。
@@ -33,11 +77,20 @@ type MCPPreset struct {
 
 // SkillPreset 技能模板。
 type SkillPreset struct {
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Params      []string     `json:"params,omitempty"`
-	Steps       []types.Step `json:"steps"`
-	Tags        []string     `json:"tags,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Category 是给「分类」那一排用的**单一归属**；Tags 是关键词，两个用途不同。
+	// 只用一个字段兼两职的话，筛选栏就会长出一堆同义标签（写作/文档/文案各占一格）。
+	Category string       `json:"category,omitempty"`
+	Params   []string     `json:"params,omitempty"`
+	Steps    []types.Step `json:"steps"`
+	Tags     []string     `json:"tags,omitempty"`
+}
+
+// SkillCategories 分类的固定顺序（界面按这个顺序排 chips）。
+// 固定而不是按出现顺序：否则收录顺序一变，整排筛选就跟着跳。
+func SkillCategories() []string {
+	return []string{"效率办公", "文档写作", "代码开发", "代码评审", "安全与测试", "数据分析", "运维部署", "知识研究", "设计", "工作流"}
 }
 
 // MCPCatalog 常见 MCP 服务器目录（官方与社区广泛使用的服务器；命令依赖本机 npx/uvx）。
@@ -95,7 +148,7 @@ var MCPCatalog = []MCPPreset{
 // SkillCatalog 技能模板目录（基于内置工具，安装即可运行/继续改造）。
 var SkillCatalog = []SkillPreset{
 	{
-		Name: "quick-note", Description: "速记入库：把一句话存进长期记忆，随时按关键词找回",
+		Name: "quick-note", Category: "效率办公", Description: "速记入库：把一句话存进长期记忆，随时按关键词找回",
 		Params: []string{"text"},
 		Steps: []types.Step{
 			{ID: "s1", Tool: "memory.save", Args: map[string]any{"content": "{{text}}"}},
@@ -104,7 +157,7 @@ var SkillCatalog = []SkillPreset{
 		Tags: []string{"记忆", "速记"},
 	},
 	{
-		Name: "dir-snapshot", Description: "目录快照：列出目标目录内容并把快照动作沉淀到记忆",
+		Name: "dir-snapshot", Category: "工作流", Description: "目录快照：列出目标目录内容并把快照动作沉淀到记忆",
 		Params: []string{"dir"},
 		Steps: []types.Step{
 			{ID: "s1", Tool: "file.list", Args: map[string]any{"path": "{{dir}}"}},
@@ -114,7 +167,7 @@ var SkillCatalog = []SkillPreset{
 		Tags: []string{"文件", "目录"},
 	},
 	{
-		Name: "web-bookmark", Description: "网页收藏：抓取网页内容并把收藏记录存入长期记忆",
+		Name: "web-bookmark", Category: "工作流", Description: "网页收藏：抓取网页内容并把收藏记录存入长期记忆",
 		Params: []string{"url"},
 		Steps: []types.Step{
 			{ID: "s1", Tool: "web.fetch", Args: map[string]any{"url": "{{url}}"}},
@@ -124,7 +177,7 @@ var SkillCatalog = []SkillPreset{
 		Tags: []string{"网页", "收藏"},
 	},
 	{
-		Name: "daily-note", Description: "工作日志：按日期把日志写入工作区 日志/ 目录",
+		Name: "daily-note", Category: "效率办公", Description: "工作日志：按日期把日志写入工作区 日志/ 目录",
 		Params: []string{"date", "content"},
 		Steps: []types.Step{
 			{ID: "s1", Tool: "file.write", Args: map[string]any{"path": "日志/{{date}}.md", "content": "{{content}}"}},
@@ -133,7 +186,7 @@ var SkillCatalog = []SkillPreset{
 		Tags: []string{"日志", "写作"},
 	},
 	{
-		Name: "project-scaffold", Description: "项目脚手架：一键生成项目目录的 README 与待办清单",
+		Name: "project-scaffold", Category: "代码开发", Description: "项目脚手架：一键生成项目目录的 README 与待办清单",
 		Params: []string{"name"},
 		Steps: []types.Step{
 			{ID: "s1", Tool: "file.write", Args: map[string]any{"path": "{{name}}/README.md", "content": "# {{name}}\n\n由 Gleam 生成的项目脚手架。"}},
@@ -163,7 +216,14 @@ func SearchMCP(q string) []MCPPreset {
 func SearchSkill(q string) []SkillPreset {
 	q = strings.ToLower(strings.TrimSpace(q))
 	if q == "" {
-		return append([]SkillPreset(nil), SkillCatalog...)
+		// 默认「新收录在前」：目录是**手工点顺序**的，最后加的往往是最想让人先看到的。
+		// 这就是技能页那个「最新」的含义——收录顺序，不是热度；我们没有热度数据，
+		// 编一个"热门"出来比不排更坏。
+		out := make([]SkillPreset, 0, len(SkillCatalog))
+		for i := len(SkillCatalog) - 1; i >= 0; i-- {
+			out = append(out, SkillCatalog[i])
+		}
+		return out
 	}
 	var out []SkillPreset
 	for _, s := range SkillCatalog {

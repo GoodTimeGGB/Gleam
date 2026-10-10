@@ -243,7 +243,7 @@
       <h2 class="reveal">下载</h2>
       <p class="section-sub reveal">一个文件，下载就能跑。不用安装别的东西。</p>
       <p class="dl-meta reveal">
-        <span class="dl-ver" id="dl-version">v1.1.1</span>
+        <span class="dl-ver" id="dl-version">v1.1.2</span>
         <span>发布于 <time id="dl-date" datetime="2026-10-10">2026-10-10</time></span>
         <span>单文件约 10 MB · MIT 许可 · <a href="https://github.com/gleam-ai/Gleam" target="_blank" rel="noopener" style="color:var(--color-accent)">源码在 GitHub</a></span>
       </p>
@@ -260,20 +260,15 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.1/Gleam-Electron-Windows-x86_64-20261010.exe" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.2/Gleam-Setup-1.1.2.exe" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-              <span>Electron 桌面版</span>
-              <span class="dl-size">约 97 MB · .exe</span>
+              <span>Electron 桌面版（NSIS 安装器）</span>
+              <span class="dl-size">约 1.2 GB · .exe</span>
             </a>
-            <a class="dl-btn" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.1/Gleam-Desktop-Windows-x86_64.exe" download>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-              <span>Go 轻量桌面版</span>
-              <span class="dl-size">约 10 MB · .exe</span>
-            </a>
-            <a class="dl-btn" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.1/Gleam-Windows-x86_64.exe" download>
+            <a class="dl-btn" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.2/gleam-windows-amd64.exe" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>命令行版</span>
-              <span class="dl-size">约 10 MB · .exe</span>
+              <span class="dl-size">约 11 MB · .exe</span>
             </a>
           </div>
           <div class="dl-note">
@@ -281,8 +276,7 @@
             <details class="dl-guide">
               <summary>安装步骤</summary>
               <ol>
-                <li><strong>Electron 版</strong>：下载 exe 安装程序 → 双击运行安装</li>
-                <li><strong>Go 轻量版</strong>：下载 exe → 双击运行（SmartScreen 拦截时点「更多信息」→「仍要运行」）</li>
+                <li><strong>Electron 版（NSIS 安装器）</strong>：下载 exe 安装程序 → 双击运行安装</li>
                 <li><strong>命令行版</strong>：放入 PATH 目录</li>
               </ol>
             </details>
@@ -300,10 +294,10 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.1/Gleam-macOS-AppleSilicon-arm64" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.2/gleam-darwin-arm64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
-              <span class="dl-size">约 9 MB</span>
+              <span class="dl-size">约 10 MB</span>
             </a>
           </div>
           <div class="dl-note">
@@ -311,10 +305,10 @@
             <details class="dl-guide">
               <summary>安装步骤</summary>
               <ol>
-                <li>下载 <code>Gleam-macOS-AppleSilicon-arm64</code></li>
-                <li>执行 <code>chmod +x Gleam-macOS-AppleSilicon-arm64</code> 加运行权限</li>
-                <li>首次运行被 Gatekeeper 拦下：终端执行 <code>xattr -d com.apple.quarantine ./Gleam-macOS-AppleSilicon-arm64</code></li>
-                <li>运行：<code>./Gleam-macOS-AppleSilicon-arm64 app</code></li>
+                <li>下载 <code>gleam-darwin-arm64</code></li>
+                <li>执行 <code>chmod +x gleam-darwin-arm64</code> 加运行权限</li>
+                <li>首次运行被 Gatekeeper 拦下：终端执行 <code>xattr -d com.apple.quarantine ./gleam-darwin-arm64</code></li>
+                <li>运行：<code>./gleam-darwin-arm64 app</code></li>
               </ol>
             </details>
           </div>
@@ -331,10 +325,10 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.1/Gleam-macOS-Intel-x86_64" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.2/gleam-darwin-amd64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
-              <span class="dl-size">约 10 MB</span>
+              <span class="dl-size">约 11 MB</span>
             </a>
           </div>
           <div class="dl-note">
@@ -342,10 +336,10 @@
             <details class="dl-guide">
               <summary>安装步骤</summary>
               <ol>
-                <li>下载 <code>Gleam-macOS-Intel-x86_64</code></li>
-                <li>执行 <code>chmod +x Gleam-macOS-Intel-x86_64</code> 加运行权限</li>
-                <li>首次运行被 Gatekeeper 拦下：终端执行 <code>xattr -d com.apple.quarantine ./Gleam-macOS-Intel-x86_64</code></li>
-                <li>运行：<code>./Gleam-macOS-Intel-x86_64 app</code></li>
+                <li>下载 <code>gleam-darwin-amd64</code></li>
+                <li>执行 <code>chmod +x gleam-darwin-amd64</code> 加运行权限</li>
+                <li>首次运行被 Gatekeeper 拦下：终端执行 <code>xattr -d com.apple.quarantine ./gleam-darwin-amd64</code></li>
+                <li>运行：<code>./gleam-darwin-amd64 app</code></li>
               </ol>
             </details>
           </div>
@@ -362,10 +356,10 @@
             </div>
           </div>
           <div class="dl-downloads">
-            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.1/Gleam-Linux-x86_64" download>
+            <a class="dl-btn dl-btn--primary" href="https://github.com/gleam-ai/Gleam/releases/download/v1.1.2/gleam-linux-amd64" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
               <span>下载</span>
-              <span class="dl-size">约 10 MB</span>
+              <span class="dl-size">约 11 MB</span>
             </a>
           </div>
           <div class="dl-note">
@@ -373,9 +367,9 @@
             <details class="dl-guide">
               <summary>安装步骤</summary>
               <ol>
-                <li>下载 <code>Gleam-Linux-x86_64</code></li>
-                <li>执行 <code>chmod +x Gleam-Linux-x86_64</code> 加运行权限</li>
-                <li>运行：<code>./Gleam-Linux-x86_64 app</code></li>
+                <li>下载 <code>gleam-linux-amd64</code></li>
+                <li>执行 <code>chmod +x gleam-linux-amd64</code> 加运行权限</li>
+                <li>运行：<code>./gleam-linux-amd64 app</code></li>
               </ol>
             </details>
           </div>

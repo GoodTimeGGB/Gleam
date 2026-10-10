@@ -1,9 +1,13 @@
 # Phase 0 spike: minimal config. Only the Linux unpacked target ("dir") has been built and checked.
-# Signing, notarization, installers (NSIS / dmg), auto-update and fuses are Phase 1+.
+# Signing, notarization, installers (dmg) and fuses are Phase 1+.
 appId: ai.gleam.desktop
 productName: Gleam
+publish:
+  provider: github
+  owner: gleam-ai
+  repo: Gleam
 directories:
-  output: release
+  output: dist
 files:
   - dist/**/*
   - "!dist/**/*.map"
@@ -30,10 +34,13 @@ win:
     - nsis
   icon: ../assets/gleam.ico
 nsis:
-  oneClick: true
+  oneClick: false
   perMachine: false
-  allowToChangeInstallationDirectory: false
+  allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: Gleam-Setup-${version}.${ext}
 mac:
   target:
     - dir

@@ -52,6 +52,22 @@ func (n NetworkConfig) ProxyModeOrDefault() string {
 	return n.ProxyMode
 }
 
+// ModelEntry 是一个可独立调用的模型接入配置。
+// 每个条目自带厂商、协议、地址、模型 ID 和密钥，互不依赖——
+// 用户可以在 DeepSeek、GLM、OpenAI 之间自由切换，也可以给同一厂商配多个模型。
+type ModelEntry struct {
+	ID         string  `yaml:"id" json:"id"`                         // 唯一标识（前端生成或用户填），如 "deepseek-chat"
+	Name       string  `yaml:"name" json:"name"`                     // 显示名，如 "DeepSeek Chat"
+	ProviderID string  `yaml:"provider_id" json:"provider_id"`       // 厂商预设 ID（zhipu/deepseek/openai/…，空为自定义）
+	Protocol   string  `yaml:"protocol" json:"protocol"`             // openai_chat | openai_responses | anthropic
+	BaseURL    string  `yaml:"base_url" json:"base_url"`             // 显式 API 地址（空则用厂商预设）
+	Model      string  `yaml:"model" json:"model"`                   // 模型 ID
+	Plan       string  `yaml:"plan" json:"plan"`                     // token | coding | agent
+	APIKey     string  `yaml:"api_key" json:"api_key"`               // 独立密钥（空则用全局凭证）
+	IsDefault  bool    `yaml:"is_default" json:"is_default"`         // 新对话默认用这个
+	IsFast     bool    `yaml:"is_fast" json:"is_fast"`               // 辅助模型（压缩/复核等高频小调用）
+}
+
 type LLMConfig struct {
 	Provider   string // glm（OpenAI 兼容协议）| mock
 	Protocol   string // openai_chat | openai_responses | anthropic（空视为 openai_chat）
@@ -64,6 +80,7 @@ type LLMConfig struct {
 	// 场景模板（专家角色）声明自己用哪一档，引擎据此换模型——"同一个 Harness，按场景换模型"，
 	// 不被单一模型绑死。档位没配就一律用主模型，所以留空是安全的。
 	Tiers  map[string]string
+	Models []ModelEntry // 多模型列表：每个条目是独立的模型接入，可在对话中切换
 	APIKey string // 生产环境建议经环境变量注入
 	// APIKeyScope 是 APIKey 被授权发往的接入主机（见 llm.KeyScope），运行时标记，
 	// **不序列化**：覆盖层里根本没有 api_key，这把 key 的落点在凭证文件里自带同一字段。
@@ -318,6 +335,26 @@ func (c *Config) SaveOverlay(path string) error {
 		}
 		llm.Set("tiers", tiers)
 	}
+	if len(c.LLM.Models) > 0 {
+		modelsArr := make([]any, 0, len(c.LLM.Models))
+		for _, m := range c.LLM.Models {
+			mm := NewYMap()
+			mm.Set("id", m.ID)
+			mm.Set("name", m.Name)
+			mm.Set("provider_id", m.ProviderID)
+			mm.Set("protocol", m.Protocol)
+			mm.Set("base_url", m.BaseURL)
+			mm.Set("model", m.Model)
+			mm.Set("plan", m.Plan)
+			if m.APIKey != "" {
+				mm.Set("api_key", m.APIKey)
+			}
+			mm.Set("is_default", m.IsDefault)
+			mm.Set("is_fast", m.IsFast)
+			modelsArr = append(modelsArr, mm)
+		}
+		llm.Set("models", modelsArr)
+	}
 	llm.Set("temperature", c.LLM.Temperature)
 	llm.Set("max_tokens", c.LLM.MaxTokens)
 	llm.Set("timeout_seconds", c.LLM.TimeoutSecs)
@@ -457,6 +494,31 @@ func (c *Config) apply(m map[string]any) {
 				// 名字或模型为空白的档位直接丢弃：留着只会变成一个"指向空模型"的坑
 				if name != "" && s != "" {
 					c.LLM.Tiers[name] = s
+				}
+			}
+		}
+		if raw, ok := v["models"]; ok {
+			if arr, ok := raw.([]any); ok {
+				c.LLM.Models = c.LLM.Models[:0]
+				for _, item := range arr {
+					sm, ok := item.(map[string]any)
+					if !ok {
+						continue
+					}
+					m := ModelEntry{}
+					getStr(sm, "id", &m.ID)
+					getStr(sm, "name", &m.Name)
+					getStr(sm, "provider_id", &m.ProviderID)
+					getStr(sm, "protocol", &m.Protocol)
+					getStrAssign(sm, "base_url", &m.BaseURL)
+					getStr(sm, "model", &m.Model)
+					getStr(sm, "plan", &m.Plan)
+					getStrAssign(sm, "api_key", &m.APIKey)
+					getBool(sm, "is_default", &m.IsDefault)
+					getBool(sm, "is_fast", &m.IsFast)
+					if m.Name != "" && m.Model != "" {
+						c.LLM.Models = append(c.LLM.Models, m)
+					}
 				}
 			}
 		}

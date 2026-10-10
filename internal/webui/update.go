@@ -30,19 +30,19 @@ const updateRepo = "gleam-ai/Gleam"
 
 const updateLatestAPI = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
 
-// assetNamesFor 当前平台该拿哪个资产。名字与 scripts/build-desktop.sh 的产物一一对应。
+// assetNamesFor 当前平台该拿哪个资产。名字与 electron-builder 产物一一对应。
 func assetNamesFor() []string {
 	switch runtime.GOOS {
 	case "windows":
-		// Desktop 版优先（windowsgui + 托盘）；没有才退到控制台版
-		return []string{"Gleam-Desktop-Windows-x86_64.exe", "Gleam-Windows-x86_64.exe"}
+		// electron-builder NSIS 产物
+		return []string{"Gleam-Setup.exe", "Gleam.Setup.exe", "Gleam Setup.exe"}
 	case "linux":
-		return []string{"Gleam-Linux-x86_64"}
+		return []string{"gleam-linux-amd64", "Gleam-Linux-x86_64"}
 	case "darwin":
 		if runtime.GOARCH == "arm64" {
-			return []string{"Gleam-macOS-AppleSilicon-arm64"}
+			return []string{"gleam-darwin-arm64", "Gleam-macOS-AppleSilicon-arm64"}
 		}
-		return []string{"Gleam-macOS-Intel-x86_64"}
+		return []string{"gleam-darwin-amd64", "Gleam-macOS-Intel-x86_64"}
 	}
 	return nil
 }
@@ -178,7 +178,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	for _, want := range assetNamesFor() {
 		for _, a := range rel.Assets {
-			if a.Name == want && trustedAssetURL(a.URL) {
+			if strings.HasPrefix(a.Name, want) && trustedAssetURL(a.URL) {
 				res["asset"] = releaseAsset{Name: a.Name, URL: a.URL, Size: a.Size}
 				break
 			}
@@ -284,7 +284,7 @@ func (s *Server) pickUpdateAsset(r *http.Request) (releaseAsset, error) {
 	}
 	for _, want := range assetNamesFor() {
 		for _, a := range rel.Assets {
-			if a.Name == want && trustedAssetURL(a.URL) {
+			if strings.HasPrefix(a.Name, want) && trustedAssetURL(a.URL) {
 				return a, nil
 			}
 		}

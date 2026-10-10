@@ -218,25 +218,53 @@
     }
     function modelField() {
       const pl = curPlan();
-      const listId = 's2-dlg-models-list';
-      const i = input('s2-dlg-model', st.modelName || (pl ? pl.model : ''), pl ? pl.model : '', (v) => { st.modelName = v; });
-      i.setAttribute('list', listId);
-      if (!st.modelName && pl) st.modelName = pl.model;
-      const dl = h('datalist', { id: listId }, pl ? h('option', { value: pl.model }) : null);
+      const wrap = h('div', {});
+      const defaultModel = pl ? pl.model : '';
+      let fetchedModels = [];
+      let useSelect = false;
+
+      function renderInput() {
+        wrap.replaceChildren();
+        if (useSelect && fetchedModels.length) {
+          const sel = h('select', { class: 's2-select s2-select--block', id: 's2-dlg-model' });
+          sel.append(h('option', { value: '', text: '— 请选择或手填模型 ID —' }));
+          fetchedModels.forEach((m) => sel.append(h('option', { value: m.id, text: m.id })));
+          if (st.modelName) sel.value = st.modelName;
+          sel.addEventListener('change', () => {
+            st.modelName = sel.value; touch(); result.hidden = true; validate();
+            const custom = h('input', { class: 'input s2-dlg-input', style: 'margin-top:6px', placeholder: '或手动输入模型 ID', autocomplete: 'off', spellcheck: 'false' });
+            custom.value = sel.value === '' ? '' : sel.value;
+            custom.addEventListener('input', () => { st.modelName = custom.value; touch(); result.hidden = true; validate(); });
+            wrap.append(sel, custom);
+          });
+          wrap.append(sel);
+        } else {
+          const i = input('s2-dlg-model', st.modelName || defaultModel, defaultModel, (v) => { st.modelName = v; });
+          wrap.append(i);
+        }
+      }
+
+      if (!st.modelName && pl) st.modelName = defaultModel;
+      renderInput();
+
       const fetchBtn = h('button', { type: 'button', class: 's2-link' }, h('span', { html: ico('refresh', 12) }), '拉取可用模型');
       fetchBtn.addEventListener('click', async () => {
+        const hasKey = st.key.trim() || st.keySet;
+        if (!hasKey) { showResult('fail', '请先填写 API Key 再拉取模型列表'); return; }
         fetchBtn.disabled = true;
         showResult('pending', '正在向厂商拉取模型列表…');
         try {
           const r = await api('POST', '/api/llm/models', target());
           if (r.ok && Array.isArray(r.models) && r.models.length) {
-            dl.replaceChildren(...r.models.map((m) => h('option', { value: m.id })));
-            showResult('ok', `拉到 ${r.models.length} 个模型，点模型框即可选择`);
+            fetchedModels = r.models;
+            useSelect = true;
+            renderInput();
+            showResult('ok', `拉到 ${r.models.length} 个模型，请从下拉列表选择`);
           } else showResult('fail', (TEST_HINTS[r.kind] || '拉取失败') + '：这个入口可能不提供模型列表，直接手填即可');
         } catch (err) { showResult('fail', err.message); }
         fetchBtn.disabled = false;
       });
-      return field('模型 ID', h('div', {}, i, dl), fetchBtn);
+      return field('模型 ID', wrap, fetchBtn);
     }
     function fastToggle() {
       const cb = h('input', { type: 'checkbox', class: 'switch', role: 'switch', 'aria-label': '辅助模型' });

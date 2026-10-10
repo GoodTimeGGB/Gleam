@@ -2021,8 +2021,11 @@ function sseData(e) {
   try { return JSON.parse(e.data); } catch { return null; }
 }
 
+let sseConnection = null;
 function connectSSE() {
+  if (sseConnection) { sseConnection.close(); sseConnection = null; }
   const es = new EventSource('/api/events');
+  sseConnection = es;
   es.onopen = () => setConn('up');
   es.onerror = () => setConn('down');
   es.addEventListener('progress', async (e) => {
@@ -6205,7 +6208,9 @@ async function loadSites() {
 // 路径统一成小写正斜杠再比：任务归档与 file.search 给的斜杠方向、大小写都不一定一致
 function normPath(p) { return String(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(); }
 
+let sitesResizeObserver = null;
 function renderSites(body, sites) {
+  if (sitesResizeObserver) { sitesResizeObserver.disconnect(); sitesResizeObserver = null; }
   body.innerHTML = '';
   if (!sites.length) {
     const empty = el('div', 'empty sites-empty');
@@ -6221,7 +6226,7 @@ function renderSites(body, sites) {
   }
   const grid = el('div', 'sites-grid');
   // 缩略图是把 1280×800 的页面按卡片实际宽度等比缩小；宽度随窗口变，比例也跟着变
-  const fit = new ResizeObserver((entries) => entries.forEach((e) => e.target.style.setProperty('--s', String(e.contentRect.width / 1280))));
+  sitesResizeObserver = new ResizeObserver((entries) => entries.forEach((e) => e.target.style.setProperty('--s', String(e.contentRect.width / 1280))));
   sites.forEach((s) => {
     const name = s.title || s.dir.split(/[\/\\]/).pop();
     const rel = relPath(s.file, s.space.path);
@@ -6263,7 +6268,7 @@ function renderSites(body, sites) {
       catch { toast('复制失败，路径是：' + s.file, 'error', 6000); }
     });
     acts.append(pv, more, cp);
-    fit.observe(thumb);
+    sitesResizeObserver.observe(thumb);
     card.append(thumb, meta, acts);
     grid.appendChild(card);
   });

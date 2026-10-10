@@ -276,7 +276,10 @@ func (a *Agent) HelperLLM() llm.Client {
 
 // RebuildFastClient 按当前配置重建辅助模型客户端（设置保存后热生效；未配置则置空）。
 func (a *Agent) RebuildFastClient() {
-	if a == nil || a.Cfg == nil || a.Cfg.LLM.FastModel == "" || a.Cfg.LLM.Provider == "mock" {
+	if a == nil {
+		return
+	}
+	if a.Cfg == nil || a.Cfg.LLM.FastModel == "" || a.Cfg.LLM.Provider == "mock" {
 		a.FastLLM = nil
 		return
 	}

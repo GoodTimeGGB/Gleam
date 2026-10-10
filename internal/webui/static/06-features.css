@@ -372,7 +372,7 @@ html[data-theme="dark"] .site-tpl-tabs button[aria-selected="true"] { background
 .dock {
   grid-column: 3; grid-row: 2;
   position: relative; min-height: 0; min-width: 0;
-  width: var(--dock-w, 520px);
+  width: var(--dock-w, 420px);
   display: flex; flex-direction: column;
   margin: 0 4px 4px 0;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--row-r);

@@ -80,7 +80,14 @@ func (a *Agent) ToolPermissionSet(name, perm string) (map[string]any, error) {
 		}
 	}
 	if err := a.Cfg.SaveOverlay(filepath.Join(a.Cfg.DataDir, config.OverlayFile)); err != nil {
-		return nil, fmt.Errorf("已生效但持久化失败: %w", err)
+		// 权限已在内存生效，持久化失败不影响当前会话，但下次重启会丢失
+		return map[string]any{
+			"name":       name,
+			"permission": a.PermissionOf(name).String(),
+			"overridden": perm != "default",
+			"tools":      a.ToolList(),
+			"warning":    "权限已生效但未保存到磁盘，重启后可能丢失：" + err.Error(),
+		}, nil
 	}
 	return map[string]any{
 		"name":       name,

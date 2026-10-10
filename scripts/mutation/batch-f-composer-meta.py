@@ -85,7 +85,7 @@ MUTATIONS = [
     {
         "name": "ContextView 不发 fill_pct（输入区水位条没有数据来源）",
         "file": "internal/agent/webfacade.go",
-        "edits": [('		"fill_pct":         st.FillPct, // 窗口占用率：水位条只画这个数，不再自己除一遍\n', "")],
+        "edits": [('		"fill_pct":      st.FillPct, // 轮数口径：短期窗口攒了多少轮（上限是配置的轮数容量，与模型无关）\n', "")],
         "targets": [t(WEBUI, "TestContext_CarriesWaterLevel")],
     },
     # ---------- 就地切模型的补丁语义（只发一个键不许清掉别的） ----------

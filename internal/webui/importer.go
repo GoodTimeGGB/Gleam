@@ -583,7 +583,7 @@ func (s *Server) handleImportApply(w http.ResponseWriter, r *http.Request) {
 			failMCP++
 			continue
 		}
-		_, err := s.Agent.MCPInstallCustom(c.Name, c.Command, c.Args, "user_approved", false)
+		_, err := s.Agent.MCPInstallCustom(c.Name, c.Command, c.Args, nil, "user_approved", false)
 		switch {
 		case err == nil:
 			instMCP++

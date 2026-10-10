@@ -7,6 +7,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
+import { pathWithRuntimes } from './runtimes';
 
 export const READY_PREFIX = 'GLEAM_READY ';
 const TOKEN_HEADER = 'X-Gleam-Token';
@@ -15,6 +16,8 @@ export interface SidecarSpec {
   bin: string;
   args: string[];
   cwd: string;
+  /** 额外要放进 PATH 前面的目录（内置运行时）。空表示不接。 */
+  extraPath?: string[];
 }
 
 export interface SidecarReady {
@@ -45,6 +48,11 @@ export class Sidecar extends EventEmitter {
 
   start(timeoutMs = 15_000): Promise<SidecarReady> {
     const env: NodeJS.ProcessEnv = { ...process.env, GLEAM_WEBUI_TOKEN: this.token };
+    // 内置运行时只接进**这一棵进程树**：sidecar 自己起的 shell.exec / MCP 子进程能用到
+    // npx / uvx，而用户自己的终端里不会凭空多出这几条路径。
+    if (this.spec.extraPath?.length) {
+      env.PATH = pathWithRuntimes(env.PATH, this.spec.extraPath);
+    }
     // Electron-only variables must not leak into the Go process or anything it spawns.
     delete env.ELECTRON_RUN_AS_NODE;
     const child = spawn(this.spec.bin, ['desktop-sidecar', ...this.spec.args], {

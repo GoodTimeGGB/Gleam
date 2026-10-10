@@ -122,15 +122,17 @@ func startHelper(t *testing.T) *Client {
 		}
 	})
 
-	c := &Client{
-		Name:    "fake",
+	// 客户端的内部结构变成了「Client + transport」，测试跟着走：
+	// 手工拼一个 stdio transport 接上假进程的管道（这样测的仍是真实现，不是替身）。
+	tp := &stdioTransport{
+		name:    "fake",
 		stdin:   stdin,
 		stdout:  bufio.NewReaderSize(stdout, 1024*1024),
 		pending: map[int64]chan rpcMessage{},
 		logf:    func(string, ...any) {},
 	}
-	go c.readLoop()
-	return c
+	go tp.readLoop()
+	return &Client{Name: "fake", tr: tp, logf: func(string, ...any) {}}
 }
 
 func TestMCPClient_InitializeAndList(t *testing.T) {

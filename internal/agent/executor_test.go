@@ -21,8 +21,9 @@ type funcTool struct {
 	name   string
 	perm   types.Permission
 	schema map[string]any
-	paths  func(args map[string]any) []string
-	fn     func(ctx context.Context, args map[string]any) (any, error)
+	// paths 与工具实现同签名（带 ctx）：测试要能验证"路径是按本次任务的边界解析的"。
+	paths func(ctx context.Context, args map[string]any) []string
+	fn    func(ctx context.Context, args map[string]any) (any, error)
 }
 
 func (f *funcTool) Name() string        { return f.name }
@@ -37,9 +38,9 @@ func (f *funcTool) Permission() types.Permission { return f.perm }
 func (f *funcTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return f.fn(ctx, args)
 }
-func (f *funcTool) Paths(args map[string]any) []string {
+func (f *funcTool) Paths(ctx context.Context, args map[string]any) []string {
 	if f.paths != nil {
-		return f.paths(args)
+		return f.paths(ctx, args)
 	}
 	return nil
 }

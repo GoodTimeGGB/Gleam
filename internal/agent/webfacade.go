@@ -327,6 +327,12 @@ func (a *Agent) SettingsView() map[string]any {
 			"force_push":          cfg.Git.ForcePush,
 			"commit_instructions": cfg.Git.CommitInstructions,
 		},
+		"worktrees": map[string]any{
+			"enabled":             cfg.Worktrees.Enabled,
+			"fetch_before_create": cfg.Worktrees.FetchBeforeCreate,
+			"auto_delete":         cfg.Worktrees.AutoDelete,
+			"max_count":           cfg.Worktrees.MaxCount,
+		},
 		"network": map[string]any{
 			"proxy_mode": cfg.Network.ProxyModeOrDefault(),
 			"proxy_url":  cfg.Network.ProxyURL,
@@ -374,6 +380,7 @@ func (a *Agent) SettingsView() map[string]any {
 			"temperature":      cfg.LLM.Temperature,
 			"max_tokens":       cfg.LLM.MaxTokens,
 			"timeout_seconds":  cfg.LLM.TimeoutSecs,
+			"context_window":   cfg.LLM.ContextWindow,
 			"api_key_set":      apiKeySet,
 			"api_key_host":     keyHost,
 			"api_key_host_cur": llm.KeyScope(cfg.LLM.BaseURL),
@@ -833,6 +840,11 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		if v, ok := lm["timeout_seconds"]; ok {
 			posInt("llm", "timeout_seconds", v, 3, 600)
 		}
+		// 上下文窗口：0 = 用内置兜底表（默认这条路），手填时才要求落在一个像样的范围里。
+		// 下界 4k：比这更小的窗口是配错了，不是一个可用配置。
+		if raw, ok := lm["context_window"]; ok {
+			zeroOr("llm", "context_window", raw, 4096, 10000000)
+		}
 	}
 	if v, ok := patch["scheduler"].(map[string]any); ok {
 		if b, ok := v["enabled"].(bool); ok {
@@ -848,6 +860,18 @@ func (a *Agent) ApplySettings(patch map[string]any) (map[string]any, error) {
 		}
 		if s2, ok := v["commit_instructions"].(string); ok {
 			sub("git")["commit_instructions"] = strings.TrimSpace(s2)
+		}
+	}
+	if v, ok := patch["worktrees"].(map[string]any); ok {
+		for _, k := range []string{"enabled", "fetch_before_create", "auto_delete"} {
+			if b, ok := v[k].(bool); ok {
+				sub("worktrees")[k] = b
+			}
+		}
+		// 上限 0 = 不限制（默认）。给下限 1，是因为"上限 0"和"上限 1"是两件事：
+		// 前者是关掉裁剪，后者是"只留一个"，混起来读的人会把关掉当成只剩一个。
+		if raw, ok := v["max_count"]; ok {
+			zeroOr("worktrees", "max_count", raw, 1, 100)
 		}
 	}
 	if v, ok := patch["network"].(map[string]any); ok {
@@ -1077,15 +1101,28 @@ func (a *Agent) ContextView() map[string]any {
 		return map[string]any{"enabled": false}
 	}
 	st := a.Mem.Stats()
+	rd := a.windowReading()
 	return map[string]any{
-		"enabled":          a.Cfg.Agent.ContextCompress,
-		"short_turns":      st.ShortTurns,
-		"short_cap":        st.ShortCap,
-		"fill_pct":         st.FillPct, // 窗口占用率：水位条只画这个数，不再自己除一遍
-		"overflow":         st.Overflow,
-		"summary":          st.Summary,
-		"summary_chars":    st.SummaryRunes,
-		"est_tokens_saved": st.SavedTokens, // 累计压缩节省（原始溢出与摘要的估算差）
+		"enabled":       a.Cfg.Agent.ContextCompress,
+		"short_turns":   st.ShortTurns,
+		"short_cap":     st.ShortCap,
+		"fill_pct":      st.FillPct, // 轮数口径：短期窗口攒了多少轮（上限是配置的轮数容量，与模型无关）
+		"overflow":      st.Overflow,
+		"summary":       st.Summary,
+		"summary_chars": st.SummaryRunes,
+		// est_tokens_saved 累计压缩节省（原始溢出与摘要的估算差）
+		"est_tokens_saved": st.SavedTokens,
+		// token 口径：最近一次请求的输入占模型上下文窗口的几成（见 ctxwindow.go）。
+		// 两套口径都给：轮数回答"攒了多少"，窗口回答"下一轮还能塞多少"，不是一回事。
+		"prompt_tokens":    rd.LastTokens,
+		"prompt_estimated": rd.Estimated,
+		"window_tokens":    rd.Window,
+		"window_source":    rd.Source,
+		"window_note":      rd.Note,
+		"window_pct":       rd.Pct,
+		"carry_turns":      rd.CarryTurns,
+		"compress_end_pct": compressAtEndPct,
+		"compress_mid_pct": compressMidPct,
 	}
 }
 
@@ -1207,6 +1244,25 @@ func (a *Agent) mcpIndex(name string) int {
 	return -1
 }
 
+// MCPInstalledByArgs 远端目录用的「装过没」判据：看已配置服务器的参数里有没有这个包引用。
+//
+// 为什么不比整个 argv：装的时候可能按选中的 npm 源加过 `--registry=…`，
+// 逐字比较会在"换了源之后"把装好的服务器判成没装。包引用是那个稳定的身份。
+func (a *Agent) MCPInstalledByArgs(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+	for _, s := range a.Cfg.MCP {
+		for _, arg := range s.Args {
+			if arg == ref || strings.Contains(arg, ref) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // MarketMCP 搜索 MCP 市场目录（q 为空返回全部），附带已安装标记。
 func (a *Agent) MarketMCP(q string) []map[string]any {
 	presets := market.SearchMCP(q)
@@ -1228,7 +1284,7 @@ func (a *Agent) MarketSkills(q string) []map[string]any {
 	for _, s := range presets {
 		_, err := a.Skills.Get(s.Name)
 		out = append(out, map[string]any{
-			"name": s.Name, "description": s.Description,
+			"name": s.Name, "description": s.Description, "category": s.Category,
 			"params": s.Params, "steps": s.Steps, "tags": s.Tags, "installed": err == nil,
 		})
 	}
@@ -1256,19 +1312,27 @@ func (a *Agent) SkillInstallPreset(name string, force bool) (int, error) {
 // MCPList 已配置的 MCP 服务器视图（含连接状态与已注册工具数）。
 func (a *Agent) MCPList() []map[string]any {
 	out := make([]map[string]any, 0, len(a.Cfg.MCP))
+	names := a.Reg.Names()
 	for _, s := range a.Cfg.MCP {
 		_, connected := a.MCP.Get(s.Name)
 		tools := 0
 		prefix := mcpToolPrefix(s.Name)
-		for _, n := range a.Reg.Names() {
+		for _, n := range names {
 			if strings.HasPrefix(n, prefix) {
 				tools++
 			}
+		}
+		kind := "stdio"
+		if strings.TrimSpace(s.URL) != "" {
+			kind = "http"
 		}
 		out = append(out, map[string]any{
 			"name": s.Name, "command": s.Command, "args": s.Args,
 			"trust": s.Trust, "enabled": s.Enabled,
 			"connected": connected, "tools": tools,
+			"kind": kind, "url": s.URL,
+			// 只报"有几个请求头"，不回吐值：里面是凭据
+			"header_count": len(s.Headers),
 		})
 	}
 	return out
@@ -1281,18 +1345,23 @@ func (a *Agent) MCPInstallPreset(id string, params map[string]string, trust stri
 	if err != nil {
 		return nil, err
 	}
-	command, args, err := market.BuildCommand(p, params)
+	argVals, envVals := market.SplitParams(p.Params, params)
+	command, args, err := market.BuildCommand(p, argVals)
+	if err != nil {
+		return nil, err
+	}
+	env, err := market.BuildEnv(p, envVals)
 	if err != nil {
 		return nil, err
 	}
 	if trust == "" {
 		trust = p.Trust
 	}
-	return a.mcpInstall(p.ID, p.Name, command, args, trust, force)
+	return a.mcpInstall(mcpSpec{Name: p.ID, Display: p.Name, Command: command, Args: args, Env: env, Trust: trust}, force)
 }
 
 // MCPInstallCustom 自定义安装 MCP 服务器（stdio）。
-func (a *Agent) MCPInstallCustom(name, command string, args []string, trust string, force bool) (map[string]any, error) {
+func (a *Agent) MCPInstallCustom(name, command string, args []string, env map[string]string, trust string, force bool) (map[string]any, error) {
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("command 不能为空")
 	}
@@ -1307,7 +1376,18 @@ func (a *Agent) MCPInstallCustom(name, command string, args []string, trust stri
 			display = "custom"
 		}
 	}
-	return a.mcpInstall(display, display, command, args, trust, force)
+	return a.mcpInstall(mcpSpec{Name: display, Display: display, Command: command, Args: args, Env: env, Trust: trust}, force)
+}
+
+// MCPInstallRemote 装一台远端（streamable-http）MCP 服务器：不起进程，只记地址与请求头。
+//
+// 与 stdio 那条路共用 mcpInstall：落盘、热连接、失败回 warning 的行为完全一致——
+// 两条路各写一套"安装流程"就会开始漂，而漂的方向是远端那套少一个回滚。
+func (a *Agent) MCPInstallRemote(name, url string, headers map[string]string, trust string, force bool) (map[string]any, error) {
+	if strings.TrimSpace(url) == "" {
+		return nil, fmt.Errorf("远端地址为空")
+	}
+	return a.mcpInstall(mcpSpec{Name: name, Display: name, URL: url, Headers: headers, Trust: trust}, force)
 }
 
 // mcpNameUnsafe 名称里必须换掉的字符，与 mcpNameRe 互补。
@@ -1337,21 +1417,42 @@ var ErrAlreadyInstalled = errors.New("已经安装过了")
 // **为什么先落盘再改内存**：原顺序是「追加到内存 → 存盘」，存盘失败时内存里已经多了
 // 一个条目——界面显示"已安装"，重启就消失，而且因为重名检查挡着，用户连重装都做不了，
 // 只能重启进程。落盘失败就把切片整个还原，让用户看到"没装上"这个真实结果。
-func (a *Agent) mcpInstall(name, display, command string, args []string, trust string, force bool) (map[string]any, error) {
+// mcpSpec 一次安装要落进配置的全部事实。
+//
+// 为什么收成一个结构体：参数已经到第九个（name/display/command/args/env/url/headers/trust/force），
+// 再往上加位置参数，调用点就开始靠"第几个"来读——那种代码改一次错一次。
+type mcpSpec struct {
+	Name    string
+	Display string
+	Command string
+	Args    []string
+	Env     map[string]string
+	URL     string
+	Headers map[string]string
+	Trust   string
+}
+
+func (a *Agent) mcpInstall(spec mcpSpec, force bool) (map[string]any, error) {
+	name, display, command, args := spec.Name, spec.Display, spec.Command, spec.Args
 	if !mcpNameRe.MatchString(name) {
 		return nil, fmt.Errorf("名称 %q 非法（仅限字母数字下划线连字符，≤32 字符）", name)
 	}
-	if strings.TrimSpace(command) == "" {
+	// 两种形态二选一：本机进程要有命令，远端要有 URL
+	if strings.TrimSpace(spec.URL) == "" && strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("启动命令不能为空")
 	}
 	idx := a.mcpIndex(name)
 	if idx >= 0 && !force {
 		return nil, fmt.Errorf("%w：重装会替换当前的命令与参数；只想临时别跑它，请改用「停用」", ErrAlreadyInstalled)
 	}
+	trust := spec.Trust
 	if trust != "readonly" && trust != "user_approved" && trust != "full_access" {
 		trust = "user_approved"
 	}
-	srv := config.MCPServerConfig{Name: name, Command: command, Args: args, Trust: trust, Enabled: true}
+	srv := config.MCPServerConfig{
+		Name: name, Command: command, Args: args, Env: spec.Env,
+		URL: spec.URL, Headers: spec.Headers, Trust: trust, Enabled: true,
+	}
 	next := append([]config.MCPServerConfig{}, a.Cfg.MCP...)
 	if idx >= 0 {
 		next[idx] = srv
@@ -1371,7 +1472,12 @@ func (a *Agent) mcpInstall(name, display, command string, args []string, trust s
 		"connected": err == nil, "tools": tools, "mcp": a.MCPList(),
 	}
 	if err != nil {
-		res["warning"] = fmt.Sprintf("已保存配置，但连接失败（首次 npx/uvx 需联网下载，可稍后在工具页查看）: %v", err)
+		// 两种形态的失败原因完全不同，提示不能共用一句
+		hint := "首次 npx/uvx 需联网下载，可稍后在工具页查看"
+		if strings.TrimSpace(srv.URL) != "" {
+			hint = "远端地址、网络或请求头里的凭据要再核一下"
+		}
+		res["warning"] = fmt.Sprintf("已保存配置，但连接失败（%s）: %v", hint, err)
 	}
 	return res, nil
 }
@@ -1437,7 +1543,9 @@ func (a *Agent) mcpConnect(srv config.MCPServerConfig) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	client, err := mcp.Start(ctx, mcp.ServerConfig{
-		Name: srv.Name, Command: srv.Command, Args: srv.Args, Trust: srv.Trust, Enabled: true,
+		Name: srv.Name, Command: srv.Command, Args: srv.Args, Env: srv.Env,
+		URL: srv.URL, Headers: srv.Headers,
+		Trust: srv.Trust, Enabled: true,
 	}, func(f string, xs ...any) { fmt.Fprintf(os.Stderr, "[mcp] "+f+"\n", xs...) })
 	if err != nil {
 		return 0, err
@@ -1699,6 +1807,8 @@ func (a *Agent) workspaceRoots() []string {
 //     "填任意路径即可覆盖任意文件"的接口；
 //   - **在不在工作区边界里**：清单记的是任务当时解析出的绝对路径，而用户可能已经把
 //     工作区切到别处，也可能当初那一步的口径与现在不同。边界以**现在**的为准。
+//     在副本里跑过的任务是个例外：它的清单记的是副本里的路径，所以**该任务自己的副本根**
+//     也算允许边界——只加这一个任务的，不是把所有副本一起放开。
 //
 // 客户端传来的路径串一律重新解析，绝不拿清单里的原文去拼 OS 调用——清单是磁盘上的
 // 文件，读它的时候它已经不完全归我们管了。
@@ -1718,7 +1828,22 @@ func (a *Agent) changeTarget(taskID, rawPath string) (changeRef, error) {
 		// 会走到这里的只有手改请求的一种人，那种时候"猜"比"拒"更坏。
 		return changeRef{}, fmt.Errorf("请填写清单里的完整路径")
 	}
+	// 副本已经被删掉的任务：清单里的路径指向一个不存在的地方。这时说"超出工作区范围"
+	// 是把人往错的方向指——真实原因是那份副本已经不在了，而这一点用户能从别处补救
+	// （任务分支还在，去 Worktrees 那一页或直接用 git 工具）。
+	if m := a.worktreeManager(); m != nil {
+		if wtDir := m.Dir(taskID); toolutil.Within(wtDir, path) {
+			if _, err := os.Stat(wtDir); os.IsNotExist(err) {
+				return changeRef{}, fmt.Errorf("这个任务的副本（%s）已经被删掉了：副本里的改动无从还原。任务分支还在，可用 git 工具查看或合并", wtDir)
+			}
+		}
+	}
 	roots := a.workspaceRoots()
+	if m := a.worktreeManager(); m != nil {
+		if meta, ok := m.Get(taskID); ok {
+			roots = append(append([]string(nil), roots...), meta.Path)
+		}
+	}
 	if len(roots) == 0 {
 		return changeRef{}, fmt.Errorf("尚未设定工作区，无法判断这个路径能不能动")
 	}

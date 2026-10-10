@@ -49,7 +49,7 @@ func TestSnapshot_SurvivesReplan(t *testing.T) {
 		t.Fatal(err)
 	}
 	write := &funcTool{name: "wtest", perm: types.PermissionUserApproved,
-		paths: func(map[string]any) []string { return []string{target} },
+		paths: func(context.Context, map[string]any) []string { return []string{target} },
 		fn: func(_ context.Context, _ map[string]any) (any, error) {
 			return map[string]any{"written": true}, os.WriteFile(target, []byte("第一轮写的\n"), 0o644)
 		}}
@@ -105,7 +105,7 @@ func TestSnapshot_CapturesBeforeWrite(t *testing.T) {
 	}
 
 	write := &funcTool{name: "wtest", perm: types.PermissionUserApproved,
-		paths: func(map[string]any) []string { return []string{target} },
+		paths: func(context.Context, map[string]any) []string { return []string{target} },
 		fn: func(_ context.Context, _ map[string]any) (any, error) {
 			return map[string]any{"written": true}, os.WriteFile(target, []byte("新内容\n"), 0o644)
 		}}
@@ -150,7 +150,7 @@ func TestSnapshot_ContentFileIsPrivateAndInsideRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	write := &funcTool{name: "wpriv", perm: types.PermissionUserApproved,
-		paths: func(map[string]any) []string { return []string{target} },
+		paths: func(context.Context, map[string]any) []string { return []string{target} },
 		fn: func(_ context.Context, _ map[string]any) (any, error) {
 			return "ok", os.WriteFile(target, []byte("覆盖"), 0o600)
 		}}
@@ -191,7 +191,7 @@ func TestSnapshot_ReadOnlyStepCapturesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	read := &funcTool{name: "rtest", perm: types.PermissionReadOnly,
-		paths: func(map[string]any) []string { return []string{target} },
+		paths: func(context.Context, map[string]any) []string { return []string{target} },
 		fn:    func(_ context.Context, _ map[string]any) (any, error) { return os.ReadFile(target) }}
 	e := snapExecutor(t, dataDir, ws, read)
 	e.Execute(context.Background(), types.Plan{Steps: []types.Step{{ID: "s1", Tool: "rtest"}}}, "t1", string(types.ModeAuto), false)
@@ -225,7 +225,7 @@ func TestSnapshot_KeepsReasonWhenItCannot(t *testing.T) {
 	}
 	all := []string{big, bin, dir}
 	write := &funcTool{name: "wthree", perm: types.PermissionUserApproved,
-		paths: func(map[string]any) []string { return all },
+		paths: func(context.Context, map[string]any) []string { return all },
 		fn:    func(_ context.Context, _ map[string]any) (any, error) { return "ok", nil }}
 	e := snapExecutor(t, dataDir, ws, write)
 	e.Execute(context.Background(), types.Plan{Steps: []types.Step{{ID: "s1", Tool: "wthree"}}}, "t1", string(types.ModeAuto), false)
@@ -274,7 +274,7 @@ func TestSnapshot_KeepsReasonWhenItCannot(t *testing.T) {
 func TestSnapshot_NonAbsoluteArgSkipped(t *testing.T) {
 	ws, dataDir := t.TempDir(), t.TempDir()
 	write := &funcTool{name: "wrel", perm: types.PermissionUserApproved,
-		paths: func(map[string]any) []string { return []string{"relative/thing.txt", ""} },
+		paths: func(context.Context, map[string]any) []string { return []string{"relative/thing.txt", ""} },
 		fn:    func(_ context.Context, _ map[string]any) (any, error) { return "ok", nil }}
 	e := snapExecutor(t, dataDir, ws, write)
 	e.Execute(context.Background(), types.Plan{Steps: []types.Step{{ID: "s1", Tool: "wrel"}}}, "t1", string(types.ModeAuto), false)
@@ -293,7 +293,7 @@ func TestSnapshot_NoDataDirDoesNotBreakRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	write := &funcTool{name: "wnodir", perm: types.PermissionUserApproved,
-		paths: func(map[string]any) []string { return []string{target} },
+		paths: func(context.Context, map[string]any) []string { return []string{target} },
 		fn:    func(_ context.Context, _ map[string]any) (any, error) { return "ok", nil }}
 	e := snapExecutor(t, "", ws, write)
 	res := e.Execute(context.Background(), types.Plan{Steps: []types.Step{{ID: "s1", Tool: "wnodir"}}}, "t1", string(types.ModeAuto), false)

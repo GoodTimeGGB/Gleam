@@ -30,7 +30,7 @@ func (t *ScreenshotTool) Permission() types.Permission {
 
 // Paths 实现 types.PathAware：截屏会落盘，把目标路径交给门控判断是否在信任路径内。
 // 未指定 path 时返回 nil（= 无法确认操作路径），由门控要求人工确认，而不是默认放行。
-func (t *ScreenshotTool) Paths(args map[string]any) []string {
+func (t *ScreenshotTool) Paths(ctx context.Context, args map[string]any) []string {
 	if p := toolutil.Str(args, "path"); p != "" {
 		return []string{p}
 	}

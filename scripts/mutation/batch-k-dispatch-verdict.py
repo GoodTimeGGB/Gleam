@@ -65,8 +65,8 @@ MUTATIONS = [
         # 第一次裁决也送去快筛：带引用的步骤要付两次审核模型的钱，
         # 而第一次筛的是占位符。不报错、不变慢到可见，只是账单翻倍。
         "edits": [(
-            "\tdec := e.adjudicate(tool, step.Args, preApproved, !hasRefs(step.Args))\n",
-            "\tdec := e.adjudicate(tool, step.Args, preApproved, true)\n",
+            "\tdec := e.adjudicate(ctx, tool, step.Args, preApproved, !hasRefs(step.Args))\n",
+            "\tdec := e.adjudicate(ctx, tool, step.Args, preApproved, true)\n",
         )],
         "targets": [AGENT],
     },
@@ -76,8 +76,8 @@ MUTATIONS = [
         # 重算那次不快筛：带引用的写操作**一次都没被审核模型看过**，
         # 而界面上"执行前用辅助模型快筛"这个开关看起来是开着的。
         "edits": [(
-            "\t\tfinal = e.adjudicate(tool, args, preApproved, true)\n",
-            "\t\tfinal = e.adjudicate(tool, args, preApproved, false)\n",
+            "\tfinal = e.adjudicate(ctx, tool, args, preApproved, true)\n",
+            "\tfinal = e.adjudicate(ctx, tool, args, preApproved, false)\n",
         )],
         "targets": [AGENT],
     },

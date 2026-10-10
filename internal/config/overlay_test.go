@@ -18,6 +18,7 @@ func TestSaveLoadOverlay_Roundtrip(t *testing.T) {
 	cfg.Memory.ShortTermCap = 30
 	cfg.Persona.Style = "gentle"
 	cfg.Persona.Name = "小光"
+	cfg.LLM.ContextWindow = 200000
 
 	path := filepath.Join(dir, OverlayFile)
 	if err := cfg.SaveOverlay(path); err != nil {
@@ -42,6 +43,38 @@ func TestSaveLoadOverlay_Roundtrip(t *testing.T) {
 	}
 	if fresh.Persona.Style != "gentle" || fresh.Persona.Name != "小光" {
 		t.Errorf("persona = %+v", fresh.Persona)
+	}
+	// 上下文窗口是占用水位的分母，存不下来就会在重启后悄悄换回兜底值——
+	// 界面上那个百分比跟着变，而用户没改过任何设置。
+	if fresh.LLM.ContextWindow != 200000 {
+		t.Errorf("context_window = %d，应为 200000", fresh.LLM.ContextWindow)
+	}
+}
+
+// TestSaveLoadOverlay_WorktreesRoundtrip worktree 那四项要能存能读。
+//
+// 尤其盯住默认值：四项默认全关、上限为 0（不限制）。存读一圈之后若变成"开着"或
+// "上限 15"，那等于替用户打开了"任务不再改你的工作区"这件事——最坏的一种默认值漂移。
+func TestSaveLoadOverlay_WorktreesRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OverlayFile)
+
+	// 先验默认值本身
+	if d := Default().Worktrees; d.Enabled || d.FetchBeforeCreate || d.AutoDelete || d.MaxCount != 0 {
+		t.Fatalf("worktree 默认应当全关且不限数量，实际 %+v", d)
+	}
+
+	cfg := Default()
+	cfg.Worktrees = WorktreeConfig{Enabled: true, FetchBeforeCreate: true, AutoDelete: false, MaxCount: 15}
+	if err := cfg.SaveOverlay(path); err != nil {
+		t.Fatal(err)
+	}
+	fresh := Default()
+	if err := LoadOverlay(fresh, path); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Worktrees != cfg.Worktrees {
+		t.Errorf("worktrees 应为 %+v，实际 %+v", cfg.Worktrees, fresh.Worktrees)
 	}
 }
 

@@ -255,19 +255,86 @@
       label('提交说明'),
       card(row({ icon: 'edit', title: '提交说明指令', desc: '写提交说明时的写法要求，会附在编程任务的指引里，由模型按它写。' }), h('div', { class: 's2-card-pad' }, instr)));
   });
-  S2.register('worktrees', () => {
-    const limit = h('select', { class: 's2-select', disabled: true, 'aria-label': '数量上限' }, h('option', { text: '15 个' }));
-    $('#s2-worktrees').replaceChildren(
-      head('Worktrees', '为并行任务各开一个 git worktree，互不干扰。Gleam 目前在当前工作区里直接执行，还不会创建 worktree。'),
+  S2.register('worktrees', async () => {
+    const view = await api('GET', '/api/worktrees').catch(() => ({}));
+    const ws = view.workspace || '';
+    const repo = !!view.repository;
+    const on = !!view.enabled;
+
+    // 空态必须分清"还没建过"和"这里建不了"：前者去跑个任务就有，后者得先换个工作区。
+    // 画成同一个空列表，读的人只会照着做错的那件事。
+    const blocked = !on ? null
+      : !ws ? '还没选工作区：没有可建副本的仓库，任务会在不限定目录的边界里执行。'
+      : !repo ? `当前工作区不是 git 仓库${ws ? '（' + ws + '）' : ''}，任务会在工作区里直接执行——想用副本请先把工作区换到一个 git 仓库。`
+      : null;
+
+    const rows = view.rows || [];
+    const list = rows.length
+      ? card(...rows.map((wt) => row({
+          icon: 'worktrees',
+          title: wt.branch,
+          titleExtra: wt.dirty ? badge('有改动') : null,
+          // 路径是这条记录唯一不可再生的信息：分支名还能从 git 里找回来，路径没了就找不回。
+          desc: `${wt.path} · ${fmtTime(wt.created_at)}${wt.dirty_detail ? ' · ' + wt.dirty_detail : ''}`,
+          control: btn('删除', () => removeWorktree(wt)),
+        })))
+      : card(empty('worktrees', blocked ? '这里现在建不了 worktree' : '还没有由 Gleam 管理的 worktree',
+          blocked || '打开上面的开关之后，下一个任务就会在自己的副本目录里执行。'));
+
+    // 条件项必须在进 replaceChildren 之前滤掉：replaceChildren 是原生接口，
+    // 它不做 h() 那层过滤——直接传 null 会在页面上印出一个字面的 "null"。
+    $('#s2-worktrees').replaceChildren(...[
+      head('Worktrees', '为每个任务开一个 git worktree：任务在副本目录里改文件，主工作区全程不动。改动留在任务分支上，不会自动并回主工作区。'),
+      blocked ? h('div', { class: 's2-notice s2-notice--warn' }, h('span', { html: ico('warn', 14) }), h('span', { text: blocked })) : null,
+      label('执行方式'),
+      card(
+        row({
+          icon: 'layers', title: '为任务创建 worktree',
+          desc: on ? '这个功能开着：每个任务建一份副本，任务在副本里执行。' : '关着：任务直接在你的工作区里执行，改动就地落盘。',
+          control: toggle(on, (v) => save({ worktrees: { enabled: v } }, v ? '已开启' : '已关闭').then(() => S2.show('worktrees'))),
+        }),
+      ),
       label('创建与清理'),
       card(
-        row({ icon: 'refresh', title: '创建前先 fetch', desc: '新建 worktree 之前先同步远端。', control: toggle(false, () => {}, { disabled: true }), disabled: true }),
-        row({ icon: 'trash', title: '自动删除', desc: '任务归档后自动删除对应的 worktree。', control: toggle(false, () => {}, { disabled: true }), disabled: true }),
-        row({ icon: 'layers', title: '数量上限', desc: '超过上限时最旧的 worktree 会被清理。', control: limit, disabled: true }),
+        row({ icon: 'refresh', title: '创建前先 fetch', desc: '新建副本之前先同步远端（会出网，见「连接」页的远端仓库同步那一行）。', control: toggle(!!view.fetch_before_create, (v) => save({ worktrees: { fetch_before_create: v } })) }),
+        row({ icon: 'trash', title: '自动删除', desc: '任务跑完后自动删掉没有未提交改动的副本；有改动的一律保留，不会被静默丢掉。', control: toggle(!!view.auto_delete, (v) => save({ worktrees: { auto_delete: v } })) }),
+        row({
+          icon: 'layers', title: '数量上限',
+          desc: '超过上限时清掉最早且干净的；有改动的一个都不清，所以实际数量可能停在上限之上。',
+          control: select(
+            [{ value: 0, label: '不限制' }, { value: 5, label: '5 个' }, { value: 15, label: '15 个' }, { value: 30, label: '30 个' }],
+            Number(view.max_count) || 0,
+            (v) => save({ worktrees: { max_count: Number(v) } }),
+            { labelText: '数量上限' }),
+        }),
       ),
       label('由 Gleam 管理的 Worktrees'),
-      card(empty('worktrees', '没有由 Gleam 管理的 worktree', '')));
+      list,
+    ].filter(Boolean));
   });
+
+  /** 删一个副本：先按"不丢改动"删；后端拒绝（409）时把它的原话给用户看，再要一次明确确认。
+   *
+   * 为什么不去问前端"这个副本脏不脏"：那件事的 owner 在后端（`git status` 是它跑的），
+   * 前端照着列表里的旧读数再猜一遍，迟早出现"页面说有改动／其实已经提交了"这种错话。
+   * 后端的拒绝理由就是最好的提示语，原样转述即可。 */
+  async function removeWorktree(wt) {
+    const url = (force) => `/api/worktrees/${encodeURIComponent(wt.task_id)}${force ? '?force=1' : ''}`;
+    try {
+      await api('DELETE', url(false));
+    } catch (err) {
+      if (err.status !== 409) { toast(err.message || String(err), 'error'); return; }
+      const ok = await confirmModal(
+        `${err.message}。继续会把里面的内容一起丢掉，且丢了找不回来。`,
+        '副本不能直接删除',
+        { okText: '丢弃并删除', danger: true });
+      if (!ok) return;
+      try { await api('DELETE', url(true)); }
+      catch (err2) { toast(err2.message || String(err2), 'error'); return; }
+    }
+    toast('已删除', 'success', 1500);
+    S2.show('worktrees');
+  }
 
   /* ============================== 工作区索引 ============================== */
   S2.register('index', async () => {

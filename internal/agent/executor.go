@@ -558,8 +558,8 @@ func panicBrief(p any) string {
 // ---------- 审核模型快筛 ----------
 // 只审"本来会被自动放行"的中高风险动作：低风险是只读，高风险本来就有人看。
 // 审核不通过不直接拒绝，而是升级为人工确认——最终决定权仍在人手里。
-func (e *Executor) adjudicate(tool types.Tool, args map[string]any, preApproved, review bool) safety.Decision {
-	dec := e.Gate.EvaluateStep(tool, args, preApproved)
+func (e *Executor) adjudicate(ctx context.Context, tool types.Tool, args map[string]any, preApproved, review bool) safety.Decision {
+	dec := e.Gate.EvaluateStepIn(ctx, tool, args, preApproved)
 	if !review || dec.NeedApproval || dec.Risk == "low" || e.Reviewer == nil {
 		return dec
 	}
@@ -668,7 +668,7 @@ func (e *Executor) runStep(ctx context.Context, state *execState, step types.Ste
 
 	// 安全门控：先按**计划里的字面参数**裁一次。带引用时这次看到的还是占位符，
 	// 所以替换完还要再裁一次（见「派发前重算裁决」）。
-	dec := e.adjudicate(tool, step.Args, preApproved, !hasRefs(step.Args))
+	dec := e.adjudicate(ctx, tool, step.Args, preApproved, !hasRefs(step.Args))
 	if dec.NeedApproval {
 		if approved, cancelled := e.awaitApproval(ctx, &r, taskID, step, dec); cancelled || !approved {
 			return finalize()
@@ -711,7 +711,7 @@ func (e *Executor) runStep(ctx context.Context, state *execState, step types.Ste
 	// 这次的 Reason 里是真值，用户在卡片上看到的是实际会动的路径。
 	final := dec
 	if hasRefs(step.Args) {
-		final = e.adjudicate(tool, args, preApproved, true)
+		final = e.adjudicate(ctx, tool, args, preApproved, true)
 		if final.NeedApproval && !dec.NeedApproval {
 			if approved, cancelled := e.awaitApproval(ctx, &r, taskID, step, final); cancelled || !approved {
 				return finalize()
@@ -799,7 +799,7 @@ func (e *Executor) runStep(ctx context.Context, state *execState, step types.Ste
 	// 而不是 e.readOnly()——后者问的是"在当前门控下是否只读"，用户把某个写工具
 	// 设成只读时，那不该顺手关掉这道保险。
 	if tool.Permission() != types.PermissionReadOnly {
-		state.snap.capture(step.ID, step.Tool, tool, args)
+		state.snap.capture(ctx, step.ID, step.Tool, tool, args)
 	}
 
 	// 带超时执行；仅在真正调用工具期间持有并发槽位（审批等待不阻塞其他步骤）；

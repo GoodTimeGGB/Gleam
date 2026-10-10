@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"gleam/internal/tools/toolutil"
 	"gleam/pkg/types"
 )
 
@@ -19,7 +20,7 @@ func (f *fakeTool) Description() string                                  { retur
 func (f *fakeTool) Schema() map[string]any                               { return map[string]any{"type": "object"} }
 func (f *fakeTool) Permission() types.Permission                         { return f.perm }
 func (f *fakeTool) Execute(context.Context, map[string]any) (any, error) { return "ok", nil }
-func (f *fakeTool) Paths(args map[string]any) []string {
+func (f *fakeTool) Paths(_ context.Context, args map[string]any) []string {
 	if v, ok := args["path"].(string); ok && v != "" {
 		return []string{v}
 	}
@@ -67,6 +68,28 @@ func TestGate_MediumPathCheck(t *testing.T) {
 	// 相对路径视为工作区内
 	if d := g.Evaluate(tool, map[string]any{"path": "a.txt"}); d.NeedApproval {
 		t.Errorf("相对路径应放行: %+v", d)
+	}
+}
+
+// 任务自己的边界（在副本里跑时那一份）算信任范围，而这份边界是 **per-task** 的：
+// 同一个绝对路径在别的任务的 ctx 下仍然要被拦——不然"信任范围"就成了一个全局开关，
+// 任务 A 的副本会在任务 B 跑的时候也算可信，那正是引入副本要消掉的串味。
+func TestGate_TaskRootsAreTrustedPerTask(t *testing.T) {
+	g := New("auto", nil, nil, []string{`D:\ws`}, time.Minute)
+	tool := &fakeTool{name: "file.write", perm: types.PermissionUserApproved}
+	wt := `D:\gleam\worktrees\t1`
+	args := map[string]any{"path": wt + `\a.txt`}
+
+	if d := g.EvaluateStepIn(context.Background(), tool, args, false); !d.NeedApproval {
+		t.Errorf("没有 per-task 边界时它就是个外部路径，应当审批: %+v", d)
+	}
+	ctx := toolutil.WithRoots(context.Background(), []string{wt})
+	if d := g.EvaluateStepIn(ctx, tool, args, false); d.NeedApproval {
+		t.Errorf("本次任务自己的边界内应当放行: %+v", d)
+	}
+	other := toolutil.WithRoots(context.Background(), []string{`D:\gleam\worktrees\t2`})
+	if d := g.EvaluateStepIn(other, tool, args, false); !d.NeedApproval {
+		t.Errorf("别的任务的边界不能顺带把这条路径变可信: %+v", d)
 	}
 }
 

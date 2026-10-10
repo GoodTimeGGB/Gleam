@@ -33,23 +33,39 @@ func TestWebUI_MarketSkillInstallAndList(t *testing.T) {
 	f := newFixture(t, nil)
 	out := f.call("GET", "/api/market/skills?q=速记", nil)
 	presets := out["presets"].([]any)
-	if len(presets) == 0 {
+	// 按**名字**取那一条，不假设它排第一：目录是会长的，关键词命中几条、谁排前面
+	// 都随目录变（"速记"两个字后来也出现在别的技能描述里）。假设下标，判据就会
+	// 因为"目录变大了"而红，而它想验的其实是 installed 这个字段。
+	quick := map[string]any(nil)
+	for _, it := range presets {
+		if m, ok := it.(map[string]any); ok && m["name"] == "quick-note" {
+			quick = m
+		}
+	}
+	if quick == nil {
 		t.Fatal("速记应命中 quick-note")
 	}
 	// installed 必须是真布尔。写成 `_, installed := Skills.Get(name)` 时它是 error，
 	// 序列化出来是 {}——前端一律当成「已安装」，市场里每一条都挂着重装按钮。
-	if _, ok := presets[0].(map[string]any)["installed"].(bool); !ok {
-		t.Fatalf("installed 不是布尔: %#v", presets[0].(map[string]any)["installed"])
+	if _, ok := quick["installed"].(bool); !ok {
+		t.Fatalf("installed 不是布尔: %#v", quick["installed"])
 	}
-	if presets[0].(map[string]any)["installed"] != false {
+	if quick["installed"] != false {
 		t.Fatal("未安装时 installed 应为 false")
 	}
 	inst := f.call("POST", "/api/market/skills/install", map[string]any{"name": "quick-note"})
 	if inst["installed"] != true || inst["version"] != float64(1) {
 		t.Errorf("安装结果 = %v", inst)
 	}
-	if got := f.call("GET", "/api/market/skills?q=速记", nil)["presets"].([]any)[0].(map[string]any)["installed"]; got != true {
-		t.Errorf("安装后 installed = %v", got)
+	after := f.call("GET", "/api/market/skills?q=速记", nil)["presets"].([]any)
+	gotInstalled := any(nil)
+	for _, it := range after {
+		if m, ok := it.(map[string]any); ok && m["name"] == "quick-note" {
+			gotInstalled = m["installed"]
+		}
+	}
+	if gotInstalled != true {
+		t.Errorf("安装后 installed = %v", gotInstalled)
 	}
 	// 已安装技能列表可见
 	skills := f.call("GET", "/api/skills", nil)

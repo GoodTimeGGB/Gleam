@@ -39,26 +39,29 @@ func (t *Tools) RegisterAll(reg *registry.Registry) {
 
 // resolve 解析并校验路径：绝对路径必须位于某个根目录下；相对路径基于第一个根目录。
 // 边界语义见 toolutil.ResolveInRoots（与 shell 工具共用同一份实现）。
-func (t *Tools) resolve(p string) (string, error) {
-	return toolutil.ResolveInRoots(p, t.Roots)
+//
+// 根目录优先取 ctx 里那一份（本次任务的边界），没有才回落到构造时配的 t.Roots：
+// 任务在自己的 worktree 里跑时，只有 ctx 那份能把它引到真实的文件上。
+func (t *Tools) resolve(ctx context.Context, p string) (string, error) {
+	return toolutil.ResolveInRoots(p, toolutil.RootsFrom(ctx, t.Roots))
 }
 
 // requireResolve 取必填路径参数并解析校验。
-func (t *Tools) requireResolve(args map[string]any, key string) (string, error) {
+func (t *Tools) requireResolve(ctx context.Context, args map[string]any, key string) (string, error) {
 	p, err := toolutil.RequireStr(args, key)
 	if err != nil {
 		return "", err
 	}
-	return t.resolve(p)
+	return t.resolve(ctx, p)
 }
 
 // Paths 实现 types.PathAware：返回参数中涉及的路径，供安全门控判断信任范围。
-func (t *Tools) Paths(args map[string]any) []string {
+func (t *Tools) Paths(ctx context.Context, args map[string]any) []string {
 	keys := []string{"path", "src", "dst", "dir", "root"}
 	var out []string
 	for _, k := range keys {
 		if v := toolutil.Str(args, k); v != "" {
-			if abs, err := t.resolve(v); err == nil {
+			if abs, err := t.resolve(ctx, v); err == nil {
 				out = append(out, abs)
 			} else {
 				out = append(out, v)
@@ -81,7 +84,7 @@ func (t *listTool) Schema() map[string]any {
 	})
 }
 func (t *listTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	dir, err := t.requireResolve(args, "path")
+	dir, err := t.requireResolve(ctx, args, "path")
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +128,7 @@ func (t *readTool) Schema() map[string]any {
 	})
 }
 func (t *readTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	p, err := t.requireResolve(args, "path")
+	p, err := t.requireResolve(ctx, args, "path")
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +192,7 @@ func (t *writeTool) Schema() map[string]any {
 	})
 }
 func (t *writeTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	p, err := t.requireResolve(args, "path")
+	p, err := t.requireResolve(ctx, args, "path")
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +229,7 @@ func (t *mkdirTool) Schema() map[string]any {
 	})
 }
 func (t *mkdirTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	p, err := t.requireResolve(args, "path")
+	p, err := t.requireResolve(ctx, args, "path")
 	if err != nil {
 		return nil, err
 	}
@@ -254,11 +257,11 @@ func (t *moveTool) Schema() map[string]any {
 	})
 }
 func (t *moveTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	src, err := t.requireResolve(args, "src")
+	src, err := t.requireResolve(ctx, args, "src")
 	if err != nil {
 		return nil, err
 	}
-	dst, err := t.requireResolve(args, "dst")
+	dst, err := t.requireResolve(ctx, args, "dst")
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +290,7 @@ func (t *deleteTool) Schema() map[string]any {
 	})
 }
 func (t *deleteTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	p, err := t.requireResolve(args, "path")
+	p, err := t.requireResolve(ctx, args, "path")
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +325,7 @@ func (t *searchTool) Schema() map[string]any {
 	})
 }
 func (t *searchTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	root, err := t.requireResolve(args, "root")
+	root, err := t.requireResolve(ctx, args, "root")
 	if err != nil {
 		return nil, err
 	}

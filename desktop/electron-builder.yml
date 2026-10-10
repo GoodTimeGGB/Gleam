@@ -1,5 +1,8 @@
-# Phase 0 spike: minimal config. Only the Linux unpacked target ("dir") has been built and checked.
-# Signing, notarization, installers (dmg) and fuses are Phase 1+.
+# 桌面端打包配置。
+# 构建顺序：scripts/build-sidecar.mjs（Go sidecar）→ scripts/fetch-runtimes.mjs（内置运行时）
+# → electron-builder。两步产物都在 extraResources 里，装完即可用，用户不需要自己装环境。
+# 未做：代码签名与公证（无付费账号，见 docs/known-limits.md），所以 Windows 上
+# SmartScreen 会拦一次，安装包本身是干净的。
 appId: ai.gleam.desktop
 productName: Gleam
 publish:
@@ -7,6 +10,9 @@ publish:
   owner: gleam-ai
   repo: Gleam
 directories:
+  # 只是兜底默认值：npm run pack:win / pack:linux 会把它顶到系统临时目录
+  # （scripts/pack-desktop.mjs）——放在工作区里会让索引器抓住新产物，
+  # 打包前的清理步骤会以 EBUSY 失败。
   output: dist
 files:
   - dist/**/*
@@ -18,6 +24,13 @@ asar: true
 extraResources:
   - from: .sidecar/${platform}-${arch}/
     to: bin/
+    filter:
+      - "**/*"
+  # 内置运行时（Node 含 npx、uv 含 uvx）：同样放在 asar 外，要能被直接执行。
+  # 它们**不进系统 PATH**——只有 Gleam 自己拉起的进程（shell.exec / MCP 子进程）看得见，
+  # 与 Go 工具链同一个口径（internal/webui/goinstall.go）。
+  - from: .runtimes/${platform}-${arch}/
+    to: runtimes/
     filter:
       - "**/*"
   # 应用图标：窗口/任务栏运行时读它（主进程 window.ts 从 resources/icon.png 取）。
@@ -33,14 +46,35 @@ win:
   target:
     - nsis
   icon: ../assets/gleam.ico
+# 辅助安装（不是一键静默）：可选「为所有人 / 仅为我」、可改安装目录、完成页可勾选直接运行——
+# 这几步与常见 Windows 安装程序一致，用户不必猜这一下会发生什么。
 nsis:
+  # 产物名**不带版本号**：官网的下载按钮指向
+  # `releases/latest/download/Gleam-Setup.exe`，版本号一旦进文件名，那条链接每次发版都得改，
+  # 而"忘了改"正是下载页对外报旧版本的原因。版本号在 Release 的 tag 里，不靠文件名承载。
+  artifactName: Gleam-Setup.${ext}
   oneClick: false
   perMachine: false
+  allowElevation: true
   allowToChangeInstallationDirectory: true
-  deleteAppDataOnUninstall: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  artifactName: Gleam-Setup-${version}.${ext}
+  shortcutName: Gleam
+  runAfterFinish: true
+  # 卸载时清掉 Electron 自己的用户数据目录（缓存、窗口状态）。用户的真实数据在 ~/.gleam，
+  # 不归安装器管——所以这一条清的是缓存，不是用户的东西。
+  deleteAppDataOnUninstall: true
+  # 语言按系统区域自动定：NSIS 没有语言选择对话框时，$LANGUAGE 取系统语言，认不出就用
+  # **列表里第一条**兜底。所以 en_US 必须排在前面——中文系统命中 zh_CN 走中文，
+  # 其余区域（含拿不到区域的情况）一律英文。顺序反过来，全世界都会看到中文安装界面。
+  # 不设 displayLanguageSelector：多一个"选语言"的弹窗，就多一步要用户做决定的选择。
+  installerLanguages:
+    - en_US
+    - zh_CN
+  # 安装页的头图与侧图（常见安装程序的品牌位）。尺寸由 NSIS 定死：
+  # 头图 150×57、侧图 164×314，生成脚本见 scripts/make-installer-art.go。
+  installerHeader: ../assets/installer-header.bmp
+  installerSidebar: ../assets/installer-sidebar.bmp
 mac:
   target:
     - dir

@@ -30,7 +30,7 @@ import _utf8  # noqa: F401  # Windows 下 stdout 默认按 GBK 写，中文会�
 # 允许直接写文件的唯一位置：原子写这一层自己。
 ALLOW_PREFIX = os.path.join("internal", "atomicfile")
 RAW_WRITE = re.compile(r"\bos\.WriteFile\s*\(")
-SKIP_DIRS = {".git", "node_modules", "dist", ".workbuddy-ai", ".qoder-cn", ".cursor", ".claude", ".agents", "pack", "bin"}
+SKIP_DIRS = {".git", "node_modules", "dist", ".workbuddy-ai", ".qoder-cn", ".cursor", ".claude", ".agents", "bin"}
 
 
 def main() -> int:

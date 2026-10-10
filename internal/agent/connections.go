@@ -23,7 +23,7 @@ import (
 //
 // 台账行的 kind 与本清单必须一致，这条由 TestConnections_EveryEgressKindHasARow 在运行时判
 // （闸门只能读源码，读不出"这一行今天到底画没画出来"）。
-var egressKinds = []string{"llm", "web.fetch", "cloud", "feedback", "update", "go.toolchain"}
+var egressKinds = []string{"llm", "web.fetch", "cloud", "feedback", "update", "go.toolchain", "market.remote", "mcp.remote", "git.remote"}
 
 // EgressKinds 出网落点清单（供测试与自述用；改这份的同时必须改台账行）。
 func EgressKinds() []string { return append([]string(nil), egressKinds...) }
@@ -68,7 +68,7 @@ func (a *Agent) ConnectionView(bindAddr string) ConnectionLedger {
 		rows = append(rows, *in)
 	}
 	rows = append(rows, a.mcpRows()...)
-	rows = append(rows, a.cloudRow(rep), a.feedbackRow(rep), updateRow(rep), goToolchainRow(rep), marketRow())
+	rows = append(rows, a.cloudRow(rep), a.feedbackRow(rep), updateRow(rep), goToolchainRow(rep), marketRemoteRow(rep), mcpRemoteRow(rep), a.gitRemoteRow(rep), marketRow())
 
 	return ConnectionLedger{
 		Rows: rows,
@@ -373,19 +373,98 @@ func goToolchainRow(rep safety.EgressReport) ConnectionRow {
 	}
 }
 
-// marketRow 模板目录：市场是随程序一起装好的静态目录，**装它本身不出网**。
+// marketRemoteRow 市场远端目录：查 MCP 官方注册表这条路。
+//
+// 为什么它必须单独有一行：台账下面那行（market）说的是"内置目录一次请求都不发"，
+// 那句话在接了远端目录之后只对内置那一半成立。把两条分开列，读者才不会读到一句
+// 已经被自己推翻了一半的话——含混的对账比不做对账更坏。
+func marketRemoteRow(rep safety.EgressReport) ConnectionRow {
+	return ConnectionRow{
+		ID: "market.remote", Title: "市场远端目录", Kind: "out", KindText: "出网",
+		Target:  "MCP 官方注册表（registry.modelcontextprotocol.io）；npm 源只用于测速与安装时指定 registry",
+		Status:  "开着：打开市场页或搜索时按需拉取，结果缓存 10 分钟",
+		Trigger: "你打开市场页 / 搜索目录时（自动），或点「刷新目录」时（强制）",
+		Leaves:  "不外发你的数据；只发一个搜索词做目录查询，查询串本身不记入留痕",
+		Trace:   "门控留痕 action=egress、kind=market.remote（只记主机与字节）",
+		Stats:   egressStatsText(rep, "market.remote"),
+		Off:     "不打开市场页就不发；目录连不上时自动退回内置目录与上次缓存，不影响已装好的 MCP",
+	}
+}
+
+// gitRemoteRow 建任务副本之前那一次 fetch。
+//
+// 为什么它必须有一行：这是**设置页一个开关**造出来的出网——「创建前先 fetch」打开之后，
+// 每建一个任务副本就往远端问一次。而 worktree 这一页其余内容讲的都是本机动作（建目录、删目录），
+// 读者不会自然想到"隔离"这件事会连网。
+//
+// 与 git.push 的关系：push 也出网，但它是模型在任务里主动调 git.push 触发的，
+// 不属于"配置里就存在、随时可能被动用"这一类；这一行只交代 fetch。
+func (a *Agent) gitRemoteRow(rep safety.EgressReport) ConnectionRow {
+	r := ConnectionRow{
+		ID: "git.remote", Title: "远端仓库同步（建副本前的 fetch）", Kind: "out", KindText: "出网",
+		Target:  "工作区的 origin 远端（地址读自本机 git 配置；台账只记主机名，不记 URL 全量）",
+		Trigger: "设置 → Worktrees 打开「创建前先 fetch」后，每个任务建 worktree 之前自动跑一次 git fetch",
+		Leaves:  "不外发你的数据；这一下只向远端取分支与提交，取回的内容留在本机",
+		Trace:   "门控留痕 action=egress、kind=git.remote（只记主机；git 不报传输字节，所以次数有、字节为 0）",
+		Stats:   gitFetchStatsText(rep),
+		Off:     "设置 → Worktrees 关掉「创建前先 fetch」；连总开关一起关掉则一个任务副本都不会建",
+	}
+	if a.Cfg == nil || !a.Cfg.Worktrees.Enabled || !a.Cfg.Worktrees.FetchBeforeCreate {
+		r.Status = "关着：worktree 总开关与「创建前先 fetch」没同时打开，这条线不存在"
+		r.Target = "—"
+		r.Leaves = "不外发：要么不建副本，要么建的时候不同步远端"
+		return r
+	}
+	r.Status = "开着：每建一个任务副本就 fetch 一次"
+	return r
+}
+
+// gitFetchStatsText fetch 的读数不说字节：git 不报传输量，写"累计 0 字节"会被读成
+// "什么都没发出去"，而事实是"发了多少这里数不出来"——把不知道说成答案，比不说更坏。
+func gitFetchStatsText(rep safety.EgressReport) string {
+	st, ok := egressStat(rep, "git.remote")
+	if !ok {
+		return "本次运行还没有这一类的出网记录"
+	}
+	hosts := strings.Join(st.Hosts, "、")
+	if len(st.Hosts) == 0 {
+		hosts = "主机名未知"
+	}
+	return fmt.Sprintf("已出网 %d 次，涉及 %d 个主机（%s）；git 不报传输字节，这里只记次数", st.Count, len(st.Hosts), hosts)
+}
+
+// marketRow 内置模板目录：市场随程序一起装好的那部分，装它本身不出网。
 //
 // 为什么值得单独占一行：别的桌面 Agent 把"市场"当成入口，用户默认那里在联网。
 // 这一行是这张表里唯一一条"你以为是连接、其实不是"——把这件事写在台账上，
 // 比在功能介绍里说一遍"我们本地优先"更可核查。
 func marketRow() ConnectionRow {
 	return ConnectionRow{
-		ID: "market", Title: "技能 / MCP 模板目录", Kind: "local", KindText: "本机",
+		ID: "market", Title: "技能 / MCP 模板目录（内置）", Kind: "local", KindText: "本机",
 		Target:  "内置在程序里，不是一个网络地址",
 		Status:  "离线可用",
 		Trigger: "你在市场点「安装」时",
 		Leaves:  "不外发：安装只往配置与技能库里写条目",
-		Trace:   "写配置与技能库有留痕（安装记录在配置里）；目录本身一次请求都不发",
+		Trace:   "写配置与技能库有留痕（安装记录在配置里）；这一份目录本身一次请求都不发",
 		Off:     "不需要关：它不发请求。装完的 MCP 若不想再用，去设置 → MCP 停用",
+		Alert: "市场页还会去 MCP 官方注册表拉远端目录——那条出网单独记在「市场远端目录」那一行，" +
+			"不要拿这一行的「离线可用」去读整张市场页",
+	}
+}
+
+// mcpRemoteRow 远端 MCP：用户从市场装的那几个 streamable-http 服务器。
+//
+// 为什么它和下面每条 MCP 服务器各占一行、而不是合并：这一行回答的是"这一类动作会不会出网"，
+// 下面那些行回答的是"这台机器上装了哪几个、各自通到哪"。两个问题，两行；合并了任一个都答不全。
+func mcpRemoteRow(rep safety.EgressReport) ConnectionRow {
+	return ConnectionRow{
+		ID: "mcp.remote", Title: "远端 MCP 服务器", Kind: "out", KindText: "出网",
+		Target:  "你在市场装的远端（streamable-http）MCP 服务器，各自的主机见下面「MCP 服务器」那几行",
+		Status:  "待命：只有模型调用远端工具、或启动时握手才发请求",
+		Trigger: "任务执行中模型调用某个 mcp.<服务器>.<工具> 时，以及启动/重连时的握手",
+		Leaves:  "工具参数与结果走这条连接；请求头里的凭据（API Key 之类）也随请求发往对方主机",
+		Trace:   "门控留痕 action=egress、kind=mcp.remote（只记主机与字节，不记正文与凭据）",
+		Stats:   egressStatsText(rep, "mcp.remote"),
+		Off:     "设置 → MCP：停用或卸载那台远端服务器；不装任何远端服务器时这条线不存在",
 	}
 }

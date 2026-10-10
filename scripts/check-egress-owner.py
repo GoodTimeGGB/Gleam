@@ -55,7 +55,7 @@ import _utf8  # noqa: F401  # Windows 下 stdout 默认按 GBK 写，中文会�
 
 OWNER_FILE = os.path.join("internal", "agent", "connections.go")
 CALL_NAME = "RecordEgress"
-SKIP_DIRS = {".git", "bin", "pack", "dist", "node_modules", "static"}
+SKIP_DIRS = {".git", "bin", "dist", "node_modules", "static"}
 
 KINDS_RE = re.compile(r"var\s+egressKinds\s*=\s*\[\]string\{(.*?)\}", re.S)
 STR_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')

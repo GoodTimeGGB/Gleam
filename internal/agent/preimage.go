@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -159,9 +160,13 @@ func (s *snapshotter) enabled() bool { return s != nil && s.dir != "" }
 // （`tools/file/file.go:61`），所以只接受绝对路径——非绝对的那条工具自己也会拒，
 // 没有副作用就没有可还原的东西。
 //
+// ctx 必须传下去：任务在自己的 worktree 里跑时，路径要按**本次任务**的边界解析。
+// 用静态工作区解析出来的绝对路径是另一个文件——快照会存下一份没人动过的内容，
+// 而真正被改的那份反而没有快照，还原就成了一句空话。
+//
 // 任何失败都**不影响执行**：快照是保险，不是前提。为了留后路而让任务跑不完，
 // 是拿"能不能干活"去换"能不能回头"。
-func (s *snapshotter) capture(stepID, toolName string, tool types.Tool, args map[string]any) {
+func (s *snapshotter) capture(ctx context.Context, stepID, toolName string, tool types.Tool, args map[string]any) {
 	if !s.enabled() || tool == nil {
 		return
 	}
@@ -169,7 +174,7 @@ func (s *snapshotter) capture(stepID, toolName string, tool types.Tool, args map
 	if !ok {
 		return
 	}
-	for _, p := range pa.Paths(args) {
+	for _, p := range pa.Paths(ctx, args) {
 		if !filepath.IsAbs(p) {
 			continue
 		}

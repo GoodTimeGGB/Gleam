@@ -57,6 +57,9 @@ import sys
 import _utf8  # noqa: F401  # Windows 下 stdout 默认按 GBK 写，中文会变乱码
 
 APP_JS = os.path.join("internal", "webui", "static", "app.js")
+# 壳层 JS 已按域拆文件（geo.js、settings2-*.js、chrome.js…）：锚点引用、接线、
+# 函数调用三件事都**跨文件**成立，只看 app.js 会把拆出去的那部分误判成"没人接"。
+JS_DIR = os.path.join("internal", "webui", "static")
 INDEX_HTML = os.path.join("internal", "webui", "static", "index.html")
 
 # 反向判据罩住的锚点前缀：rail-* 现场栏结构、ro-* 读数格子、cp-* 输入区就地控件、
@@ -65,9 +68,17 @@ SIDE_PREFIX = ("rail-", "ro-", "cp-", "bp-", "cx-", "cu-")
 # HTML 里指向 id 的无障碍属性（这些算"有人接"，只是接的人不是 JS）
 ARIA_TO = ("aria-controls", "aria-labelledby", "aria-describedby", "for")
 
-REF_RE = re.compile(r"""(?:\$\(\s*|getElementById\(\s*|querySelector\(\s*)['"]#([A-Za-z0-9_\-]+)['"]""")
+# getElementById 收的是裸 id（不带 #），$()/querySelector 才带。原来三者共用一条
+# "必须带 #" 的规则，于是 getElementById('cp-update-btn') 这种合法接线被判成"没人接"。
+REF_RE = re.compile(
+    r"""(?:\$\(\s*|querySelector\(\s*)['"]#([A-Za-z0-9_\-]+)['"]"""
+    r"""|getElementById\(\s*['"]([A-Za-z0-9_\-]+)['"]""")
+
 ID_ATTR_RE = re.compile(r'id="([A-Za-z0-9_\-]+)"')
 ID_ASSIGN_RE = re.compile(r"""\.id\s*=\s*['"]([A-Za-z0-9_\-]+)['"]""")
+# 设置页用 h(tag, { id: 'x' }) 这种属性对象建 DOM：只认 id="…" 会把这类定义
+# 判成"没人定义"，于是引用它的地方被误报（2026-10-10 扩到全量 JS 后才暴露）。
+ID_PROP_RE = re.compile(r"""\bid\s*:\s*['"]([A-Za-z0-9_\-]+)['"]""")
 FUNC_RE = re.compile(r"^\s*(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(", re.M)
 
 
@@ -105,13 +116,14 @@ def refs_of(js_text):
         tail = js_text[m.end():m.end() + 8].lstrip()
         if tail.startswith("+"):
             continue
-        out.add(m.group(1))
+        out.add(m.group(1) or m.group(2))
     return out
 
 
 def judge(js_text, html_text, label_js, label_html, say):
     """判定一份 (app.js, index.html) 文本。返回退出码。"""
-    defined = set(ID_ATTR_RE.findall(html_text)) | set(ID_ATTR_RE.findall(js_text)) | set(ID_ASSIGN_RE.findall(js_text))
+    defined = (set(ID_ATTR_RE.findall(html_text)) | set(ID_ATTR_RE.findall(js_text))
+               | set(ID_ASSIGN_RE.findall(js_text)) | set(ID_PROP_RE.findall(js_text)))
     refs = refs_of(js_text)
 
     rc = 0
@@ -133,7 +145,13 @@ def judge(js_text, html_text, label_js, label_html, say):
         say("index.html 里找不到任何 %s 锚点：现场栏被删了还是改了前缀？判据失效，请先修本脚本。"
             % "/".join(SIDE_PREFIX))
         return 1
-    orphans = [i for i in side_ids if ("#" + i) not in js_text and i not in aria_targets]
+        # 「有人接」有两种合法写法：$('#id') 里的 '#id'，与 getElementById('id') 的裸 id。
+    # 早先只查字面 "#id"，于是 getElementById 这种接线被误判成"没人接"。
+    def wired(name):
+        return (("#" + name) in js_text
+                or ("getElementById('" + name + "')") in js_text
+                or ('getElementById("' + name + '")') in js_text)
+    orphans = [i for i in side_ids if not wired(i) and i not in aria_targets]
     if orphans:
         say("这些锚点没有任何生产者（界面画出来了，那一格永远是占位）：")
         for o in orphans:
@@ -197,11 +215,14 @@ def main() -> int:
     selftest = "--self-test" in sys.argv[1:]
     root = argv[0] if argv else "."
     try:
-        js_text, html_text = read(os.path.join(root, APP_JS)), read(os.path.join(root, INDEX_HTML))
+        # 静态目录下所有 JS 拼成一份：拆文件之后，锚点引用与接线都是跨文件的
+        names = sorted(n for n in os.listdir(os.path.join(root, JS_DIR)) if n.endswith(".js"))
+        js_text = "\n".join(read(os.path.join(root, JS_DIR, n)) for n in names)
+        html_text = read(os.path.join(root, INDEX_HTML))
     except OSError as e:
         print("读不到前端源文件：%s" % e)
         return 1
-    label_js = APP_JS.replace("\\", "/")
+    label_js = "%s/*.js（%d 份）" % (JS_DIR.replace("\\", "/") + "/", len(names))
     label_html = INDEX_HTML.replace("\\", "/")
     rc = judge(js_text, html_text, label_js, label_html, print)
     if rc != 0 or not selftest:

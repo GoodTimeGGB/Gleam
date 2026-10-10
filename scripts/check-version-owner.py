@@ -20,7 +20,7 @@ r"""前端不许再抄一份版本号，也不许替「有没有新版」下结�
 **官网（`website/`）是同一件事的另一半，规则刻意相反**：应用内前端有 `GET /api/info`
 可问，所以那里不许抄；官网是纯静态页，没有出口可问，只能抄一份——那就把这一份关进
 `id="dl-version"` 与 `id="dl-date"` 两个打了标记的元素里，要求它**等于 owner**
-（版本的 owner 是 `buildinfo`，发布日期的 owner 是 `pack/` 下最新那份
+（版本的 owner 是 `buildinfo`，发布日期的 owner 是 `dist/` 下最新那份
 `SHA256SUMS-<date>.txt`，由 `scripts/package.sh` 打包时写出），并且整站只许出现一次。
 标记读不到时报"判据失效"而不是"通过"。
 
@@ -49,7 +49,10 @@ BUILDINFO = os.path.join("internal", "buildinfo", "buildinfo.go")
 STATIC = os.path.join("internal", "webui", "static")
 WEBSITE = "website"
 WEBSITE_PAGE = os.path.join(WEBSITE, "index.html")
-PACK = "pack"
+# 打包产物的落点，与 scripts/package.sh 里的 DIST 必须一致。
+# 这里只读**带日期**的校验和：它由打包那次写出，所以"新包打出来了、官网日期还停在上次"
+# 是机械可判的。不带日期的 SHA256SUMS.txt 是 latest 用的，推不出发布日期。
+PACK = "dist"
 SCAN_SUFFIX = (".js", ".html", ".css")
 SUMS_RE = re.compile(r"^SHA256SUMS-(\d{8})\.txt$")
 
@@ -146,7 +149,7 @@ def marked(text, marker):
 
 
 def release_date(root):
-    """「这次发布是哪天」的 owner：`pack/` 下最新那份 `SHA256SUMS-<date>.txt`。
+    """「这次发布是哪天」的 owner：`dist/` 下最新那份 `SHA256SUMS-<date>.txt`。
 
     它由 `scripts/package.sh` 在打包时写出，所以官网上那个日期不需要有人记得改——
     漏改就是这道判据报红。
@@ -176,7 +179,7 @@ def site_hits(page_text, scan_texts, version, latest_date):
     hits = []
     for marker, want, why in (
         ("dl-version", "v" + version, "版本徽标要等于 owner（internal/buildinfo）"),
-        ("dl-date", latest_date, "发布日期要等于 pack/ 下最新那份校验和的日期"),
+        ("dl-date", latest_date, "发布日期要等于 dist/ 下最新那份校验和的日期"),
     ):
         got = marked(page_text, marker)
         if got is None:

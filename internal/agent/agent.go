@@ -26,6 +26,7 @@ import (
 	"gleam/internal/harness/space"
 	"gleam/internal/llm"
 	"gleam/internal/tools/file"
+	"gleam/internal/tools/toolutil"
 	"gleam/pkg/types"
 )
 
@@ -62,6 +63,12 @@ type Agent struct {
 	// 模型档位客户端缓存：档位名 -> 客户端（按配置惰性构建，设置保存后由 RebuildTierClients 重建）
 	tierMu      sync.Mutex
 	tierClients map[string]llm.Client
+
+	// 上下文窗口的最近读数：最近一次请求的输入 token 规模（见 ctxwindow.go）。
+	// 它不属于某个任务：memory 的短窗口是这台机器上所有任务共用的那一份。
+	ctxMu               sync.Mutex
+	lastPromptTokens    int
+	lastPromptEstimated bool
 }
 
 // taskBudget 用户批准后追加的额度（在配置上限之上再加）。
@@ -147,6 +154,8 @@ func (a *Agent) RunGoal(ctx context.Context, req types.GoalRequest) *types.GoalR
 	// 与下面的成长记录紧挨着，避免"记了口径"和"用了口径"隔在文件两头。
 	prog := &goalProgress{}
 	result := a.runGoalLoop(ctx, req, goal, mode, normalizeTaskMode(req.TaskMode), taskID, prog)
+	// 跑完就处置副本：该留的留（脏的一律留，见 settleWorktree），该清的在配置允许时清。
+	a.settleWorktree(taskID)
 	prog.stamp(result)
 	result.ConfigSnapshot = &snap
 	result.TaskID = taskID
@@ -709,6 +718,8 @@ func (a *Agent) installUsageHook() {
 
 // addUsage 累加一次模型调用用量；非本引擎的任务（taskID 未登记）直接忽略。
 func (a *Agent) addUsage(taskID string, u llm.Usage) {
+	// 先记窗口读数，再看 taskID：它问的是"当前上下文有多大"，跟哪次任务无关。
+	a.notePromptSize(u)
 	if taskID == "" {
 		return
 	}
@@ -831,10 +842,17 @@ func (a *Agent) runGoalLoop(ctx context.Context, req types.GoalRequest, goal, mo
 	if a.Mem != nil {
 		a.Mem.AddTurn("user", goal)
 	}
-	cwd := a.workspaceOf(req)
-
 	notify := func(phase, msg string, pct int, kind string) {
 		a.Notifier.OnProgress(types.ProgressEvent{TaskID: taskID, Phase: phase, Message: msg, Progress: pct, Kind: kind})
+	}
+
+	cwd := a.workspaceOf(req)
+	// ---------- 隔离：让这次任务在自己的 worktree 里跑 ----------
+	// 时机是**规划之前**：规划拿到的 cwd 与执行时的文件边界是同一件事的两面，
+	// 只改一边就会出现"照着主工作区规划、把文件写进 worktree"。
+	if iso := a.isolateForTask(ctx, req, taskID, notify); len(iso.roots) > 0 {
+		ctx = toolutil.WithRoots(ctx, iso.roots)
+		cwd = iso.cwd
 	}
 
 	// 场景模板的模型档位：角色声明了档位且配置里有对应模型时换模型，否则就是主模型。
@@ -885,7 +903,8 @@ func (a *Agent) runGoalLoop(ctx context.Context, req types.GoalRequest, goal, mo
 		}
 		var recent []memory.Turn
 		if a.Mem != nil && a.Mem.Short != nil {
-			recent = a.Mem.Short.Recent(6)
+			// 带几轮由 memory 说话（水位越线时会收紧，见 CarryTurns）。
+			recent = a.Mem.Short.Recent(a.Mem.CarryTurns())
 		}
 		var relevant []memory.Hit
 		if a.Mem != nil && a.Mem.Long != nil {
@@ -1004,6 +1023,14 @@ func (a *Agent) runGoalLoop(ctx context.Context, req types.GoalRequest, goal, mo
 			return stop
 		}
 
+		// ---------- 上下文窗口检查点（同一处：执行后、反思前） ----------
+		// 放在这里是因为**接下来马上就要再发一次请求**（反思），而这一轮的执行已经
+		// 把上下文撑到了最大。任务还没结束（下面还要反思、可能还要重规划），
+		// 所以只有越过 96% 才动手——压完不结束任务，接着把这一轮走完。
+		if compressed, tightened := a.compressMidTask(ctx, taskID); compressed || tightened {
+			notify("context", a.contextActionText(compressed, tightened, true), 92, "info")
+		}
+
 		// ---------- Reflect ----------
 		notify("reflect", tell.ReflectStart(), 92, "info")
 		// 验收标准在规划时就定好了，这里交给反思器逐条判定（而不是让它凭感觉打分）
@@ -1115,7 +1142,7 @@ func (a *Agent) runChatPath(ctx context.Context, goal, taskID, role string) *typ
 	sys += volatile.String()
 	var msgs []llm.Message
 	if a.Mem != nil && a.Mem.Short != nil {
-		for _, t := range a.Mem.Short.Recent(6) {
+		for _, t := range a.Mem.Short.Recent(a.Mem.CarryTurns()) {
 			role := llm.RoleUser
 			if t.Role == "assistant" {
 				role = llm.RoleAssistant
@@ -1189,11 +1216,16 @@ func (a *Agent) finalize(taskID string, result *types.GoalResult, plan *types.Pl
 	if result.Summary != "" && a.Mem != nil {
 		a.Mem.AddTurn("assistant", result.Summary)
 	}
-	if a.Cfg.Agent.ContextCompress && a.Mem != nil {
+	if a.compressionOn() {
+		// 收尾路径上做，但**不阻塞交付**：摘要要花一次模型调用，任务的结论不该等它。
+		// 用独立的 ctx 与超时——任务自己的 ctx 这时可能已经取消（用户点了停止、
+		// 或者任务是失败收场的），而"把早期上下文汇总下来"不因为任务失败就不该做。
 		ctxC, cancelC := context.WithTimeout(context.Background(), 30*time.Second)
 		go func() {
 			defer cancelC()
-			a.Mem.Compress(a.CompressSummarizer(ctxC, taskID))
+			if compressed, tightened := a.compressAfterTask(ctxC, taskID); compressed || tightened {
+				a.notifyContextAction(compressed, tightened, false)
+			}
 		}()
 	}
 	// 长期记忆沉淀任务记录（尽力而为）

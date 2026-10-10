@@ -30,7 +30,7 @@ type agentFixture struct {
 
 func newFixture(t *testing.T, scripts []llm.Scripted) *agentFixture {
 	t.Helper()
-	ws := t.TempDir()
+	ws := dirOutsideRepo(t)
 	dataDir := t.TempDir()
 	cfg := config.Default()
 	cfg.Workspace = ws
@@ -402,4 +402,24 @@ func TestRunGoal_ReusedTaskIDWhileRunning(t *testing.T) {
 	if res1.TaskID != "same-id" || res2.TaskID != "same-id" {
 		t.Error("TaskID 应保留")
 	}
+}
+
+// dirOutsideRepo 造一个**在仓库之外**的临时目录。
+//
+// GHA 的 Windows runner 把 TEMP 设成 <workspace>/.ci-tmp（见 .github/workflows/ci.yml，
+// 为躲开 RUNNER~1 短路径），于是 t.TempDir() 造出来的"普通目录"本身就在 git 仓库里——
+// git 向上就能找到外层仓库，"不是仓库"的断言于是全部反过来。改在缓存目录下建，
+// 就与 TEMP 怎么设无关了。
+func dirOutsideRepo(t *testing.T) string {
+	t.Helper()
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Skipf("没有可用的缓存目录，无法保证临时目录落在仓库之外：%v", err)
+	}
+	d, err := os.MkdirTemp(base, "gleam-norepo-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	return d
 }

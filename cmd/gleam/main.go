@@ -49,6 +49,7 @@ import (
 	"gleam/internal/tools/file"
 	gittools "gleam/internal/tools/git"
 	"gleam/internal/tools/mcp"
+	"gleam/internal/tools/prompt"
 	"gleam/internal/tools/shell"
 	"gleam/internal/tools/std"
 	"gleam/internal/tools/web"
@@ -174,6 +175,8 @@ type runtime struct {
 	agent   *agent.Agent
 	cleanup func()
 	growth  *growth.Log
+	// startMCP 在 WithAsyncMCP 下才有实质内容：装配期不连 MCP，由调用方在就绪后调它。
+	startMCP func()
 }
 
 // runtimeOption 装配的可选开关。
@@ -182,6 +185,7 @@ type runtimeOption func(*runtimeConfig)
 // runtimeConfig 装配过程中的可调项。
 type runtimeConfig struct {
 	noDefaultWorkspace bool
+	asyncMCP           bool
 }
 
 // WithNoDefaultWorkspace 关闭「没指定工作区就用当前目录兜底」。
@@ -189,6 +193,14 @@ type runtimeConfig struct {
 // 用户没显式选过工作区时，界面停在「不指定工作区」才是诚实的。
 func WithNoDefaultWorkspace() runtimeOption {
 	return func(rc *runtimeConfig) { rc.noDefaultWorkspace = true }
+}
+
+// WithAsyncMCP 让 MCP 服务器不在装配期连接，改由调用方在**就绪之后**调 rt.startMCP()。
+// 桌面壳用它：npx -y … 这类外部 MCP 要先 npm 解析再起一个 Node 进程，本机实测 ~2.2 s，
+// 同步连会把整条「打开到能用」堵在那儿（2413 ms → 解耦后 ~150 ms）。连上之前少几个
+// MCP 工具，不影响其它功能。
+func WithAsyncMCP() runtimeOption {
+	return func(rc *runtimeConfig) { rc.asyncMCP = true }
 }
 
 // buildRuntime 装配全部子系统。
@@ -363,6 +375,9 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	// 只记主机名与字节量，内容留在本机；见 safety.AuditEntry.Egress 的边界说明。
 	llm.SetEgressHook(func(host string, nbytes int) { gate.RecordEgress("llm", host, nbytes) })
 	webTool.OnEgress = func(host string, nbytes int) { gate.RecordEgress("web.fetch", host, nbytes) }
+	// 远端 MCP（streamable-http）也是出网：用户装的远端服务器会被调用，数据发到对方主机。
+	// 这条留痕和 web.fetch 同级——远端 MCP 是**用户自己装的**第三方端点，更该看得见。
+	mcp.SetRemoteEgressHook(func(host string, nbytes int) { gate.RecordEgress("mcp.remote", host, nbytes) })
 	// 等待审批状态落盘（P4-2）：进程若在等待审批期间退出，重启后能列出卡住的任务。
 	gate.SetPendingPath(filepath.Join(cfg.DataDir, pendingFile))
 	if len(cfg.Safety.ToolPermissions) > 0 {
@@ -394,6 +409,9 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	a.Auth = authMgr
 
 	// 依赖 Agent 的适配器工具
+	// 提示词步骤（prompt.run）：外部技能（Claude 的 SKILL.md 那类提示词包）靠它落地。
+	// 注册在 agent 建好之后：provider 现取 a.LLM，用户换模型后下一次调用就用新的。
+	reg.MustRegister(prompt.NewGenerate(func() llm.Client { return a.LLM }))
 	reg.MustRegister(std.NewMemSave(&memAdapter{m: mem, scope: a.MemoryScope}))
 	reg.MustRegister(std.NewMemSearch(&memAdapter{m: mem, scope: a.MemoryScope}))
 	reg.MustRegister(std.NewMemDelete(&memAdapter{m: mem, scope: a.MemoryScope}))
@@ -406,13 +424,21 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 	reg.MustRegister(std.NewSkillRun(&skillAdapter{s: skills}, a))
 
 	// MCP 连接器（尽力而为）
-	if len(cfg.MCP) > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		mcpClients := mcp.RegisterAll(ctx, reg, toMCPCfgs(cfg.MCP), func(f string, xs ...any) {
-			fmt.Fprintf(os.Stderr, "[mcp] "+f+"\n", xs...)
-		})
-		cancel()
-		a.MCP.AddAll(mcpClients)
+	startMCP := func() {}
+	connectMCP := func() {
+		if len(cfg.MCP) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			mcpClients := mcp.RegisterAll(ctx, reg, toMCPCfgs(cfg.MCP), func(f string, xs ...any) {
+				fmt.Fprintf(os.Stderr, "[mcp] "+f+"\n", xs...)
+			})
+			cancel()
+			a.MCP.AddAll(mcpClients)
+		}
+	}
+	if rc.asyncMCP {
+		startMCP = connectMCP
+	} else {
+		connectMCP()
 	}
 
 	// 调度器启动：到点自动执行目标
@@ -427,7 +453,7 @@ func buildRuntime(configPath, workspace, dataDir string, mockLLM bool, mockScrip
 		sched.Start()
 	}
 
-	return &runtime{cfg: cfg, client: client, reg: reg, mem: mem, gate: gate, skills: skills, sched: sched, agent: a, cleanup: cleanup, growth: growthLog}, nil
+	return &runtime{cfg: cfg, client: client, reg: reg, mem: mem, gate: gate, skills: skills, sched: sched, agent: a, cleanup: cleanup, growth: growthLog, startMCP: startMCP}, nil
 }
 
 // sysNotify 发系统通知。抽成变量是为了两件事：

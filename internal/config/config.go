@@ -23,6 +23,7 @@ type Config struct {
 	Persona          PersonaConfig
 	Network          NetworkConfig
 	Git              GitConfig
+	Worktrees        WorktreeConfig
 	MCP              []MCPServerConfig
 	DataDir          string   // 数据目录，默认 ~/.gleam
 	Workspace        string   // 默认工作区（文件工具的根目录）
@@ -35,6 +36,21 @@ type GitConfig struct {
 	BranchPrefix       string // 由 Gleam 创建的分支统一加这个前缀
 	ForcePush          bool   // 推送时用 --force-with-lease
 	CommitInstructions string // 生成提交说明时的写法要求
+}
+
+// WorktreeConfig「每个任务在自己的 git worktree 里跑」的偏好。
+//
+// Enabled 默认**关**：打开之后模型写的文件不再落在你的工作区里，而是落在
+// `<数据目录>/worktrees/<任务ID>`。这改的是"文件写到哪"这个根本边界，
+// 对所有既有安装默认生效等于一次静默的行为变更。
+//
+// 其余三项都只在 Enabled 之后才有意义，也默认关/保守：FetchBeforeCreate 会出网，
+// AutoDelete 会让"能不能还原"依赖"worktree 还在不在"（见 docs/known-limits.md）。
+type WorktreeConfig struct {
+	Enabled           bool // 总开关：为任务建 worktree，任务在它里面执行
+	FetchBeforeCreate bool // 建之前先 fetch（出网，台账记 git.remote）
+	AutoDelete        bool // 任务跑完后自动删掉**干净**的 worktree
+	MaxCount          int  // 保留上限，超出时清最旧且干净的（0 表示不限制；默认 0）
 }
 
 // NetworkConfig 出网方式（目前只作用于访问模型服务的那条路）。
@@ -56,16 +72,16 @@ func (n NetworkConfig) ProxyModeOrDefault() string {
 // 每个条目自带厂商、协议、地址、模型 ID 和密钥，互不依赖——
 // 用户可以在 DeepSeek、GLM、OpenAI 之间自由切换，也可以给同一厂商配多个模型。
 type ModelEntry struct {
-	ID         string  `yaml:"id" json:"id"`                         // 唯一标识（前端生成或用户填），如 "deepseek-chat"
-	Name       string  `yaml:"name" json:"name"`                     // 显示名，如 "DeepSeek Chat"
-	ProviderID string  `yaml:"provider_id" json:"provider_id"`       // 厂商预设 ID（zhipu/deepseek/openai/…，空为自定义）
-	Protocol   string  `yaml:"protocol" json:"protocol"`             // openai_chat | openai_responses | anthropic
-	BaseURL    string  `yaml:"base_url" json:"base_url"`             // 显式 API 地址（空则用厂商预设）
-	Model      string  `yaml:"model" json:"model"`                   // 模型 ID
-	Plan       string  `yaml:"plan" json:"plan"`                     // token | coding | agent
-	APIKey     string  `yaml:"api_key" json:"api_key"`               // 独立密钥（空则用全局凭证）
-	IsDefault  bool    `yaml:"is_default" json:"is_default"`         // 新对话默认用这个
-	IsFast     bool    `yaml:"is_fast" json:"is_fast"`               // 辅助模型（压缩/复核等高频小调用）
+	ID         string `yaml:"id" json:"id"`                   // 唯一标识（前端生成或用户填），如 "deepseek-chat"
+	Name       string `yaml:"name" json:"name"`               // 显示名，如 "DeepSeek Chat"
+	ProviderID string `yaml:"provider_id" json:"provider_id"` // 厂商预设 ID（zhipu/deepseek/openai/…，空为自定义）
+	Protocol   string `yaml:"protocol" json:"protocol"`       // openai_chat | openai_responses | anthropic
+	BaseURL    string `yaml:"base_url" json:"base_url"`       // 显式 API 地址（空则用厂商预设）
+	Model      string `yaml:"model" json:"model"`             // 模型 ID
+	Plan       string `yaml:"plan" json:"plan"`               // token | coding | agent
+	APIKey     string `yaml:"api_key" json:"api_key"`         // 独立密钥（空则用全局凭证）
+	IsDefault  bool   `yaml:"is_default" json:"is_default"`   // 新对话默认用这个
+	IsFast     bool   `yaml:"is_fast" json:"is_fast"`         // 辅助模型（压缩/复核等高频小调用）
 }
 
 type LLMConfig struct {
@@ -81,7 +97,7 @@ type LLMConfig struct {
 	// 不被单一模型绑死。档位没配就一律用主模型，所以留空是安全的。
 	Tiers  map[string]string
 	Models []ModelEntry // 多模型列表：每个条目是独立的模型接入，可在对话中切换
-	APIKey string // 生产环境建议经环境变量注入
+	APIKey string       // 生产环境建议经环境变量注入
 	// APIKeyScope 是 APIKey 被授权发往的接入主机（见 llm.KeyScope），运行时标记，
 	// **不序列化**：覆盖层里根本没有 api_key，这把 key 的落点在凭证文件里自带同一字段。
 	// 内存里留它，是为了让"当前生效的 key"始终是单一事实——每次要发请求都去翻磁盘，
@@ -90,6 +106,10 @@ type LLMConfig struct {
 	Temperature float64
 	MaxTokens   int
 	TimeoutSecs int
+	// ContextWindow 模型的上下文窗口（token）。0 = 用内置兜底表，查不到再用默认值
+	// （见 llm.ContextWindowFor）。它只影响**占用水位的分母**，不影响实际请求——
+	// 但分母错了，界面上那个百分比就是假的，所以宁可让用户能覆盖。
+	ContextWindow int
 }
 
 // DefaultMaxSteps 单个计划的步骤数上限兜底值。
@@ -170,6 +190,19 @@ type MCPServerConfig struct {
 	Name    string
 	Command string
 	Args    []string
+	// Env 传给子进程的环境变量（在继承的父环境之上追加）。
+	// 为什么必须有：官方目录里大量服务器靠 API_KEY 这类变量拿凭据，没有它就只能
+	// 把那些条目标成"装不了"——用户看到的目录有一多半点不动。
+	// **值是明文存在配置里的**，与 command/args 同一层；密钥类的另存 credentials.json
+	// 是下一步的事，这一版不假装做到了。
+	Env map[string]string
+	// URL 非空 = 远端 streamable-http 服务器（不起进程）；此时 Command/Args/Env 都不用。
+	// 远端意味着**一条出网连接**：主机要出现在「连接与出网」台账里（kind=mcp.remote）。
+	URL string
+	// Headers 远端请求头，凭据（Authorization 之类）走这里。
+	// **明文存在配置里**：与 command/args 同一层；密钥挪进 credentials.json 是下一步的事，
+	// 这一版不假装做到了。API 一律不回吐这些值（MCPList 只给个数）。
+	Headers map[string]string
 	Trust   string // readonly | user_approved | full_access，MCP 工具的权限级别
 	Enabled bool
 }
@@ -224,6 +257,9 @@ func Default() *Config {
 		Scheduler: SchedulerConfig{Enabled: true},
 		Persona:   PersonaConfig{Name: "Gleam", Style: "efficient"},
 		Git:       GitConfig{BranchPrefix: "gleam/"},
+		// worktree 一律默认关，包括数量上限：上限到了就要删东西，
+		// 而"删掉你没看过的目录"不该是默认行为。MaxCount 为 0 表示不限制。
+		Worktrees: WorktreeConfig{},
 	}
 }
 
@@ -358,6 +394,7 @@ func (c *Config) SaveOverlay(path string) error {
 	llm.Set("temperature", c.LLM.Temperature)
 	llm.Set("max_tokens", c.LLM.MaxTokens)
 	llm.Set("timeout_seconds", c.LLM.TimeoutSecs)
+	llm.Set("context_window", c.LLM.ContextWindow)
 	root.Set("llm", llm)
 
 	agent := NewYMap()
@@ -406,6 +443,13 @@ func (c *Config) SaveOverlay(path string) error {
 	gitc.Set("force_push", c.Git.ForcePush)
 	gitc.Set("commit_instructions", c.Git.CommitInstructions)
 	root.Set("git", gitc)
+
+	wt := NewYMap()
+	wt.Set("enabled", c.Worktrees.Enabled)
+	wt.Set("fetch_before_create", c.Worktrees.FetchBeforeCreate)
+	wt.Set("auto_delete", c.Worktrees.AutoDelete)
+	wt.Set("max_count", c.Worktrees.MaxCount)
+	root.Set("worktrees", wt)
 
 	persona := NewYMap()
 	persona.Set("name", c.Persona.Name)
@@ -526,6 +570,7 @@ func (c *Config) apply(m map[string]any) {
 		getFloat(v, "temperature", &c.LLM.Temperature)
 		getInt(v, "max_tokens", &c.LLM.MaxTokens)
 		getInt(v, "timeout_seconds", &c.LLM.TimeoutSecs)
+		getInt(v, "context_window", &c.LLM.ContextWindow)
 	}
 	if v, ok := sub(m, "agent"); ok {
 		getInt(v, "max_replans", &c.Agent.MaxReplans)
@@ -581,6 +626,12 @@ func (c *Config) apply(m map[string]any) {
 		getStr(v, "branch_prefix", &c.Git.BranchPrefix)
 		getBool(v, "force_push", &c.Git.ForcePush)
 		getStr(v, "commit_instructions", &c.Git.CommitInstructions)
+	}
+	if v, ok := sub(m, "worktrees"); ok {
+		getBool(v, "enabled", &c.Worktrees.Enabled)
+		getBool(v, "fetch_before_create", &c.Worktrees.FetchBeforeCreate)
+		getBool(v, "auto_delete", &c.Worktrees.AutoDelete)
+		getInt(v, "max_count", &c.Worktrees.MaxCount)
 	}
 	if v, ok := sub(m, "network"); ok {
 		getStr(v, "proxy_mode", &c.Network.ProxyMode)

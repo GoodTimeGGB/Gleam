@@ -19,6 +19,7 @@ import (
 	"gleam/internal/agent"
 	"gleam/internal/buildinfo"
 	"gleam/internal/harness/skill"
+	"gleam/internal/market"
 	"gleam/pkg/types"
 )
 
@@ -157,12 +158,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/workspace", s.handleWorkspaceGet)
 	mux.HandleFunc("POST /api/workspace", s.handleWorkspaceSet)
 	mux.HandleFunc("POST /api/workspace/clear", s.handleWorkspaceClear)
+	mux.HandleFunc("GET /api/worktrees", s.handleWorktreeList)
+	mux.HandleFunc("DELETE /api/worktrees/{id}", s.handleWorktreeRemove)
 	mux.HandleFunc("GET /api/fs", s.handleFsBrowse)
 
 	// 厂商预设 / 市场 / MCP 管理
 	mux.HandleFunc("GET /api/providers", s.handleProviders)
 	mux.HandleFunc("GET /api/market/mcp", s.handleMarketMCP)
 	mux.HandleFunc("POST /api/market/mcp/install", s.handleMarketMCPInstall)
+	mux.HandleFunc("GET /api/market/sources", s.handleMarketSources)
+	mux.HandleFunc("GET /api/market/runtimes", s.handleMarketRuntimes)
 	mux.HandleFunc("GET /api/market/skills", s.handleMarketSkills)
 	mux.HandleFunc("POST /api/market/skills/install", s.handleMarketSkillInstall)
 	mux.HandleFunc("GET /api/mcp", s.handleMCPList)
@@ -979,9 +984,64 @@ func (s *Server) handleProviders(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"count": len(s.Agent.ProvidersView()), "providers": s.Agent.ProvidersView()})
 }
 
+// handleMarketMCP 内置目录 + 远端目录（官方 MCP 注册表）合并返回。
+//
+// 内置目录先列：它永远可用、离线也在，用户第一眼看到的东西不该受网络影响。
+// 远端失败不是错误，是一句要如实说的话——放在 source_note 里，界面照着显示，
+// 而不是把整个市场变成空列表（那会被读成"市场里什么都没有"）。
 func (s *Server) handleMarketMCP(w http.ResponseWriter, r *http.Request) {
-	list := s.Agent.MarketMCP(r.URL.Query().Get("q"))
-	writeJSON(w, 200, map[string]any{"count": len(list), "presets": list})
+	q := r.URL.Query().Get("q")
+	list := s.Agent.MarketMCP(q)
+
+	// 查询词交给目录源，本地不再过滤（本地过滤只能看到默认那一页，搜啥都是"没有"）
+	remote, note := s.marketSearch(r.Context(), q, r.URL.Query().Get("refresh") == "1")
+	// 排一次序：能装的在前、名字越贴越前。注册表会把第三方 fork 排在官方包前面。
+	remote = market.RankRemote(remote, q)
+	// 运行时探测一次即可（每个条目都查一遍就是 50×5 次 LookPath）
+	rtByName := map[string]market.RuntimeStatus{}
+	for _, r := range market.Runtimes() {
+		rtByName[r.Name] = r
+	}
+	decorateRuntime := func(command string) (string, bool, string) {
+		name := market.RuntimeFor(command)
+		if name == "" {
+			return "", true, ""
+		}
+		r, ok := rtByName[name]
+		if !ok {
+			return name, true, ""
+		}
+		return name, r.Found, r.Why
+	}
+	pick, why := s.marketNPMSource(r.Context())
+	for _, p := range remote {
+		rtName, rtFound, rtWhy := decorateRuntime(p.Command)
+		// 远端条目与内置条目共用一种形状，界面与安装入口只需认识一种。
+		list = append(list, map[string]any{
+			"id": p.ID, "name": p.Name, "desc": p.Desc, "command": p.Command,
+			"params": p.Params, "trust": p.Trust, "tags": p.Tags,
+			"installed":      s.Agent.MCPInstalledByArgs(p.PkgRef),
+			"remote":         true,
+			"source":         p.Source,
+			"version":        p.Version,
+			"pkg_ref":        p.PkgRef,
+			"homepage":       p.Homepage,
+			"installable":    p.Installable,
+			"unsupported":    p.Unsupported,
+			"base_args":      marketInstallArgs(pick, strings.HasPrefix(p.Command, "npx"), p.BaseArgs),
+			"npm_source":     pick.ID,
+			"npm_source_why": why,
+			// 运行时缺失要在卡片上就看得见：等用户按下安装再报错，他已经在等结果了
+			"runtime":       rtName,
+			"runtime_found": rtFound,
+			"runtime_why":   rtWhy,
+		})
+	}
+	writeJSON(w, 200, map[string]any{
+		"count": len(list), "presets": list,
+		"remote_count": len(remote), "source_note": note,
+		"npm_source": pick.ID, "npm_source_why": why,
+	})
 }
 
 func (s *Server) handleMarketMCPInstall(w http.ResponseWriter, r *http.Request) {
@@ -995,6 +1055,17 @@ func (s *Server) handleMarketMCPInstall(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 400, "需要 id")
 		return
 	}
+	// 内置目录里没有这个 id，就看远端目录：一个安装入口同时服务两种来源，
+	// 否则界面上那两个来源共用一颗「安装」按钮，点远端那条必然报"目录中不存在"。
+	if _, err := market.FindMCP(body.ID); err != nil {
+		res, rErr := s.installRemoteMCP(r.Context(), body.ID, body.Params, body.Trust, body.Force)
+		if rErr != nil {
+			writeInstallErr(w, rErr)
+			return
+		}
+		writeJSON(w, 200, res)
+		return
+	}
 	res, err := s.Agent.MCPInstallPreset(body.ID, body.Params, body.Trust, body.Force)
 	if err != nil {
 		writeInstallErr(w, err)
@@ -1003,9 +1074,93 @@ func (s *Server) handleMarketMCPInstall(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 200, res)
 }
 
+// installRemoteMCP 装一条远端目录里的服务器。
+//
+// 两条边界必须在这里守住：
+//  1. **只装标了可安装的**。不可安装的条目（远端 http 型、只有 cargo 包、要必填环境变量）
+//     若放过去，装出来的是"起来就崩"的服务器——当时报错比事后排查强得多。
+//  2. **命令与参数取自目录，不取自请求体**。请求里只有 id，argv 由服务端按目录拼好，
+//     否则这个入口就成了一个任意命令执行点（它要经过门控审批，但没必要给它这个口子）。
+func (s *Server) installRemoteMCP(ctx context.Context, id string, params map[string]string, trust string, force bool) (map[string]any, error) {
+	p, note, found := s.lookupRemotePreset(ctx, id)
+	if found {
+		if !p.Installable {
+			return nil, fmt.Errorf("这条装不了：%s", p.Unsupported)
+		}
+		// 缺运行时要在写配置之前拦下：`mcpInstall` 会先把配置落盘再去连，
+		// 连不上只回一句 warning——用户看到的是"装了却连不上"，而真实原因是这台机器没有 node。
+		if miss, missing := market.RuntimeMissing(p.Command); missing {
+			return nil, fmt.Errorf("本机没有 %s，装不了它：%s", miss.Name, miss.Why)
+		}
+		name := remoteMCPName(p.ID)
+		// 远端（streamable-http）：不起进程，凭据走请求头。先走这一支，
+		// 免得下面的"缺 npx"判断把远端条目也拦下来（远端根本不需要 npx）。
+		if p.Kind == "http" {
+			headers, hErr := market.BuildHeaders(p, params)
+			if hErr != nil {
+				return nil, hErr
+			}
+			if len(headers) == 0 {
+				headers = nil
+			}
+			return s.Agent.MCPInstallRemote(name, p.URL, headers, trust, force)
+		}
+		pick, _ := s.marketNPMSource(ctx)
+		args := marketInstallArgs(pick, strings.HasPrefix(p.Command, "npx"), p.BaseArgs)
+		// 目录里声明为 env 的那几项作为环境变量交给子进程；其余（正常没有）忽略。
+		// 远端条目的 BaseArgs 是字面量，没有 {占位符} 可替换，所以只走 env 这一路。
+		_, envVals := market.SplitParams(p.Params, params)
+		env := map[string]string{}
+		for k, v := range envVals {
+			if strings.TrimSpace(v) != "" {
+				env[k] = strings.TrimSpace(v)
+			}
+		}
+		for _, pm := range p.Params {
+			if pm.Kind == "env" && pm.Required && env[pm.Key] == "" {
+				return nil, fmt.Errorf("缺少必填环境变量 %q（%s）", pm.Key, pm.Label)
+			}
+		}
+		if len(env) == 0 {
+			env = nil
+		}
+		return s.Agent.MCPInstallCustom(name, p.Command, args, env, trust, force)
+	}
+	if note != "" {
+		return nil, fmt.Errorf("目录源当前不可用（%s），拿不到 %q 的安装信息", note, id)
+	}
+	return nil, fmt.Errorf("远端目录里没有 %q", id)
+}
+
+// remoteMCPName 把注册表里的名字收敛成合法的 MCP 服务器名（它会做工具名的中段）。
+// 取最后一段并只留安全字符：`io.github.foo/bar` → `bar`。
+func remoteMCPName(id string) string {
+	base := id
+	if i := strings.LastIndexAny(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.ToLower(base)
+	base = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		}
+		return '-'
+	}, base)
+	base = strings.Trim(base, "-")
+	if base == "" || len(base) > 32 {
+		base = "remote"
+	}
+	return base
+}
+
+// handleMarketSkills 内置技能目录。分类表随响应一起给：界面的筛选栏不该自己
+// 维护一份分类清单（两处各写一份就会漂，而漂的方向是"筛选栏有一格点了没结果"）。
 func (s *Server) handleMarketSkills(w http.ResponseWriter, r *http.Request) {
 	list := s.Agent.MarketSkills(r.URL.Query().Get("q"))
-	writeJSON(w, 200, map[string]any{"count": len(list), "presets": list})
+	writeJSON(w, 200, map[string]any{
+		"count": len(list), "presets": list, "categories": market.SkillCategories(),
+	})
 }
 
 func (s *Server) handleMarketSkillInstall(w http.ResponseWriter, r *http.Request) {
@@ -1042,17 +1197,18 @@ func (s *Server) handleMCPList(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleMCPInstallCustom(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name    string   `json:"name"`
-		Command string   `json:"command"`
-		Args    []string `json:"args"`
-		Trust   string   `json:"trust"`
-		Force   bool     `json:"force"`
+		Name    string            `json:"name"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+		Trust   string            `json:"trust"`
+		Force   bool              `json:"force"`
 	}
 	if err := readJSON(r, &body); err != nil || body.Command == "" {
 		writeErr(w, 400, "需要 command")
 		return
 	}
-	res, err := s.Agent.MCPInstallCustom(body.Name, body.Command, body.Args, body.Trust, body.Force)
+	res, err := s.Agent.MCPInstallCustom(body.Name, body.Command, body.Args, body.Env, body.Trust, body.Force)
 	if err != nil {
 		writeInstallErr(w, err)
 		return

@@ -261,6 +261,43 @@ type Manager struct {
 	omittedTurns int      // 累计被压缩掉的对话轮数（摘要省略量标注用）
 	omittedRunes int      // 累计被压缩掉/截断掉的字数（rune）
 	dir          string
+	// carry 下一轮提示携带几轮最近对话（见 CarryFull / CarryTight）。
+	// **不持久化**：它是"这次会话现在紧不紧"的状态，重启后提示本来就从零攒起，
+	// 把一个收紧态带到新进程里只会让新会话莫名其妙地少带历史。
+	carry int
+}
+
+// CarryTurns 下一轮提示应当携带几轮最近对话。0（零值）视为正常态。
+func (m *Manager) CarryTurns() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.carry <= 0 {
+		return CarryFull
+	}
+	return m.carry
+}
+
+// SetCarryTurns 设置携带轮数（钳在 [CarryTight, CarryFull] 内），返回是否真的变了。
+// 返回"是否变了"而不是让调用方自己比对：水位附近每轮都会调用它，
+// 只有真的变了才值得往进度里说一句。
+func (m *Manager) SetCarryTurns(n int) bool {
+	if n < CarryTight {
+		n = CarryTight
+	}
+	if n > CarryFull {
+		n = CarryFull
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old := m.carry
+	if old <= 0 {
+		old = CarryFull
+	}
+	if old == n {
+		return false
+	}
+	m.carry = n
+	return true
 }
 
 // pinnedCap 钉住区上限（超出丢最旧——淘汰最旧是追加式的，不重排剩余条目，不违反「绝不重排」）。
@@ -322,6 +359,14 @@ const overflowCap = 100
 
 // summaryCap 滚动摘要保留上限（rune）。
 const summaryCap = 2000
+
+// 下一轮提示里携带几轮最近对话。**这是"压缩真的腾出上下文"的那一半**：
+// 汇总溢出轮不会让提示变小（那些轮本来就已经不在提示里了），
+// 让水位降下来的动作是下一轮**少带几轮**。
+const (
+	CarryFull  = 6 // 通常：最近 6 轮
+	CarryTight = 2 // 收紧态：最近 2 轮（水位越线时进入，掉回来再松开）
+)
 
 // contextFile 数据目录下的压缩状态文件。
 const contextFile = "context.json"
@@ -506,6 +551,10 @@ func (m *Manager) ResetConversation() {
 		m.Short.Reset()
 	}
 	m.ClearSummary()
+	// 新对话从正常携带开始：上一个会话是因为它自己攒满了才收紧的，那件事不该跟过来。
+	m.mu.Lock()
+	m.carry = CarryFull
+	m.mu.Unlock()
 }
 
 // saveContextLocked 持久化压缩状态（尽力而为）。

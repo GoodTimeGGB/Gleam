@@ -89,13 +89,12 @@ go run scripts/make-zip.go "$DIST/Gleam-release-$DATE.zip" \
   "$DIST/Gleam-Linux-x86_64-$DATE" \
   README.md \
   LICENSE \
-  "pack/CHANGELOG.md=CHANGELOG.md" \
+  "CHANGELOG.md=CHANGELOG.md" \
   "configs/config.yaml=config.example.yaml" \
   scripts/install.ps1 \
   scripts/build-desktop.sh
 
-echo "[5/5] 归档到 pack/ 并生成校验和"
-cp -f "$DIST/Gleam-release-$DATE.zip" "pack/Gleam-release-$DATE.zip"
+echo "[5/5] 生成校验和"
 (cd "$DIST" && sha256sum \
   "Gleam-Windows-x86_64-$DATE.exe" \
   "Gleam-Desktop-Windows-x86_64-$DATE.exe" \
@@ -105,7 +104,6 @@ cp -f "$DIST/Gleam-release-$DATE.zip" "pack/Gleam-release-$DATE.zip"
   "webui-static-$DATE.zip" \
   "website-$DATE.zip" \
   "Gleam-release-$DATE.zip" > "SHA256SUMS-$DATE.txt")
-cp -f "$DIST/SHA256SUMS-$DATE.txt" "pack/SHA256SUMS-$DATE.txt"
 
 echo
 echo "完成：$DIST/ 下的 $DATE 产物"

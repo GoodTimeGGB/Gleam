@@ -15,7 +15,6 @@ __pycache__/
 # 发布产物：scripts/package.sh 可重建，不入库
 dist/
 website/dist/
-pack/*.zip
 
 # AI Agent 工具目录（本机专用，不入库）
 .workbuddy-ai/

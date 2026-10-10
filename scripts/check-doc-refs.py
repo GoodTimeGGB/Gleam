@@ -17,7 +17,7 @@ gofmt 管代码文本，本脚本管文档文本。两者都便宜（各只一�
 理由见设计文档 §4.6.23。
 
 用法：python scripts/check-doc-refs.py [仓库根目录]
-退出码：0 = 全部引用有效；1 = 有悬空引用（逐条打印文件:行号 §小节号）。
+退出码：0 = 全部引用有效（或本机没放设计文档，跳过）；1 = 有悬空引用（逐条打印文件:行号 §小节号）。
 """
 import io
 import os
@@ -29,7 +29,7 @@ import _utf8  # noqa: F401  # Windows 下 stdout 默认按 GBK 写，中文会�
 DESIGN = "Gleam 技术设计文档.md"
 # §4.6.x 这种**泛指**写法不算引用（它说的是"这一片"，不是某一节）。
 REF = re.compile(r"§(4\.6\.\d+)")
-SKIP_DIRS = {".git", "node_modules", "dist", ".workbuddy-ai", ".qoder-cn", ".cursor", ".claude", ".agents", "pack"}
+SKIP_DIRS = {".git", "node_modules", "dist", ".workbuddy-ai", ".qoder-cn", ".cursor", ".claude", ".agents"}
 
 
 def main() -> int:
@@ -37,6 +37,12 @@ def main() -> int:
     os.chdir(root)
 
     design_path = os.path.join(root, DESIGN)
+    if not os.path.exists(design_path):
+        # 设计文档**不入库**（在 .gitignore 里，仅本机保留）：本机没放就跳过，
+        # 而不是报红。守卫判的是「指针指向的东西在不在」，文档本身不在时无对象可判；
+        # 但文档在、小节解析不出来，下面仍然会硬失败。
+        print("跳过：仓库里没有 %s（不入库），本次没有可校验的引用。" % DESIGN)
+        return 0
     try:
         with io.open(design_path, "rb") as f:
             design = f.read().decode("utf-8", "replace")
